@@ -176,7 +176,7 @@ impl System {
         while t < t0 + duration {
             let dt = self.step_size(s.pos, t).min(t0 + duration - t).max(1e-3);
             let a = thrust + self.step_gravity(s, thrust, t, dt);
-            let n = State { pos: s.pos + s.vel * dt + a * (0.5 * dt * dt), vel: s.vel + a * dt };
+            let n = crate::kinematics::advance(s, a, dt);
             if let Some((body, ti)) = self.impact(s.pos, n.pos, t, t + dt) {
                 let u = (ti - t) / dt;
                 points.push(s.pos + (n.pos - s.pos) * u);

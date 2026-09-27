@@ -14,3 +14,6 @@ pub mod sensors;
 pub mod session;
 pub mod units;
 pub mod world;
+pub mod thermal;
+pub mod doctrine;
+pub mod damage;

@@ -2,7 +2,39 @@
 
 Read [GAME_MECHANICS.md](GAME_MECHANICS.md) (rules authority) and [ARCHITECTURE.md](ARCHITECTURE.md) (structure authority) first. This file is the working state at handoff.
 
+## Latest: single command ship, lunar station and tactical refinements
+
+See [REFINEMENTS.md](REFINEMENTS.md) for current implemented behavior and remaining limitations. The frigate alone accepts player orders; the lunar sensor station is autonomous, unarmed and unscreened, pinging every minute without visible pulse rings. Allied platform observations relay at light speed. Persistent sensor errors, covariance-sized uncertainty, local missile solutions and reconnaissance probes now affect simulation, not just rendering. Balance remains provisional.
+
+## 2026-09-27 sensor and movement revision (historical progress below)
+
+- Beam engagement is a standing target order, automatically pulsing every 10 seconds when the received track is within a provisional 3-light-second envelope; Cease fire cancels future shots, not already emitted light. Missile delta-v is now doubled to 59,958 km/s (about 68 minutes at 1,500g).
+
+- Active sensing is a one-shot Ping command, never a toggle. Own emission rings remain anchored at emission, expand at c/2 (round-trip range), and fade over 0.7–1 AU. Actual outbound signals still travel at c. Inspection no longer replaces the selected command ship. Missile acceleration increased from 1,000g to 1,500g, with unchanged delta-v.
+
+- Transport is scenario-controlled (`controllable = false`), automatically navigates to the escape region, and cannot receive player orders through the session or UI. The frigate is selected on startup. Regression verifies the transport reaches the objective unaided.
+- Full-simulation salvo regression reproduced nine nuclear missiles flying on after the lead warhead killed the target. Fuses now also detect the pass against the received track, without consulting target death, so remaining warheads detonate. All missile types retire after a completed pass even with fuel remaining. Laser payloads may fire during the initial burn; previously they could pass the target with their firing logic disabled. Historical trajectories remain for light-delay physics, but spent missiles are absent from live body views. Validation: 84 tests passing, 3 manual surveys ignored, strict clippy and build clean.
+
+- Armed scenario ships now carry 10 kinetic, 10 nuclear and 10 laser missiles each. Repeated fire clicks reserve ammunition and enqueue shots in click order, with one shared launcher per ship firing at most once per simulation second across all payloads. The UI shows available stock and queued counts; a queued shot whose track disappears is cancelled without consuming its reserved round. Removed the extra velocity arrow extending from the front of resolved contact markers. Validation: 80 passing tests and strict clippy clean.
+
+- Latest display rule: uncertainty rings appear only at **60 light-seconds or farther from the nearest friendly ship**, using the estimated contact position. This replaces the earlier 8-pixel precision gate; zoom and missile positions do not affect eligibility. Rings still grow with age to their existing cap.
+
+- Nuclear fuses now burst on their first closest pass regardless of whether that pass is inside the damage radius. The radius still limits damage. Interval minima and exact update-boundary passes are covered; still-closing missiles do not burst early. Active sensors resolve both starting-scenario targets in a 1200-second regression. Resolved contacts now show a hollow ship arrow oriented along estimated velocity; direction-only contacts retain bearing lines. The age ring is hidden when the projected 2-sigma position uncertainty fits within the marker (8 px), otherwise grows with age to its cap. Contact UI explicitly distinguishes TRACK from DIRECTION ONLY.
+
+- Ship beam emitters are now implemented: `Command::FireBeam` on armed ships, independent of remaining missiles, with tracked-contact Beam buttons, recharge status and a fading own firing-solution line. Placeholder pulse energy 15 TJ, recharge 10 s, divergence 0.3 microradian and pointing jitter 0.1 microradian. Aim is predicted solely from faction tracks; pulses survive shooter destruction, propagate at c, obey occlusion, and couple decreasing energy as their spot spreads. Received energy uses the existing screen/hull model; shooter telemetry records emitted energy. Reactor budgets, waste heat, beam emission detection and a complete energy ledger remain future work. No automatic fire or enemy hit confirmation is added.
+- Missiles are autonomous: excluded from the active ships list and map selection; the session rejects all player commands to missile bodies with `NotControllable`. Their map rendering remains. Updated validation: 75 tests pass, 3 manual surveys ignored, strict workspace clippy passes; desktop firing/recharge and missile-list exclusion visually verified.
+
+- Three channels: passive localization ~0.1 AU, active ranging ~1 AU, direction-only ~10 AU. Calibration reference is a 10g-burning ship, with 75% acquisition per frame/return at those ranges. Passive ranging is an explicitly tagged TL7 sensor proposal with noisy range and bearing; no exact positions or velocities enter the faction view. Direction-only contacts still require triangulation for a track.
+- Ping emissions snapshot the source signature and expose it at 10× passive/localization and direction-finding range. Ping, echo, and relay delays/occlusion still apply, including after sensors turn off. Future hull size/stealth tuning should change emitted signature and reflecting cross-section, not add separate detection rolls.
+- Ship right-click orders now use `Flyby`, burning to the earliest predicted encounter without braking and coasting after passage. The side-panel “Intercept and match velocity” checkbox switches to/from the existing rendezvous order. Point stops and celestial orbits are unchanged.
+- Contact map labels omit sensor age. A separate age ring grows from 8 to 40 px over one hour and stays capped; covariance remains uncapped in the simulation and visible in details.
+- Regression coverage includes single-ship passive tracking, nominal channel probabilities and 10× exposure, causal ping/echo arrival after shutdown, flyby passage and switching to velocity matching. The older bearing-only and short-range echo tests were updated to the new requirements.
+- Corrected the same standing-thrust bug in `closing_trial` that was already fixed in `range_trial`: use `World::set_thrust`, so guidance does not overwrite the intended jinks. Missile hit percentages remain prototype calibration targets, not verified promises.
+- Earlier sensor validation: 69 tests passed. Desktop screenshot verified the flyby status/toggle and age ring. Post-change survey (`LUMINAL_SURVEY_N=20 LUMINAL_SURVEY_AT=1 cargo test --release -p luminal-core range_survey -- --ignored --nocapture`): kinetic 20/20 at 0.01 AU, nuclear 5/20 at 1 AU, laser 3/20 at 10 AU. These do not meet the older 50% goals; missile tuning remains outstanding.
+
 ## Decisions made with the user (settled)
+
+- **Modern, post-WWII Royal Navy terminology is a project principle** (2026-09-27), with contemporary usage preferred. See GAME_MECHANICS.md for the authoritative rule. Player-facing track designators are `Track 1`, `Track 2`, etc.; tracking quality and identification remain separate. Verify modern naval usage and document space-specific adaptations; avoid obsolete period language.
 
 - Top-down **2D** real-time **strategy** game, native **Linux** desktop app. Rust workspace; client is **eframe/egui 0.36** (chosen over Bevy for fast builds and panel-heavy UI; the sim core has no renderer dependency, so this is swappable).
 - **Vector graphics.** Ships are little arrows with velocity-vector tails. Planets, suns and other objects come later.
@@ -43,7 +75,7 @@ Read [GAME_MECHANICS.md](GAME_MECHANICS.md) (rules authority) and [ARCHITECTURE.
 
 ### Placeholder values to review (all in `params.rs`)
 
-missile delta-v 600 km/s · burn 60 % · terminal reserve 30 % · terminal at 60 s to go · seeker noise floor 1e-11 W/m² · missile emission 1e5 W cold + 1e8 W per g · magazines 12 / 6 · ship radius 100 m · nuclear lethal radius 10 km · laser standoff 10,000 km · intercept standoff 1,000 km · sensor frame 10 s · cold emission 1e8 W · drive emission 1e11 W per g · passive noise floor 1e-13 W/m² · detection SNR 3 · bearing σ 1e-4 rad at SNR 1 · ping power 1e12 W · cross-section 1e4 m² · echo noise floor 1e-24 W/m² · range σ 1 km at SNR 1 · tracker manoeuvre 1 g per minute. With these: a cold ship is invisible beyond ~30 ls, a burning one is seen across AU, echoes reach ~10 ls, and a ping is visible for several AU.
+missile delta-v 600 km/s · burn 60 % · terminal reserve 30 % · terminal at 60 s to go · seeker noise floor 1e-11 W/m² · missile emission 2.5e3 W cold + 2.5e8 W per g · magazines 12 / 6 · ship radius 100 m · nuclear lethal radius 10 km · laser standoff 10,000 km · intercept standoff 1,000 km · sensor frame 10 s · cold emission 2.5e4 W · drive emission 2.5e9 W per g · passive noise floor 1e-13 W/m² · detection SNR 3 · passive bearing σ 0.03 rad at SNR 1 (echo 1e-4, seeker 1e-4) · ping power 1e12 W · cross-section 1e4 m² · echo noise floor 1e-24 W/m² · range σ 1 km at SNR 1 · tracker manoeuvre 1 g per minute. With these: a cold ship is seen half the time at ~0.27 ls, and a 20 g burner at ~24 ls (detection is P = SNR / (SNR + 3) per frame, a long tail: ~1 % a frame at 10× the 50 % range), a burning one is seen across AU, echoes reach ~10 ls, and a ping is visible for several AU.
 
 ## Next steps, in order
 

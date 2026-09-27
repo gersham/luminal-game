@@ -12,7 +12,7 @@ use crate::params;
 use crate::units::G0;
 use crate::autopilot::Avoidance;
 use crate::world::{Alert, AlertKind, Autopilot, BodyKind, FactionId, LossCause, Objective, OrderError, Outcome, World};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, VecDeque};
 
 pub use crate::world::{AutopilotStatus, BodyId, InterceptTarget, Order};
 
@@ -33,6 +33,10 @@ pub enum Command {
     Orbit { body: BodyId, celestial: usize },
     /// Close on a target, match velocity and hold station.
     Intercept { body: BodyId, target: InterceptTarget },
+    /// Close at maximum thrust and fly through, retaining velocity.
+    Flyby { body: BodyId, target: InterceptTarget },
+    KeepRange {body:BodyId,target:InterceptTarget,range:f64},
+    Evade {body:BodyId,target:InterceptTarget},
     /// Fly to a point in minimal time (burn, flip, brake) and stop there.
     MoveTo { body: BodyId, point: Vec2 },
     /// Come to rest in the local frame as fast as the drive allows.
@@ -41,16 +45,25 @@ pub enum Command {
     SetDriveLimit { body: BodyId, g: f64 },
     /// Launch a missile at a tracked contact.
     Launch { body: BodyId, target: ContactId, payload: Payload },
-    /// Ping once per sensor frame. Pings are visible far beyond their echo range.
-    SetActiveSensor { body: BodyId, on: bool },
+    CancelLaunches { body: BodyId },
+    DeployProbe { body: BodyId, direction: Vec2 },
+    FireBeam { body: BodyId, target: ContactId },
+    /// Emit one pulse. Pings are visible far beyond their echo range.
+    Ping { body: BodyId },
+    EngageBeam { body: BodyId, target: Option<ContactId> },
+    ArmBeams { body: BodyId },
+    /// Request gradual screen buildup or energy-conserving collapse.
+    SetScreen { body: BodyId, up: bool },
     SetWarp(f64),
     SetPaused(bool),
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Rejection {
+    PowerOrHeat,
     UnknownBody,
     NotYourBody,
+    NotControllable,
     Destroyed,
     ExceedsMaxAccel { requested_g: f64, max_g: f64 },
     SpectatorCannotCommand,
@@ -58,22 +71,51 @@ pub enum Rejection {
     NoTrack,
     InvalidTarget,
     EmptyMagazine,
+    LauncherRecharging,
+    BeamRecharging,
+    Unarmed,
+}
+
+impl Command {
+    pub fn body(&self) -> Option<BodyId> {
+        match *self {
+            Self::SetThrust { body, .. } | Self::Orbit { body, .. } | Self::Intercept { body, .. }
+            | Self::Flyby { body, .. } | Self::KeepRange {body,..} | Self::Evade {body,..} | Self::MoveTo { body, .. } | Self::AllStop { body }
+            | Self::SetDriveLimit { body, .. } | Self::Launch { body, .. } | Self::FireBeam { body, .. }
+            | Self::Ping { body } | Self::EngageBeam { body, .. } | Self::SetScreen { body, .. }
+            | Self::CancelLaunches { body } | Self::DeployProbe {body,..} | Self::ArmBeams { body } => Some(body),
+            Self::SetWarp(_) | Self::SetPaused(_) => None,
+        }
+    }
 }
 
 impl From<OrderError> for Rejection {
     fn from(e: OrderError) -> Self {
         match e {
+            OrderError::PowerOrHeat => Rejection::PowerOrHeat,
             OrderError::Destroyed => Rejection::Destroyed,
             OrderError::NoTrack => Rejection::NoTrack,
             OrderError::InvalidTarget => Rejection::InvalidTarget,
             OrderError::EmptyMagazine => Rejection::EmptyMagazine,
+            OrderError::LauncherRecharging => Rejection::LauncherRecharging,
+            OrderError::BeamRecharging => Rejection::BeamRecharging,
+            OrderError::Unarmed => Rejection::Unarmed,
         }
     }
 }
 
-/// A body whose state the viewer knows exactly: its own, or anything for the spectator.
+/// Command-ship state, delayed friendly telemetry, or truth for the spectator.
 #[derive(Clone, Debug)]
 pub struct BodyView {
+    pub damage:crate::damage::Report,
+    pub interceptor_battery:Option<crate::world::interceptor::Battery>,
+    pub interceptor:Option<(f64,f64)>, // Remaining delta-v and expiry, not truth target IDs.
+    pub point_defence: Option<crate::world::point_defence::PointDefence>,
+    pub has_screen: bool,
+    pub baseline_emission_factor: f64,
+    pub sensors: crate::sensors::SensorSuite,
+    pub probes: u32,
+    pub thermal: crate::thermal::Thermal,
     pub id: BodyId,
     pub name: String,
     pub kind: BodyKind,
@@ -88,14 +130,30 @@ pub struct BodyView {
     pub avoidance: Avoidance,
     /// Cap on autopilot thrust, km/s² (infinite when unset).
     pub drive_limit: f64,
-    pub active_sensor: bool,
-    pub magazine: u32,
+    pub magazine: [u32; 2],
+    pub missile_ready_at: [f64; 2],
+    pub missile_queued: [u32; 2],
     pub missile: Option<MissileView>,
+    pub screen_up: bool,
+    /// Energy stored in the screen and taken by the hull, J.
+    pub screen_j: f64,
+    pub hull_j: f64,
+    /// A combatant; unarmed ships (transports) are shown differently.
+    pub armed: bool,
+    pub controllable: bool,
+    pub beam_ready_at: f64,
+    pub beam_target: Option<ContactId>,
+    pub beam_auto: bool,
+    pub beam_emitted_j: f64,
+    /// Our emitted shot's aim line; carries no enemy hit result.
+    pub last_beam: Option<(f64, Vec2, Vec2)>,
 }
 
 /// A missile's own status, as its faction knows it.
 #[derive(Clone, Copy, Debug)]
 pub struct MissileView {
+    pub correction_possible: Option<bool>,
+    pub locally_resolved: bool,
     pub payload: Payload,
     pub target: ContactId,
     pub phase: Phase,
@@ -104,6 +162,7 @@ pub struct MissileView {
 
 #[derive(Clone, Debug)]
 pub struct TrackView {
+    pub velocity_sigma:f64,
     /// Estimate propagated to view time.
     pub pos: Vec2,
     pub vel: Vec2,
@@ -118,6 +177,7 @@ pub struct TrackView {
 
 #[derive(Clone, Debug)]
 pub struct BearingView {
+    pub received_at:f64,
     pub sensor: BodyId,
     pub origin: Vec2,
     pub bearing: f64,
@@ -128,6 +188,15 @@ pub struct BearingView {
 /// Something the faction has sensed. Identity and truth are not included.
 #[derive(Clone, Debug)]
 pub struct ContactView {
+    pub resolved_class:Option<crate::world::ShipClass>,
+    pub resolved_interceptor:bool,
+    pub damage:Option<crate::damage::Report>,
+    pub resolved_kind:Option<BodyKind>,
+    /// Gameplay assumption: a position resolution identifies missile class,
+    /// but bearing-only indications reveal no platform class or physical identity.
+    pub resolved_missile: bool,
+    pub quality: &'static str,
+    pub stale: bool,
     pub id: ContactId,
     pub track: Option<TrackView>,
     pub bearings: Vec<BearingView>,
@@ -146,6 +215,36 @@ pub struct CelestialView {
     pub radius: f64,
 }
 
+/// An observed hostile pulse, not the opponent's outbound wavefront or true origin.
+#[derive(Clone, Copy, Debug)]
+pub struct PingSighting {
+    pub contact: ContactId,
+    pub emitted_at: f64,
+    pub received_at: f64,
+    pub pos: Option<Vec2>,
+    pub vel: Vec2,
+    pub initial_radius: f64,
+    pub observer: Vec2,
+    pub bearing: f64,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct OwnPing {
+    pub origin: Vec2,
+    pub t_emit: f64,
+    pub useful_range: f64,
+}
+impl PingSighting {
+    pub fn opacity(&self, now: f64) -> f32 {
+        let lifetime=(1.0-(now-self.received_at).max(0.0)/params::HOSTILE_PING_LIFETIME_S.value).clamp(0.0,1.0);
+        lifetime as f32
+    }
+    pub fn radius(&self, now: f64) -> f64 {
+        self.initial_radius + 0.5 * params::SHIP_MAX_ACCEL_G.value * G0 * (now-self.emitted_at).max(0.0).powi(2)
+    }
+    pub fn center(&self, now: f64) -> Option<Vec2> { self.pos.map(|p| p+self.vel*(now-self.emitted_at).max(0.0)) }
+}
+
 #[derive(Clone, Debug)]
 pub struct LossView {
     pub body: BodyId,
@@ -156,15 +255,19 @@ pub struct LossView {
 
 #[derive(Clone, Debug)]
 pub struct View {
+    pub hostile_pings: Vec<PingSighting>,
+    pub combat: Vec<crate::world::CombatEvent>,
+    pub pending_orders: usize,
     pub time: f64,
     pub role: Role,
     pub warp: f64,
     pub paused: bool,
     pub bodies: Vec<BodyView>,
+    /// Own emitted pulses only (all pulses for the spectator).
+    pub pings: Vec<OwnPing>,
     pub contacts: Vec<ContactView>,
     pub celestials: Vec<CelestialView>,
-    /// Losses the viewer knows of. PLACEHOLDER: a faction learns of its own losses
-    /// instantly; this should arrive by light like everything else.
+    /// Own losses whose reports have arrived; the spectator sees truth.
     pub losses: Vec<LossView>,
     /// Public ephemeris, for display forecasts.
     pub system: System,
@@ -175,6 +278,9 @@ pub struct View {
 }
 
 pub struct LocalSession {
+    bot_debug: VecDeque<(f64, FactionId, String)>,
+    bots: BTreeMap<FactionId, crate::doctrine::Doctrine>,
+    next_doctrine: f64,
     world: World,
     warp: f64,
     paused: bool,
@@ -183,29 +289,68 @@ pub struct LocalSession {
     last_alert: Option<(f64, String)>,
 }
 
-/// Warp that alerts drop to.
-pub const ALERT_WARP: f64 = 1.0;
-
 impl LocalSession {
     pub fn new(world: World) -> Self {
-        Self { world, warp: 1.0, paused: true, watch: None, last_alert: None }
+        Self { bot_debug: VecDeque::new(), world, warp: 1.0, paused: true, watch: None, last_alert: None, bots: BTreeMap::new(), next_doctrine: 0.0 }
     }
 
-    /// Advance by elapsed wall-clock seconds, scaled by warp. If the watched faction
-    /// perceives something needing attention, time stops there and warp drops; the game
-    /// ending pauses it.
+    /// Explicit omniscient local debug feed, separate from faction sensor views.
+    pub fn bot_debug(&self, faction: FactionId) -> impl Iterator<Item = &(f64, FactionId, String)> {
+        self.bot_debug.iter().filter(move |(_, f, _)| *f == faction)
+    }
+
+    /// Advance by elapsed wall-clock seconds, scaled by the player's chosen warp.
+    /// Alerts are notifications only: they never slow or pause the simulation.
     pub fn tick(&mut self, wall_dt: f64) {
+        self.tick_with_deadline(wall_dt,None);
+    }
+    /// Keep input/rendering responsive under load. Requested warp is retained;
+    /// achieved simulation speed is lower when the event budget is exhausted.
+    pub fn tick_realtime(&mut self,wall_dt:f64) {
+        self.tick_with_deadline(wall_dt,Some(std::time::Instant::now()+std::time::Duration::from_millis(8)));
+    }
+    fn tick_with_deadline(&mut self,wall_dt:f64,deadline:Option<std::time::Instant>) {
         if self.paused {
             return;
         }
         let t = self.world.time() + wall_dt * self.warp;
-        if let Some(alert) = self.world.advance_until_alert(t, self.watch) {
-            self.last_alert = Some((alert.t, self.describe(&alert)));
-            self.warp = self.warp.min(ALERT_WARP);
-            if alert.kind == AlertKind::GameOver {
-                self.paused = true;
+        loop {
+            if deadline.is_some_and(|d|std::time::Instant::now()>=d) {break;}
+            if !self.bots.is_empty() && self.world.time() >= self.next_doctrine {
+                for f in self.bots.keys().copied().collect::<Vec<_>>() {
+                    let v = self.view(Role::Faction(f));
+                    let orders = self.bots.get_mut(&f).unwrap().orders(&v);
+                    for cmd in orders {
+                        let description=match &cmd {
+                            Command::Ping {..} => "Active ping".into(),
+                            Command::Flyby {target:InterceptTarget::Contact(c),..} => format!("Flyby ordered on {c}"),
+                            Command::EngageBeam {target:Some(c),..} => format!("Main beam assigned to {c}"),
+                            Command::Launch {target,payload,..} => format!("Queue {} missile → {target}",payload.name()),
+                            Command::SetScreen {up,..} => format!("Screen {}",if *up {"raised"} else {"lowered"}),
+                            _ => format!("{cmd:?}"),
+                        };
+                        let result=self.command(Role::Faction(f),cmd);
+                        let note=match result {Ok(())=>description,Err(e)=>format!("{description} · REJECTED: {e:?}")};
+                        if self.bot_debug.back().is_none_or(|(_,last_f,last)|*last_f!=f || *last!=note) {
+                            self.bot_debug.push_back((self.world.time(),f,note));
+                            if self.bot_debug.len()>128 {self.bot_debug.pop_front();}
+                        }
+                    }
+                }
+                self.next_doctrine = self.world.time() + params::SENSOR_FRAME_S.value;
             }
+            let until = if self.bots.is_empty() { t } else { t.min(self.next_doctrine) };
+            if let Some(alert) = self.world.advance_until_alert_budgeted(until, self.watch,deadline) {
+                self.last_alert = Some((alert.t, self.describe(&alert)));
+                if self.world.time()>=t { break; }
+                continue;
+            }
+            if self.world.time() >= t { break; }
         }
+    }
+
+    pub fn enable_bot(&mut self, faction: FactionId, enabled: bool) {
+        if enabled { self.bots.entry(faction).or_default(); } else { self.bots.remove(&faction); }
     }
 
     /// The faction whose perceived events should drop the warp; `None` for none.
@@ -221,11 +366,14 @@ impl LocalSession {
     fn describe(&self, a: &Alert) -> String {
         let name = |id: BodyId| self.world.body(id).map_or("?".to_string(), |b| b.name.clone());
         match &a.kind {
-            AlertKind::NewContact(c) => format!("New contact C{}", c.0),
+            AlertKind::ContactLost(c) => format!("Contact lost: {c}"),
+            AlertKind::NewContact(c) => format!("New contact: {c}"),
             AlertKind::ShipLost(b) => format!("{} lost", name(*b)),
             AlertKind::CollisionWarning(b) => format!("{}: collision avoidance engaged", name(*b)),
             AlertKind::CollisionUnavoidable(b) => format!("{}: collision unavoidable", name(*b)),
             AlertKind::OrderComplete(b) => format!("{}: order complete", name(*b)),
+            AlertKind::Hit(b) => format!("{} hit", name(*b)),
+            AlertKind::LaunchCancelled(b) => format!("{}: queued launch cancelled; target track unavailable", name(*b)),
             AlertKind::GameOver => match &self.world.outcome {
                 Some(o) => format!("Game over: {}", o.reason),
                 None => "Game over".into(),
@@ -234,13 +382,36 @@ impl LocalSession {
     }
 
     pub fn command(&mut self, role: Role, cmd: Command) -> Result<(), Rejection> {
+        let description=format!("role={role:?} command={cmd:?}");
+        let result=self.execute_command(role,cmd);
+        self.world.debug_note("ORDER",format!("{description} result={result:?}"));
+        result
+    }
+
+    pub fn enable_debug_log(&mut self,path:&std::path::Path)->std::io::Result<()> {self.world.enable_debug_log(path)}
+    pub fn debug_log_path(&self)->Option<&std::path::Path> {self.world.debug_log_path()}
+    pub fn debug_log_error(&self)->Option<&str> {self.world.debug_log_error()}
+
+    fn execute_command(&mut self, role: Role, cmd: Command) -> Result<(), Rejection> {
+        if let Some(body) = cmd.body() {
+            let kind = self.owned(role, body)?;
+            if let Command::SetThrust { thrust, .. } = &cmd {
+                let max_g = if kind == BodyKind::Ship { params::SHIP_MAX_ACCEL_G.value } else { params::PROBE_MAX_ACCEL_G.value };
+                if thrust.length() / G0 > max_g * (1.0 + 1e-9) { return Err(Rejection::ExceedsMaxAccel { requested_g: thrust.length()/G0, max_g }); }
+            }
+            self.world.log_command(&cmd);
+            if self.world.transmit_order(body, cmd.clone()) { return Ok(()); }
+        }
         match cmd {
+            Command::DeployProbe {body,direction} => { self.owned(role,body)?; self.world.deploy_probe(body,direction)?; }
+            Command::CancelLaunches { body } => { self.owned(role, body)?; self.world.cancel_launches(body)?; }
             Command::SetWarp(w) => self.warp = w.clamp(0.0, 1e6),
             Command::SetPaused(p) => self.paused = p,
             Command::SetThrust { body, thrust } => {
                 let kind = self.owned(role, body)?;
                 let max_g = match kind {
                     BodyKind::Ship => params::SHIP_MAX_ACCEL_G.value,
+                    BodyKind::Station => 0.0,
                     BodyKind::Probe => params::PROBE_MAX_ACCEL_G.value,
                     BodyKind::Missile => params::MISSILE_MAX_ACCEL_G.value,
                 };
@@ -258,6 +429,12 @@ impl LocalSession {
                 self.owned(role, body)?;
                 self.world.set_intercept(body, target)?;
             }
+            Command::Flyby { body, target } => {
+                self.owned(role, body)?;
+                self.world.set_flyby(body, target)?;
+            }
+            Command::KeepRange {body,target,range}=>{self.owned(role,body)?;self.world.set_tactical_range(body,target,Some(range))?;}
+            Command::Evade {body,target}=>{self.owned(role,body)?;self.world.set_tactical_range(body,target,None)?;}
             Command::MoveTo { body, point } => {
                 self.owned(role, body)?;
                 self.world.set_move(body, point)?;
@@ -272,13 +449,29 @@ impl LocalSession {
             }
             Command::Launch { body, target, payload } => {
                 self.owned(role, body)?;
-                self.world.launch(body, target, payload)?;
+                self.world.queue_launch(body, target, payload)?;
             }
-            Command::SetActiveSensor { body, on } => {
+            Command::FireBeam { body, target } => {
                 self.owned(role, body)?;
-                if !self.world.set_active_sensor(body, on) {
+                self.world.fire_beam(body, target)?;
+            }
+            Command::Ping { body } => {
+                self.owned(role, body)?;
+                if !self.world.ping(body) {
                     return Err(Rejection::Destroyed);
                 }
+            }
+            Command::EngageBeam { body, target } => {
+                self.owned(role, body)?;
+                self.world.engage_beam(body, target)?;
+            }
+            Command::ArmBeams { body } => {
+                self.owned(role, body)?;
+                self.world.arm_beams(body)?;
+            }
+            Command::SetScreen { body, up } => {
+                self.owned(role, body)?;
+                self.world.set_screen(body, up)?;
             }
         }
         Ok(())
@@ -291,6 +484,9 @@ impl LocalSession {
         let b = self.world.body(body).ok_or(Rejection::UnknownBody)?;
         if b.faction != faction {
             return Err(Rejection::NotYourBody);
+        }
+        if !b.controllable || self.world.decider(faction,self.world.time()) != Some(body) {
+            return Err(Rejection::NotControllable);
         }
         Ok(b.kind)
     }
@@ -308,8 +504,18 @@ impl LocalSession {
             .enumerate()
             .filter(|(_, b)| visible(b.faction))
             .filter_map(|(i, b)| {
+                let known;
+                let b = if let Role::Faction(f) = role { known = w.known_body(f, BodyId(i as u32))?; &known } else { b };
                 let s = b.trajectory.state_at(t)?;
                 Some(BodyView {
+                    damage:crate::damage::Report {damage:b.damage,installed:b.installed_systems(),observed_at:b.trajectory.start(),screen_heat:b.screen_j},
+                    interceptor_battery:b.interceptor_battery,interceptor:b.interceptor.map(|i|(i.dv_left,i.expires)),
+                    point_defence: b.point_defence.map(|mut pd| {pd.rate_hz*=b.operating_effectiveness(crate::damage::System::PdLaser);pd}),
+                    has_screen: b.has_screen,
+                    baseline_emission_factor: b.baseline_emission_factor,
+                    sensors: b.sensors,
+                    probes: b.probes,
+                    thermal: b.thermal,
                     id: BodyId(i as u32),
                     name: b.name.clone(),
                     kind: b.kind,
@@ -321,9 +527,26 @@ impl LocalSession {
                     autopilot: b.autopilot,
                     avoidance: b.avoidance,
                     drive_limit: b.drive_limit,
-                    active_sensor: b.active_sensor,
                     magazine: b.magazine,
-                    missile: b.missile.map(|m| MissileView { payload: m.payload, target: m.target, phase: m.phase, dv_left: m.dv_left }),
+                    missile_ready_at: b.missile_ready_at,
+                    missile_queued: b.missile_queued,
+                    missile: b.missile.map(|m| MissileView { payload: m.payload, target: m.target, phase: m.phase, dv_left: m.dv_left, locally_resolved: m.local_fix.is_some(),
+                        correction_possible:m.local_fix.map(|fix| {
+                            let target=crate::kinematics::State {pos:fix.pos+fix.vel*(t-fix.t),vel:fix.vel};
+                            let (left,miss)=crate::missile::zero_effort_miss(s,target,Vec2::ZERO);
+                            miss.length()<=crate::missile::lateral_reach(b.max_accel(),m.dv_left,left)
+                        }),
+                    }),
+                    screen_up: b.screen_up,
+                    screen_j: b.screen_j,
+                    hull_j: b.hull_j,
+                    armed: b.armed,
+                    controllable: b.controllable && w.decider(b.faction,t)==Some(BodyId(i as u32)),
+                    beam_ready_at: b.beam_ready_at,
+                    beam_target: b.beam_target,
+                    beam_auto: b.beam_auto,
+                    beam_emitted_j: b.beam_emitted_j,
+                    last_beam: b.last_beam,
                 })
             })
             .collect();
@@ -333,16 +556,18 @@ impl LocalSession {
             Role::Faction(f) => w.perception(f).map(|p| {
                 p.contacts
                     .values()
+                    .filter(|c| !w.contact_retired(f, c.id))
                     .map(|c| {
-                        let track = c.track.as_ref().map(|tr| {
+                        let track = c.track.as_ref().filter(|_|c.resolved).map(|tr| {
                             let now = tr.at(t, &w.system);
-                            TrackView { pos: now.pos(), vel: now.vel(), accel: now.accel(), cov: now.pos_cov(), updated_at: tr.t, updates: tr.updates }
+                            TrackView { velocity_sigma:now.p[2][2].max(now.p[3][3]).max(0.0).sqrt(),pos: now.pos(), vel: now.vel(), accel: now.accel(), cov: now.pos_cov(), updated_at: tr.t, updates: tr.updates }
                         });
                         let bearings = c
                             .bearings
                             .values()
                             .filter_map(|o| match o.measurement {
                                 Measurement::Bearing { bearing, sigma } => Some(BearingView {
+                                    received_at:o.decider_received_at,
                                     sensor: o.sensor,
                                     origin: o.origin,
                                     bearing,
@@ -357,6 +582,17 @@ impl LocalSession {
                             Measurement::Bearing { .. } => None,
                         };
                         ContactView {
+                            resolved_class:track.as_ref().and_then(|_|w.body_for_contact(f,c.id).and_then(|id|w.bodies[id.0 as usize].ship_class)),
+                            resolved_interceptor:track.is_some() && w.body_for_contact(f,c.id).is_some_and(|id|w.bodies[id.0 as usize].interceptor.is_some()),
+                            damage:w.known_damage(f,c.id),
+                            resolved_kind:track.as_ref().and_then(|_|w.body_for_contact(f,c.id).map(|id|w.bodies[id.0 as usize].kind)),
+                            resolved_missile: track.is_some() && w.body_for_contact(f,c.id)
+                                .is_some_and(|id|w.bodies[id.0 as usize].kind==BodyKind::Missile),
+                            quality: if t - c.last.decider_received_at > params::TRACK_LOST_S.value { "lost" }
+                                else if t - c.last.decider_received_at > params::TRACK_STALE_S.value { "stale" }
+                                else if track.as_ref().is_some_and(|tr| tr.updates >= 3 && tr.velocity_sigma <= params::TRACK_VELOCITY_SIGMA.value) { "velocity resolved" }
+                                else if track.is_some() { "position resolution" } else { "direction indication" },
+                            stale: t - c.last.decider_received_at > params::TRACK_STALE_S.value,
                             id: c.id,
                             track,
                             bearings,
@@ -382,27 +618,36 @@ impl LocalSession {
         let losses = w
             .losses
             .iter()
-            .filter(|l| l.cause != LossCause::Expended && w.body(l.body).is_some_and(|b| visible(b.faction)))
+            .filter(|l| l.cause != LossCause::Expended && w.body(l.body).is_some_and(|b| visible(b.faction))
+                && match role { Role::Spectator => true, Role::Faction(f) => w.loss_known(f,l.body) })
             .map(|l| LossView {
                 body: l.body,
                 name: w.body(l.body).map(|b| b.name.clone()).unwrap_or_default(),
                 t: l.t,
                 cause: match l.cause {
                     LossCause::Impact(i) => format!("hit {}", w.system.bodies[i].name),
-                    LossCause::Missile { payload, missile } => {
-                        format!("{} missile {}", payload.name(), w.body(missile).map_or("?".into(), |m| m.name.clone()))
-                    }
+                    LossCause::Missile { payload, .. } => format!("{} missile", payload.name()),
                     LossCause::Expended => "expended".into(),
+                    LossCause::ShipBeam { .. } => "ship beam".into(),
+                    LossCause::PointDefence { .. } => "point-defence laser".into(),
+                    LossCause::Interceptor { .. } => "point-defence missile".into(),
                 },
             })
             .collect();
 
         View {
+            hostile_pings: w.hostile_pings(match role { Role::Faction(f) => Some(f), Role::Spectator => None }),
+            combat: w.combat_events(match role { Role::Spectator => None, Role::Faction(f) => Some(f) }),
+            pending_orders: match role { Role::Spectator => 0, Role::Faction(f) => w.pending_orders(f) },
             time: t,
             role,
             warp: self.warp,
             paused: self.paused,
             bodies,
+            pings: w.ping_emissions.iter().filter(|(id, _)| visible(w.bodies[id.0 as usize].faction)
+                && !matches!(w.bodies[id.0 as usize].kind, BodyKind::Station | BodyKind::Missile)).map(|(id, front)| OwnPing {
+                origin:front.origin,t_emit:front.t_emit,useful_range:crate::units::AU * if matches!(w.bodies[id.0 as usize].kind,BodyKind::Probe|BodyKind::Missile) { params::PROBE_SENSOR_FACTOR.value.sqrt() } else {1.0}
+            }).collect(),
             contacts,
             celestials,
             losses,
@@ -431,14 +676,173 @@ mod tests {
     }
 
     #[test]
+    fn doctrine_engages_without_truth_and_is_warp_independent() {
+        let run=|chunks:usize| {
+            let mut s=running(0.0);
+            s.enable_bot(RAIDER,true);
+            s.enable_bot(ESCORT,true);
+            for _ in 0..chunks { s.tick(1800.0/chunks as f64); }
+            assert!(!s.world.bodies.iter().any(|b| b.missile.is_some()),"uncertain early tracks must not trigger speculative AI salvos");
+            s.world.command_log().to_vec()
+        };
+        assert_eq!(run(1),run(30));
+    }
+
+    #[test]
     fn faction_view_holds_own_ships_and_contacts_only() {
         let s = running(60.0);
         let v = s.view(Role::Faction(ESCORT));
         assert!(v.bodies.iter().all(|b| b.faction == ESCORT));
-        assert_eq!(v.bodies.len(), 2);
+        assert_eq!(v.bodies.len(), 3);
         let c = v.contacts.first().expect("burning cruiser is detected at once");
         assert!(c.last_emitted_at < v.time - 100.0, "its light is old");
-        assert!(c.track.is_some(), "two escorts triangulate it");
+        // Coarse passive bearings from escorts 1 ls apart cannot fix a target ~160 ls
+        // away: the opening is bearing-only until they spread out or ping.
+        // The lunar station supplies a wider baseline than the two escort ships.
+        assert!(!c.bearings.is_empty());
+    }
+
+    #[test]
+    fn ping_is_one_shot_and_its_display_is_private() {
+        let mut s = running(0.0);
+        s.command(Role::Faction(ESCORT), Command::Ping { body: BodyId(1) }).unwrap();
+        let first = s.view(Role::Faction(ESCORT)).pings[0];
+        assert!(s.view(Role::Faction(RAIDER)).pings.is_empty());
+        s.world.advance_to(300.0);
+        let pulses = s.view(Role::Faction(ESCORT)).pings;
+        assert_eq!(pulses.len(), 1);
+        assert_eq!(pulses[0].t_emit, first.t_emit);
+        assert_eq!(pulses[0].origin, first.origin);
+        s.command(Role::Faction(ESCORT), Command::Ping { body: BodyId(1) }).unwrap();
+        assert_eq!(s.view(Role::Faction(ESCORT)).pings.len(), 2);
+        s.world.advance_to(1400.0);
+        assert!(s.view(Role::Faction(ESCORT)).pings.is_empty());
+    }
+
+    #[test]
+    fn hostile_ping_is_delayed_then_expires_without_exposing_its_wavefront() {
+        let mut s=running(0.0);
+        s.command(Role::Faction(RAIDER),Command::Ping {body:BodyId(2)}).unwrap();
+        s.world.advance_to(100.0);
+        let v=s.view(Role::Faction(ESCORT));
+        assert!(v.hostile_pings.is_empty() && v.pings.is_empty());
+        s.world.advance_to(750.0);
+        let v=s.view(Role::Faction(ESCORT));
+        assert!(v.pings.is_empty());
+        let p=v.hostile_pings.first().expect("pinger becomes visible only after light arrives");
+        assert!(p.pos.is_none(),"at the doubled separation this pulse is direction-only");
+        assert!(p.radius(900.0)>p.radius(750.0));
+        assert!(p.opacity(900.0)<p.opacity(750.0));
+        assert_eq!(p.opacity(p.received_at+600.0),0.0);
+        s.world.advance_to(1400.0);
+        assert!(s.view(Role::Faction(ESCORT)).hostile_pings.is_empty());
+    }
+
+    #[test]
+    fn ping_manoeuvre_radius_uses_100g_and_bearing_only_has_no_position() {
+        let p=PingSighting {contact:ContactId(1),emitted_at:0.0,received_at:10.0,pos:None,
+            vel:Vec2::ZERO,initial_radius:0.0,observer:Vec2::ZERO,bearing:0.0};
+        assert!(p.center(100.0).is_none());
+        assert!((p.radius(600.0)-176_519.7).abs()<0.01);
+    }
+
+    #[test]
+    fn beam_commands_enforce_ownership_and_tracks() {
+        let mut s = running(60.0);
+        let fire = Command::FireBeam { body: BodyId(1), target: ContactId(999) };
+        assert_eq!(s.command(Role::Faction(RAIDER), fire.clone()), Err(Rejection::NotYourBody));
+        assert_eq!(s.command(Role::Spectator, fire.clone()), Err(Rejection::SpectatorCannotCommand));
+        assert_eq!(s.command(Role::Faction(ESCORT), fire), Err(Rejection::NoTrack));
+    }
+
+    #[test]
+    fn missiles_cannot_receive_player_commands() {
+        let mut s = running(0.0);
+        // Use a missile body fixture; every body command shares the ownership gate.
+        s.world.bodies[0].kind = BodyKind::Missile;
+        let body = BodyId(0);
+        for cmd in [
+            Command::SetThrust { body, thrust: Vec2::ZERO },
+            Command::AllStop { body },
+            Command::Ping { body },
+            Command::SetScreen { body, up: true },
+            Command::Orbit { body, celestial: 1 },
+            Command::FireBeam { body, target: ContactId(0) },
+            Command::EngageBeam { body, target: Some(ContactId(0)) },
+        ] {
+            assert_eq!(s.command(Role::Faction(ESCORT), cmd), Err(Rejection::NotControllable));
+        }
+        assert!(s.view(Role::Faction(ESCORT)).bodies.iter().any(|b| b.id == body), "missiles remain visible on the map");
+    }
+
+    #[test]
+    fn lunar_station_is_autonomous_and_reports_without_visible_pulses() {
+        let mut s=running(0.0);
+        // Exercise the optional active station configuration, disabled in playtests.
+        s.world.bodies[3].sensors=crate::sensors::SensorSuite::FULL;
+        let station=BodyId(3);
+        assert_eq!(s.command(Role::Faction(ESCORT),Command::Ping {body:station}),Err(Rejection::NotControllable));
+        assert!(s.world.set_screen(station,true).is_err());
+        s.world.advance_to(180.0);
+        let b=&s.world.bodies[3];
+        assert!(!b.armed && !b.screen_up && b.magazine==[0; 2]);
+        let pulses:Vec<_>=s.world.ping_emissions.iter().filter(|(id,_)|*id==station).map(|(_,p)|p.t_emit).collect();
+        assert!(pulses.len()>=3);
+        assert!(pulses.windows(2).all(|p| (p[1]-p[0]-60.0).abs()<1e-9));
+        assert!(s.view(Role::Faction(ESCORT)).pings.is_empty());
+        assert!(s.world.perception(ESCORT).unwrap().log.iter().any(|o|o.sensor==station && o.decider_received_at>o.sensor_received_at));
+        s.world.advance_to(86_400.0);
+        let station_pos=s.world.bodies[3].trajectory.state_at(s.world.time()).expect("station survives lunar orbit").pos;
+        assert!((station_pos-s.world.system.state(2,s.world.time()).pos).length()<10_000.0);
+    }
+
+    #[test]
+    fn another_allied_ship_cannot_receive_player_orders() {
+        let mut s=running(0.0);
+        s.world.bodies[0].controllable=true;
+        assert_eq!(s.command(Role::Faction(ESCORT),Command::Ping {body:BodyId(0)}),Err(Rejection::NotControllable));
+        assert_eq!(s.view(Role::Faction(ESCORT)).bodies.iter().filter(|b|b.controllable).map(|b|b.id).collect::<Vec<_>>(),vec![BodyId(1)]);
+    }
+
+    #[test]
+    fn persistent_debug_log_records_orders_rejections_and_combat() {
+        let mut s=running(0.0);
+        let stamp=std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+        let path=std::env::temp_dir().join(format!("luminal-test-{stamp}-{}.log",std::process::id()));
+        s.enable_debug_log(&path).unwrap();
+        s.command(Role::Faction(ESCORT),Command::Ping {body:BodyId(1)}).unwrap();
+        assert!(s.command(Role::Faction(ESCORT),Command::Ping {body:BodyId(2)}).is_err());
+        s.world.debug_note("COMBAT","test event".into());
+        let log=std::fs::read_to_string(&path).unwrap();
+        assert!(log.contains("SESSION") && log.contains("PARAM") && log.contains("PLATFORM"));
+        assert!(log.contains("PING") && log.contains("ORDER") && log.contains("result=Err"));
+        assert!(log.contains("COMBAT\ttest event"));
+        drop(s);
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn missile_pings_remain_physical_but_have_no_map_ring() {
+        let mut s=running(0.0);
+        assert!(s.world.ping(BodyId(1)));
+        let visible=s.view(Role::Faction(ESCORT)).pings.len();
+        assert!(visible>0);
+        let emitted=s.world.ping_emissions.len();
+        s.world.bodies[1].kind=BodyKind::Missile;
+        assert_eq!(s.view(Role::Faction(ESCORT)).pings.len(),visible-1);
+        assert_eq!(s.world.ping_emissions.len(),emitted,"display filtering must not delete sensor pulses");
+    }
+
+    #[test]
+    fn transport_orders_are_scenario_controlled() {
+        let mut s = running(0.0);
+        for cmd in [Command::AllStop { body: BodyId(0) }, Command::SetThrust { body: BodyId(0), thrust: Vec2::ZERO },
+            Command::Ping { body: BodyId(0) }] {
+            assert_eq!(s.command(Role::Faction(ESCORT), cmd), Err(Rejection::NotControllable));
+        }
+        let v = s.view(Role::Faction(ESCORT));
+        assert!(!v.bodies.iter().find(|b| b.id == BodyId(0)).unwrap().controllable);
+        assert!(v.bodies.iter().find(|b| b.id == BodyId(1)).unwrap().controllable);
     }
 
     #[test]
@@ -455,30 +859,81 @@ mod tests {
                 let Some(real) = truth.bodies.iter().find(|b| b.id == *id) else { continue };
                 let err = (t.pos - real.pos).length();
                 let sigma = (t.cov[0][0] + t.cov[1][1]).sqrt();
-                assert!(err < 4.0 * sigma + 100.0, "T+{} err {err} km, sigma {sigma} km", v.time);
+                if std::env::var("LUMINAL_DEBUG").is_ok() {
+                    let r = (real.pos - v.bodies[0].pos).length();
+                    eprintln!("T+{} err {err:.0} sigma {sigma:.0} range {:.1} ls updates {} speed {:.0}", v.time, r / crate::units::LIGHT_SECOND, t.updates, real.vel.length());
+                }
+                if std::env::var("LUMINAL_DEBUG").is_err() {
+                    assert!(err < 4.0 * sigma + 100.0, "T+{} err {err} km, sigma {sigma} km", v.time);
+                }
             }
         }
     }
 
     #[test]
-    fn a_perceived_event_drops_the_warp() {
+    fn raider_salvo_has_one_track_per_source_not_duplicate_cruiser_tracks() {
+        let mut s=LocalSession::new(scenario::transport_intercept());
+        s.enable_bot(RAIDER,true);
+        s.command(Role::Spectator,Command::SetPaused(false)).unwrap();
+        s.tick(1560.0); // The raider now starts twice as far away; reports arrive later.
+        // Explicit speculative launches exercise association independently of AI doctrine.
+        let target=s.view(Role::Faction(RAIDER)).contacts.first().unwrap().id;
+        for _ in 0..3 {s.command(Role::Faction(RAIDER),Command::Launch {body:BodyId(2),target,payload:Payload::Nuclear}).unwrap();}
+        s.tick(900.0);
+        let v=s.view(Role::Faction(ESCORT));
+        let association=s.contact_truth(Role::Spectator,ESCORT).unwrap();
+        let sources:Vec<_>=v.contacts.iter().map(|c|association[&c.id]).collect();
+        let unique:std::collections::BTreeSet<_>=sources.iter().copied().collect();
+        assert_eq!(sources.len(),unique.len(),"each source has exactly one displayed contact");
+        for contact in &v.contacts {
+            let kind=s.world.bodies[association[&contact.id].0 as usize].kind;
+            assert_eq!(contact.resolved_kind,contact.track.as_ref().map(|_|kind));
+            assert_eq!(contact.resolved_missile,contact.track.is_some() && kind==BodyKind::Missile);
+        }
+        assert_eq!(sources.iter().filter(|id|**id==BodyId(2)).count(),1,"one cruiser track");
+        assert_eq!(sources.iter().filter(|id|s.world.bodies[id.0 as usize].kind==BodyKind::Probe).count(),0,"probes disabled in the scenario");
+        assert!(sources.iter().filter(|id|s.world.bodies[id.0 as usize].kind==BodyKind::Missile).count()>1,
+            "separate salvo members must remain separate tracks; exact detections depend on scenario geometry");
+    }
+
+    #[test]
+    fn new_contacts_preserve_selected_warp_and_full_tick() {
+        let mut s=LocalSession::new(scenario::transport_intercept());
+        s.set_watch(Some(ESCORT));
+        s.command(Role::Spectator,Command::SetWarp(100.0)).unwrap();
+        s.command(Role::Spectator,Command::SetPaused(false)).unwrap();
+        s.tick(2.0);
+        let v=s.view(Role::Faction(ESCORT));
+        assert!(!v.contacts.is_empty());
+        assert_eq!(v.warp,100.0);
+        assert_eq!(v.time,200.0);
+        assert!(!s.paused);
+    }
+
+    #[test]
+    fn order_completion_preserves_warp_and_finishes_tick() {
         let mut s = LocalSession::new(scenario::transport_intercept());
         s.set_watch(Some(ESCORT));
-        s.command(Role::Faction(ESCORT), Command::Orbit { body: BodyId(0), celestial: 1 }).unwrap();
-        s.command(Role::Spectator, Command::SetWarp(100_000.0)).unwrap();
+        // The frigate starts parked in orbit, so an orbit order would hold at once;
+        // a move takes a while and then completes.
+        let planet = s.view(Role::Faction(ESCORT)).celestials[1].pos;
+        let point = planet + Vec2::new(0.0, 200_000.0);
+        s.command(Role::Faction(ESCORT), Command::MoveTo { body: BodyId(1), point }).unwrap();
+        s.command(Role::Spectator, Command::SetWarp(1000.0)).unwrap();
         s.command(Role::Spectator, Command::SetPaused(false)).unwrap();
-        s.tick(10.0); // a million seconds requested
+        s.tick(10.0);
         let v = s.view(Role::Faction(ESCORT));
-        assert_eq!(v.warp, ALERT_WARP);
-        assert!(v.time < 1e6, "stopped at the event, not the end of the tick: {}", v.time);
-        assert_eq!(s.last_alert().unwrap().1, "Transport: order complete");
+        assert_eq!(v.warp, 1000.0);
+        assert_eq!(v.time, 10_000.0);
+        assert!(!v.paused);
+        assert!(s.world.alerts.iter().any(|a|matches!(a.kind,AlertKind::OrderComplete(BodyId(1)))));
     }
 
     #[test]
     fn spectator_sees_truth_and_may_ask_for_associations() {
         let s = running(60.0);
         let v = s.view(Role::Spectator);
-        assert_eq!(v.bodies.len(), 3);
+        assert_eq!(v.bodies.len(), 4);
         assert_eq!(v.celestials.len(), 3);
         assert!(s.contact_truth(Role::Faction(ESCORT), ESCORT).is_none());
         assert!(s.contact_truth(Role::Spectator, ESCORT).is_some());
@@ -492,7 +947,7 @@ mod tests {
         assert_eq!(s.command(me, Command::SetThrust { body: cruiser, thrust: Vec2::ZERO }), Err(Rejection::NotYourBody));
         let too_hard = Vec2::new(101.0 * G0, 0.0);
         assert!(matches!(
-            s.command(me, Command::SetThrust { body: BodyId(0), thrust: too_hard }),
+            s.command(me, Command::SetThrust { body: BodyId(1), thrust: too_hard }),
             Err(Rejection::ExceedsMaxAccel { .. })
         ));
         let _ = RAIDER;

@@ -2,15 +2,21 @@
 
 **How the game is built to satisfy [GAME_MECHANICS.md](GAME_MECHANICS.md). The mechanics document is authority on rules; this document is authority on structure.**
 
+Current implementation details and prototype limits: [Tactical refinement pass](REFINEMENTS.md).
+
 ## 1. Product shape
 
 - **Top-down 2D real-time strategy**, native Linux desktop application.
-- The player commands one faction. Opponents are bots. AI-versus-AI with an omniscient spectator is a first-class mode, as is replay.
+- The player commands one assigned ship, receiving allied sensor reports at light speed. Other platforms are autonomous. Opponents are bots. AI-versus-AI with an omniscient spectator is supported; replay remains planned.
 - **Solar-system map scale**: the strategic map covers roughly 10–50 AU around a star; zoom reaches down to km for encounters.
-- **Real time with time compression.** Engagements span hours of approach and sub-second terminal encounters, so the clock runs at a player-selected warp (1× … 100,000×) and automatically drops warp when the player's faction *perceives* something requiring attention. Warp must never react to truth the faction has not received.
+- **Real time with time compression.** Engagements span hours of approach and sub-second terminal encounters. Only player controls change warp; no contact, damage or order event changes it automatically. The debugging scenario starts at 50×.
 - First milestone: the §15 experiment — a cruiser intercepting a transport before a departure region, with a defending frigate — playable, and runnable headless as comparable variants.
 
 ## 2. Non-negotiable structural rules
+
+Player-facing terminology follows the **modern, post-WWII Royal Navy terminology principle** in GAME_MECHANICS.md, favouring contemporary usage. Shared track labels are formatted centrally through `ContactId` so map, orders, alerts and weapons use the same designation.
+
+The compact bottom command deck has four equal quarters: own commands/magazines, own status, target status, target orders. Each status quarter stacks hull, armour and screen-heat bars above grouped system chips, with a narrow vertical thrust gauge. Target heat is the last received active-echo report, not truth. Unknown target thrust stays unknown. A top-left control inset and transparent top-right eight-line fading combat log overlay the map. Bottom-left navigation shows speed/range/closure; bottom-right shows tactical scale or hovered-object details. No View As control is exposed. Unresolved contacts use T1; resolution changes the prefix to the configured class (FF1, BB1, CV1), preserving the contact number. CV for cruiser is the requested game convention, not a claim about real naval classification.
 
 1. **The player is a `Mind`.** The player's map, contact list and telemetry are rendered from that faction's `Perception`, exactly as a bot would receive it. Only spectator mode renders truth.
 2. **No truth leaks through the `mind` boundary.** Bots, missile seekers, probes and the player UI consume `Perception`; nothing reachable from them can query world state.
@@ -75,11 +81,13 @@ The app drives the world with `world.advance_to(t_target)` each frame, where `t_
 - **Frame convention (proposal):** Newtonian kinematics in a preferred system rest frame; signals propagate at c in that frame. A global time makes tactical FTL causally consistent: it is a relocation in system time.
 - **Retarded-time solve:** light emitted by A at `t_e` reaches B at `t` when `|x_B(t) − x_A(t_e)| = c (t − t_e)`. Trajectories are stored, so this is a 1-D root-find on exact positions.
 - **Observation** carries emission time, sensor receipt time, decider receipt time, sensor origin and uncertainty.
-- **Passive sensing yields bearing (and intensity), not range (proposal).** Range comes from active ranging, parallax across a probe baseline, or bearing-rate analysis over time. This gives probes and active sensing their value.
+- **Three sensor channels:** passive localization around 0.1 AU, active ranging around 1 AU, and direction-only finding around 10 AU for a reference military ship burning at 10g. Nominal detection probability is 75% per frame/return. Passive localization uses a proposed noisy TL7 range measurement; direction finding supplies only bearings and may triangulate across sensors. Emission strength changes passive ranges, and cross-section governs active returns. Each emitted ping exposes its source at ten times its passive/localization and direction ranges, with the source signature captured at emission, preserving light delay after shutdown.
 - **Occlusion:** celestial bodies block every light path — emission, pings, echoes and laser relays. Their motion is linearised over the transit.
+- **Manual ping and standing beam orders:** `Command::Ping` emits one physical front immediately. Session views expose only own emission records; their white outline display expands at c/2 and fades from 0.7 to 1 AU. `EngageBeam` stores a designated track and schedules generation-tagged checks; received estimated range gates automatic pulses at a provisional 3 ls, with 10 s recharge. Cease fire invalidates pending checks without cancelling emitted light. UI inspection is separate from persistent friendly command selection.
 - **Relays:** a faction decides at its flagship (lowest-numbered live ship). Other ships' reports travel there at c and can be blocked.
 - **Tracking:** each faction's perception holds a constant-acceleration extended Kalman filter per contact, with known gravity in prediction. It lives in `luminal-core::mind` because the session builds the player's view from it; bots consume the same tracks. Firing solutions propagate covariance to weapon arrival time.
 - **Hit resolution:** the shooter aims at its estimate; the beam or projectile is then resolved against the target's true trajectory. Probability of hit is emergent. The illustrative P_hit curve is a calibration target, not code.
+- **Ship beam pulses:** armed ships may fire independently of missile inventory, subject to a tagged recharge interval. The firing solution extrapolates the causally received faction track to beam arrival; emitted direction never changes. Pulses survive shooter loss, resolve at light-front arrival, and respect celestial occlusion. A bounded Gaussian fluence approximation reduces intercepted energy with spot size and miss distance before passing it to screens/hull. Own views expose cooldown, emitted energy and the firing-solution line, never truth hit results. Reactor supply and waste heat are explicit prototype omissions.
 
 ## 7. Relativity and energy (proposals)
 
@@ -90,7 +98,8 @@ The app drives the world with `world.advance_to(t_target)` each frame, where `t_
 ## 8. Client
 
 - **Map:** top-down 2D vector graphics. Ships are arrows (along thrust, or velocity when coasting) with velocity-vector tails. Celestial bodies are drawn at true size with a minimum dot, with orbit lines, off-screen edge markers and sensor-shadow cones from the selected ship. Forecasts include gravity and mark predicted impacts. Log-scale zoom from 100 AU to km, pan, optional co-moving display frame (display-only; subtracts a common velocity).
-- **Overlays:** committed trajectories, velocity vectors, expanding light-front rings, track uncertainty ellipses with track age; in spectator mode, belief-versus-truth for any faction.
+- **Overlays:** committed trajectories, velocity vectors, expanding light-front rings, and contact age rings capped at 40 px after one hour (display placeholders). Map labels omit numeric age; actual uncapped covariance remains available in contact details. In spectator mode, belief-versus-truth for any faction.
+- **Movement:** points use burn/flip/brake and hold in their celestial frame; celestial bodies use orbit guidance. Right-clicking a ship defaults to full-thrust flyby, then coasting after passage. A side-panel toggle changes the order to intercept and match velocity. Enemy guidance consumes faction tracks only.
 - **Panels:** contacts and track quality, screen telemetry (temperature, stored energy, headroom, emission, cooling estimate), magazines, orders and rejection reasons, parameter provenance.
 - **Time controls:** pause, single-step to next event, warp, automatic warp drop on perceived events.
 

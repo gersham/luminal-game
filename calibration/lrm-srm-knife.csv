@@ -1,0 +1,4 @@
+range_au,depth,seed,hits_a,hits_b,damage_a,damage_b,destroyed_a,destroyed_b,launched_a,launched_b,finished,interceptor_kills,elapsed_s,hull_a,hull_b,armour_a,armour_b,first_damage_s,first_loss_s
+0.002,30,1000,9,14,157194438391332.63,911285462467324.8,false,true,0,0,true,0,589,100,0,100,0,329,468
+0.002,30,1001,13,16,177871356713649.13,932034701364202.3,false,true,0,0,true,0,727,100,0,99.97287728844825,0,339,606
+0.002,30,1002,15,13,485452284578561.6,934339780476972.1,false,true,0,0,true,0,693,93.50167872040485,0,92.40697294932663,0,131,572

@@ -18,11 +18,17 @@ use std::collections::{BTreeMap, VecDeque};
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ContactId(pub u32);
 
+impl std::fmt::Display for ContactId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "T{}", self.0)
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Measurement {
-    /// Passive: direction only (proposal: passive sensing yields no range).
+    /// Long-range direction finding, without localization.
     Bearing { bearing: f64, sigma: f64 },
-    /// Active echo: direction and range from the sensor.
+    /// Passive localization or active echo: noisy direction and range.
     BearingRange { bearing: f64, sigma_bearing: f64, range: f64, sigma_range: f64 },
 }
 
@@ -107,7 +113,7 @@ pub struct Track {
 }
 
 /// Initial velocity uncertainty for a new track, km/s.
-const INITIAL_SIGMA_V: f64 = 100.0;
+const INITIAL_SIGMA_V: f64 = 10_000.0;
 /// Initial thrust uncertainty for a new track, in g.
 const INITIAL_SIGMA_A_G: f64 = 20.0;
 
@@ -286,6 +292,10 @@ pub fn triangulate(a: (Vec2, f64, f64), b: (Vec2, f64, f64)) -> Option<(Vec2, [[
 
 #[derive(Clone, Debug)]
 pub struct Contact {
+    /// Identification requires a direct passive localisation or a usable echo,
+    /// not triangulated bearings or interception of the target's ping.
+    pub resolved: bool,
+    systematic_floor: Option<(f64,[[f64;2];2])>,
     pub id: ContactId,
     pub track: Option<Track>,
     /// Latest bearing report from each of our sensors.
@@ -293,8 +303,14 @@ pub struct Contact {
     pub last: Observation,
 }
 
-/// Reports older than this cannot be combined into a triangulation, s.
-const TRIANGULATION_WINDOW_S: f64 = 120.0;
+/// A report whose light left this long before the track's newest one is too stale to
+/// fold in, s: retrodicting and re-predicting across a long gap jerks the estimate.
+/// It still shows as a bearing.
+const STALE_REPORT_S: f64 = 0.0;
+/// Slack beyond the light-time across the baseline for pairing two bearings into a
+/// triangulation, s. Bearings taken further apart in time see a moving target in two
+/// different places, and the fix would be confidently wrong.
+const TRIANGULATION_SLACK_S: f64 = 1.0;
 /// How many recent observations to keep for inspection.
 const LOG_LEN: usize = 200;
 
@@ -319,15 +335,22 @@ impl Perception {
         let c = self
             .contacts
             .entry(obs.contact)
-            .or_insert_with(|| Contact { id: obs.contact, track: None, bearings: BTreeMap::new(), last: obs });
+            .or_insert_with(|| Contact { resolved:false, systematic_floor:None,id: obs.contact, track: None, bearings: BTreeMap::new(), last: obs });
         if obs.emitted_at >= c.last.emitted_at {
             c.last = obs;
         }
         match obs.measurement {
             Measurement::BearingRange { bearing, sigma_bearing, range, sigma_range } => {
+                if matches!(obs.source, Source::Emission | Source::Echo) { c.resolved = true; }
+                if c.bearings.get(&obs.sensor).is_none_or(|old|obs.emitted_at>=old.emitted_at) {
+                    c.bearings.insert(obs.sensor, Observation {measurement:Measurement::Bearing {bearing,sigma:sigma_bearing},..obs});
+                }
                 let pos = obs.origin + Vec2::new(bearing.cos(), bearing.sin()) * range;
-                let cov = polar_cov(bearing, range, sigma_range, sigma_bearing);
+                let radial=crate::sensors::systematic_range(range,obs.snr,obs.source);
+                let angular=crate::params::DIRECTION_SYSTEMATIC_RAD.value/obs.snr.sqrt().max(1.0);
+                let cov = polar_cov(bearing, range, sigma_range.hypot(radial), sigma_bearing.hypot(angular));
                 match &mut c.track {
+                    Some(t) if obs.emitted_at < t.t - STALE_REPORT_S => {}
                     Some(t) => {
                         t.predict(obs.emitted_at, sys);
                         t.update_position(pos, cov);
@@ -336,25 +359,63 @@ impl Perception {
                 }
             }
             Measurement::Bearing { bearing, sigma } => {
-                c.bearings.insert(obs.sensor, obs);
+                if c.bearings.get(&obs.sensor).is_none_or(|old|obs.emitted_at>=old.emitted_at) {
+                    c.bearings.insert(obs.sensor, obs);
+                }
                 match &mut c.track {
+                    Some(t) if obs.emitted_at < t.t - STALE_REPORT_S => {}
                     Some(t) => {
                         t.predict(obs.emitted_at, sys);
-                        t.update_bearing(obs.origin, bearing, sigma);
+                        let angular=crate::params::DIRECTION_SYSTEMATIC_RAD.value/obs.snr.sqrt().max(1.0);
+                        t.update_bearing(obs.origin, bearing, sigma.hypot(angular));
                     }
                     None => {
-                        let other = c.bearings.values().find(|o| {
-                            o.sensor != obs.sensor && (o.emitted_at - obs.emitted_at).abs() < TRIANGULATION_WINDOW_S
-                        });
-                        if let Some(o) = other
-                            && let Measurement::Bearing { bearing: b2, sigma: s2 } = o.measurement
-                            && let Some((pos, cov)) = triangulate((obs.origin, bearing, sigma), (o.origin, b2, s2))
-                        {
+                        // Try every other sensor's recent bearing; keep the tightest fix.
+                        let best = c
+                            .bearings
+                            .values()
+                            .filter(|o| {
+                                let window = (o.origin - obs.origin).length() / crate::units::C + TRIANGULATION_SLACK_S;
+                                o.sensor != obs.sensor && (o.emitted_at - obs.emitted_at).abs() < window
+                            })
+                            .filter_map(|o| match o.measurement {
+                                Measurement::Bearing { bearing: b2, sigma: s2 } => {
+                                    triangulate((obs.origin, bearing, sigma), (o.origin, b2, s2))
+                                }
+                                Measurement::BearingRange { .. } => None,
+                            })
+                            .min_by(|a, b| (a.1[0][0] + a.1[1][1]).total_cmp(&(b.1[0][0] + b.1[1][1])));
+                        if let Some((pos, cov)) = best {
                             c.track = Some(Track::new(obs.emitted_at, pos, cov));
                         }
                     }
                 }
             }
+        }
+        // Correlated calibration error cannot be averaged away by repeated frames.
+        // Smaller/stronger-range measurements progressively lower this floor.
+        if let Some(tr)=&mut c.track {
+            let (bearing,range)=match obs.measurement {
+                Measurement::BearingRange {bearing,range,..} => (bearing,range),
+                Measurement::Bearing {bearing,..} => (bearing,(tr.pos()-obs.origin).length()),
+            };
+            let radial=crate::sensors::systematic_range(range,obs.snr,obs.source);
+            let angular=crate::params::DIRECTION_SYSTEMATIC_RAD.value/obs.snr.sqrt().max(1.0);
+            let candidate=polar_cov(bearing,range,radial,angular);
+            // A weak newer report must not inflate the retained solution to that
+            // report's much larger calibration uncertainty. Motion still grows P.
+            let retained=c.systematic_floor.map(|(at,mut floor)| {
+                let manoeuvre=0.5*crate::params::TRACK_MANEUVER_G.value*G0*(tr.t-at).max(0.0).powi(2);
+                floor[0][0]+=manoeuvre.powi(2); floor[1][1]+=manoeuvre.powi(2);
+                floor
+            });
+            let use_new=retained.is_none_or(|old|candidate[0][0]+candidate[1][1]<old[0][0]+old[1][1]);
+            if use_new {
+                c.systematic_floor=Some((tr.t,candidate));
+            }
+            let floor=if use_new {candidate} else {retained.unwrap()};
+            tr.p[0][0]=tr.p[0][0].max(floor[0][0]);
+            tr.p[1][1]=tr.p[1][1].max(floor[1][1]);
         }
     }
 }
@@ -362,6 +423,28 @@ impl Perception {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn bearing_triangulation_and_ping_do_not_identify_a_platform() {
+        let mut p=Perception::new(FactionId(0));
+        let sys=System::default();
+        let target=Vec2::new(1000.0,1000.0);
+        let report=Observation {contact:ContactId(1),sensor:BodyId(0),origin:Vec2::ZERO,
+            emitted_at:0.0,sensor_received_at:1.0,decider_received_at:1.0,
+            measurement:Measurement::Bearing {bearing:bearing_of(target),sigma:0.001},snr:9.0,source:Source::Emission};
+        p.ingest(report,&sys);
+        let origin=Vec2::new(2000.0,0.0);
+        p.ingest(Observation {sensor:BodyId(1),origin,
+            measurement:Measurement::Bearing {bearing:bearing_of(target-origin),sigma:0.001},..report},&sys);
+        assert!(p.contacts[&ContactId(1)].track.is_some());
+        assert!(!p.contacts[&ContactId(1)].resolved);
+        let ranged=Observation {source:Source::Ping,measurement:Measurement::BearingRange {
+            bearing:bearing_of(target),sigma_bearing:0.001,range:target.length(),sigma_range:10.0},..report};
+        p.ingest(ranged,&sys);
+        assert!(!p.contacts[&ContactId(1)].resolved);
+        p.ingest(Observation {source:Source::Echo,..ranged},&sys);
+        assert!(p.contacts[&ContactId(1)].resolved);
+    }
 
     #[test]
     fn two_bearings_triangulate() {

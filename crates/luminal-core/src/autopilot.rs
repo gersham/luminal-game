@@ -92,21 +92,27 @@ pub struct Approach {
 /// over, and brakes to a halt. `ff` is the acceleration needed just to keep pace with
 /// the destination (its acceleration minus the ship's gravity).
 fn approach(ship: State, dest: State, ff: Vec2, stop_at: f64, brake: f64, max_accel: f64) -> Approach {
+    use crate::kinematics::proper_velocity;
+    use crate::units::C;
     let dp = dest.pos - ship.pos;
     let range = dp.length();
     let dir = dp.normalized();
     let gap = range - stop_at;
-    let speed = gap.signum() * (2.0 * brake * gap.abs()).sqrt().min(gap.abs() / FINAL_TAU_S).max(-50.0);
-    let v_rel = ship.vel - dest.vel;
-    let v_des = dir * speed;
-    let cmd = ff + (v_des - v_rel) * (1.0 / VELOCITY_TAU_S);
+    // The fastest proper speed from which braking at `brake` still stops within `gap`:
+    // relativistic stopping distance is (c²/a)(γ − 1).
+    let stop_u = |d: f64| C * ((1.0 + brake * d / (C * C)).powi(2) - 1.0).max(0.0).sqrt();
+    let speed = gap.signum() * stop_u(gap.abs()).min(gap.abs() / FINAL_TAU_S).max(-50.0);
+    // Work in proper velocity, which is what thrust changes. Destinations move slowly,
+    // so subtracting proper velocities is an adequate relative measure.
+    let u_rel = proper_velocity(ship.vel) - proper_velocity(dest.vel);
+    let cmd = ff + (dir * speed - u_rel) * (1.0 / VELOCITY_TAU_S);
     // Bang-bang estimate from the current closing speed.
-    let u = v_rel.dot(dir);
+    let u = u_rel.dot(dir);
     let a = brake.max(1e-12);
     let d = gap.max(0.0);
     let v_peak = (a * d + 0.5 * u * u).sqrt();
     let eta = ((2.0 * v_peak - u) / a).max(0.0);
-    Approach { thrust: clamp(cmd, max_accel), eta, gap, rel_speed: v_rel.length() }
+    Approach { thrust: clamp(cmd, max_accel), eta, gap, rel_speed: (ship.vel - dest.vel).length() }
 }
 
 /// Guidance to stop at a destination that moves with a celestial frame.
@@ -117,6 +123,19 @@ pub fn move_to(ship: State, dest: State, ff: Vec2, max_accel: f64) -> Approach {
 /// Guidance to close on a target, match its velocity and hold station at `STANDOFF_KM`.
 pub fn rendezvous(ship: State, target: State, ff: Vec2, max_accel: f64) -> Approach {
     approach(ship, target, ff, STANDOFF_KM, INTERCEPT_BRAKE_FRACTION * max_accel, max_accel)
+}
+
+pub fn keep_range(ship:State,target:State,ff:Vec2,range:f64,max_accel:f64)->Approach {
+    approach(ship,target,ff,range,INTERCEPT_BRAKE_FRACTION*max_accel,max_accel)
+}
+
+/// Burn toward the earliest predicted encounter. No braking or velocity matching.
+pub fn flyby(ship: State, target: State, target_accel: Vec2, max_accel: f64) -> Approach {
+    let delta = target.pos - ship.pos;
+    let (direction, eta) = crate::missile::intercept_aim(
+        ship, target, target_accel, max_accel, crate::params::FLYBY_HORIZON_S.value,
+    ).unwrap_or((delta.normalized(), f64::INFINITY));
+    Approach { thrust: direction * max_accel, eta, gap: delta.length(), rel_speed: (target.vel - ship.vel).length() }
 }
 
 /// How far ahead the collision check looks, s.
@@ -203,6 +222,20 @@ fn clamp(v: Vec2, max: f64) -> Vec2 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn range_orders_close_withdraw_and_hold_without_overspeed() {
+        let target=State {pos:Vec2::ZERO,vel:Vec2::ZERO};
+        for (distance,sign) in [(200_000.0,-1.0),(50_000.0,1.0)] {
+            let ship=State {pos:Vec2::new(distance,0.0),vel:Vec2::ZERO};
+            let r=keep_range(ship,target,Vec2::ZERO,100_000.0,1.0);
+            assert!(r.thrust.x*sign>0.0);
+            assert!(r.thrust.length()<=1.0+1e-9);
+        }
+        let ship=State {pos:Vec2::new(100_000.0,0.0),vel:Vec2::ZERO};
+        assert_eq!(keep_range(ship,target,Vec2::ZERO,100_000.0,1.0).thrust,Vec2::ZERO);
+        let closing=State {vel:Vec2::new(-100.0,0.0),..ship};
+        assert!(keep_range(closing,target,Vec2::ZERO,100_000.0,1.0).thrust.x>0.0);
+    }
     use crate::scenario::home_system;
     use crate::units::G0;
 
@@ -257,6 +290,25 @@ mod tests {
         assert!((flip / optimal - 0.5).abs() < 0.1, "flip at {flip} s of {optimal} s");
         assert!(arrived < 1.25 * optimal, "arrived at {arrived} s, optimum {optimal} s");
         assert!((ship.pos - dest.pos).length() < 1.0 && ship.vel.length() < 0.01, "stays put");
+    }
+
+    #[test]
+    fn a_relativistic_move_still_stops_on_the_point() {
+        use crate::kinematics::advance;
+        use crate::units::{AU, C};
+        let a = 100.0 * G0;
+        let dest = State { pos: Vec2::new(20.0 * AU, 0.0), vel: Vec2::ZERO };
+        let mut ship = State { pos: Vec2::ZERO, vel: Vec2::ZERO };
+        let (dt, mut t, mut peak) = (10.0, 0.0, 0.0f64);
+        while t < 48.0 * 3600.0 {
+            let m = move_to(ship, dest, Vec2::ZERO, a);
+            ship = advance(ship, m.thrust, dt);
+            peak = peak.max(ship.vel.length());
+            t += dt;
+        }
+        assert!(peak > 0.15 * C, "peak {} c", peak / C);
+        assert!((ship.pos - dest.pos).length() < 5.0, "off by {} km", (ship.pos - dest.pos).length());
+        assert!(ship.vel.length() < 0.01);
     }
 
     #[test]

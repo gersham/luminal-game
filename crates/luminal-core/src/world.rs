@@ -16,6 +16,15 @@ use crate::scheduler::Scheduler;
 use crate::sensors::{self, bearing_of};
 use crate::units::AU;
 use std::collections::BTreeMap;
+#[path = "refinements.rs"]
+mod refinements;
+pub use refinements::{CombatEvent, CombatKind};
+#[path = "calibration.rs"]
+pub mod calibration;
+#[path = "point_defence.rs"]
+pub mod point_defence;
+#[path = "interceptor.rs"]
+pub mod interceptor;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct FactionId(pub u8);
@@ -26,8 +35,15 @@ pub struct BodyId(pub u32);
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BodyKind {
     Ship,
+    Station,
     Probe,
     Missile,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ShipClass { Frigate, Battleship, Cruiser, Transport }
+impl ShipClass {
+    pub fn designator(self)->&'static str {match self {Self::Frigate=>"FF",Self::Battleship=>"BB",Self::Cruiser=>"CV",Self::Transport=>"TR"}}
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -45,6 +61,10 @@ pub enum Order {
     Orbit { celestial: usize, radius: f64, sense: f64 },
     /// Close on the target, match its velocity and hold station nearby.
     Intercept(InterceptTarget),
+    /// Maximum-thrust encounter, then coast through without matching velocity.
+    Flyby(InterceptTarget),
+    KeepRange(InterceptTarget,f64),
+    Evade(InterceptTarget),
     /// Fly to a point in minimal time and stop there. The point is `offset` from
     /// celestial `frame` and moves with it.
     MoveTo { frame: usize, offset: Vec2 },
@@ -55,6 +75,7 @@ pub enum AutopilotStatus {
     Manoeuvring,
     Closing { eta: f64, range: f64 },
     Holding,
+    Passed,
     /// The target contact has no track (bearing only) or is gone; coasting.
     NoTrack,
 }
@@ -67,12 +88,23 @@ pub struct Autopilot {
 
 #[derive(Clone, Debug)]
 pub struct Body {
+    pub ship_class: Option<ShipClass>,
+    pub damage:crate::damage::Damage,
+    pub interceptor_battery:Option<interceptor::Battery>,
+    pub interceptor:Option<interceptor::Interceptor>,
+    pub point_defence: Option<point_defence::PointDefence>,
+    pub has_screen: bool,
+    pub baseline_emission_factor: f64,
+    pub sensors: sensors::SensorSuite,
+    pub probes: u32,
+    pub probe_burn_until: Option<f64>,
+    probe_ping_at: f64,
+    pub thermal: crate::thermal::Thermal,
+    launch_generation: u64,
     pub name: String,
     pub kind: BodyKind,
     pub faction: FactionId,
     pub trajectory: Trajectory,
-    /// Pinging once per sensor frame.
-    pub active_sensor: bool,
     /// Manual thrust order, used when no autopilot order is active.
     pub commanded: Vec2,
     pub autopilot: Option<Autopilot>,
@@ -80,10 +112,31 @@ pub struct Body {
     pub avoidance: Avoidance,
     /// Cap on autopilot thrust, km/s². Lower is quieter: drive emission scales with it.
     pub drive_limit: f64,
-    /// Missiles left to launch.
-    pub magazine: u32,
+    /// Remaining missiles by payload, indexed by Payload::index().
+    pub magazine: [u32; 2],
+    /// Independent launcher cooldowns, indexed by payload.
+    pub missile_ready_at: [f64; 2],
+    pub missile_queued: [u32; 2],
+    missile_queue_ready_at: [f64; 2],
     /// Present on missiles.
     pub missile: Option<MissileState>,
+    /// Screen raised: incoming energy fills it before reaching the hull.
+    pub screen_up: bool,
+    /// Energy stored in the radiating field reservoir, J.
+    pub screen_j: f64,
+    /// Energy the hull has taken, J. The ship is lost at `HULL_INTEGRITY_J`.
+    pub hull_j: f64,
+    /// Started with weapons aboard: a combatant rather than, say, a transport.
+    pub armed: bool,
+    pub controllable: bool,
+    pub beam_ready_at: f64,
+    pub beam_target: Option<ContactId>,
+    pub beam_auto: bool,
+    beam_order: u64,
+    /// Energy emitted by this ship's beam weapon, drawn from its capacitor.
+    pub beam_emitted_j: f64,
+    /// Own fire-control solution, not a report of a hit.
+    pub last_beam: Option<(f64, Vec2, Vec2)>,
 }
 
 /// What a missile carries and knows. `target_body` is truth used only by the world to
@@ -98,32 +151,76 @@ pub struct MissileState {
     pub dv_left: f64,
     /// Remaining initial-burn delta-v, km/s.
     pub burn_left: f64,
+    /// Launch bearing from received evidence, never target truth.
+    pub search_heading: Vec2,
+    pub active_seeker: bool,
     pub seeker: Option<Seeker>,
+    pub local_fix: Option<sensors::SeekerFix>,
     pub last_guide: f64,
+    /// Closest pass to the target so far, km (truth, for spending a missile that flew by).
+    pub(crate) closest: f64,
     pub(crate) target_body: BodyId,
+    /// Where it was launched, and its aim error per km flown (truth): the spread that
+    /// makes long shots less accurate.
+    pub(crate) launched_at: Vec2,
+    pub(crate) aim_drift: Vec2,
 }
 
 impl Body {
+    pub fn installed_systems(&self)->[bool;15] {
+        use crate::damage::System as S;
+        std::array::from_fn(|i|match S::ALL[i] {
+            S::Passive=>self.sensors.passive,S::Active=>self.sensors.active,S::Direction=>self.sensors.direction_finding,
+            S::Screens=>self.has_screen,S::PdMissiles=>self.interceptor_battery.is_some(),S::PdLaser=>self.point_defence.is_some(),
+            S::Beam|S::Launcher=>self.armed,S::Propulsion=>self.kind==BodyKind::Ship,
+            _=>matches!(self.kind,BodyKind::Ship|BodyKind::Station),
+        })
+    }
+    pub fn system_effectiveness(&self,system:crate::damage::System)->f64 {
+        if matches!(self.kind,BodyKind::Missile|BodyKind::Probe) {return 1.0;}
+        if !self.installed_systems()[system as usize] {return 0.0;}
+        self.damage.effectiveness(system)
+    }
+    pub fn operating_effectiveness(&self,system:crate::damage::System)->f64 {
+        use crate::damage::System as S;
+        if system.independent_power() {return self.system_effectiveness(system);}
+        self.system_effectiveness(system)*self.system_effectiveness(S::Power)
+            *self.system_effectiveness(S::Mind)
+    }
+    pub fn advance_thermal(&mut self,t:f64) {
+        use crate::damage::System as S;
+        let power=self.system_effectiveness(S::Power);
+        let screen=self.operating_effectiveness(S::Screens);
+        self.thermal.advance_scaled(t,self.screen_up && screen>0.0,&mut self.screen_j,power,screen);
+    }
+    pub fn sensor_effectiveness(&self)->[f64;2] {
+        [self.operating_effectiveness(crate::damage::System::Passive),self.operating_effectiveness(crate::damage::System::Direction)]
+    }
     pub fn alive_at(&self, t: f64) -> bool {
         self.trajectory.state_at(t).is_some()
     }
 
     pub fn max_accel(&self) -> f64 {
-        crate::units::G0
+        self.operating_effectiveness(crate::damage::System::Propulsion)*crate::units::G0
             * match self.kind {
-                BodyKind::Ship => SHIP_MAX_ACCEL_G.value,
+                BodyKind::Ship => SHIP_MAX_ACCEL_G.value*self.damage.hull_thrust_factor(),
+                BodyKind::Station => 0.0,
                 BodyKind::Probe => PROBE_MAX_ACCEL_G.value,
-                BodyKind::Missile => MISSILE_MAX_ACCEL_G.value,
+                BodyKind::Missile => if self.interceptor.is_some() {INTERCEPTOR_ACCEL_G.value} else {self.missile.map_or(MISSILE_MAX_ACCEL_G.value,|m|m.payload.acceleration_g())},
             }
     }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum OrderError {
+    PowerOrHeat,
     Destroyed,
     NoTrack,
     InvalidTarget,
     EmptyMagazine,
+    LauncherRecharging,
+    BeamRecharging,
+    Unarmed,
 }
 
 /// How a body came to an end. Truth only.
@@ -133,8 +230,24 @@ pub enum LossCause {
     Impact(usize),
     /// Killed by a missile's payload.
     Missile { payload: Payload, missile: BodyId },
+    ShipBeam { shooter: BodyId },
+    PointDefence { shooter: BodyId },
+    Interceptor { missile:BodyId },
     /// A missile that fired, detonated or missed and is spent.
     Expended,
+}
+
+/// A payload landing on a body. Truth only.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Hit {
+    pub body: BodyId,
+    pub t: f64,
+    pub payload: Payload,
+    /// Source body: a missile, or the firing ship for a direct beam.
+    pub missile: BodyId,
+    /// Energy delivered, and how much of it the screen stored, J.
+    pub energy_j: f64,
+    pub screened_j: f64,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -166,14 +279,18 @@ pub struct Outcome {
 }
 
 /// Something a faction has noticed that deserves the player's attention. Raised only
-/// from that faction's own information (own losses are a PLACEHOLDER: known at once).
+/// from that faction's received information.
 #[derive(Clone, Debug, PartialEq)]
 pub enum AlertKind {
+    ContactLost(ContactId),
     NewContact(ContactId),
     ShipLost(BodyId),
     CollisionWarning(BodyId),
     CollisionUnavoidable(BodyId),
     OrderComplete(BodyId),
+    /// One of our ships reported a hit and survived.
+    Hit(BodyId),
+    LaunchCancelled(BodyId),
     GameOver,
 }
 
@@ -193,14 +310,23 @@ pub struct BodySpec {
     pub state: State,
     /// Thrust held through the prehistory and onward, km/s².
     pub thrust: Vec2,
+    /// Initial magazine depth for each missile payload.
     pub magazine: u32,
 }
 
 #[derive(Clone, Copy, Debug)]
 enum Event {
+    InterceptorGuide(BodyId),
+    PointDefence(BodyId),
+    PointDefencePulse(point_defence::Pulse),
+    TacticalFrame,
+    BeamControl(BodyId, u64),
     Step(BodyId),
     SensorFrame,
     MissileGuide(BodyId),
+    QueuedLaunch(BodyId, ContactId, Payload, u64),
+    /// A missile's commanded thrust takes effect after its response time.
+    MissileThrust(BodyId, Vec2),
     /// A laser missile's beam, resolved when its light reaches the target.
     Beam(Beam),
 }
@@ -211,17 +337,25 @@ struct Beam {
     target: BodyId,
     front: Front,
     direction: Vec2,
+    /// None for the pre-existing missile laser model.
+    ship_energy_j: f64,
 }
 
 #[derive(Clone, Debug)]
 struct Ping {
+    search_heading:Option<Vec2>,
+    power_w: f64,
     emitter: BodyId,
+    /// Signature at emission; later thrust/sensor changes cannot recall this light.
+    signature_w: f64,
     front: Front,
     pending: Vec<BodyId>,
 }
 
 #[derive(Clone, Debug)]
 struct Echo {
+    target:BodyId,
+    power_w: f64,
     emitter: BodyId,
     front: Front,
     out_km: f64,
@@ -235,10 +369,15 @@ struct Relay {
 }
 
 pub struct World {
+    profile:Option<SimulationProfile>,
+    pub probes_enabled:bool,
+    interceptor_solutions:BTreeMap<(BodyId,BodyId),sensors::SeekerFix>,
+    refinement: refinements::Refinements,
     time: f64,
     pub system: System,
     pub bodies: Vec<Body>,
     pub losses: Vec<Loss>,
+    pub hits: Vec<Hit>,
     pub objective: Option<Objective>,
     pub outcome: Option<Outcome>,
     pub alerts: Vec<Alert>,
@@ -246,14 +385,18 @@ pub struct World {
     last_step: Vec<f64>,
     last_frame: f64,
     pings: Vec<Ping>,
+    /// Emitted pulses for the owning faction's round-trip range display.
+    pub ping_emissions: Vec<(BodyId, Front)>,
     echoes: Vec<Echo>,
     relays: Vec<Relay>,
     perceptions: BTreeMap<FactionId, Perception>,
-    /// Truth-side association of bodies to each faction's contact ids. PLACEHOLDER:
-    /// perfect association; real data association is not modelled.
+    /// Established gameplay assumption: reports uniquely associate with a source.
+    /// Position and velocity remain uncertain; association does not expose truth.
     association: BTreeMap<(FactionId, BodyId), ContactId>,
+    reverse_association:BTreeMap<(FactionId,ContactId),BodyId>,
     rng: Rng,
 }
+
 
 /// Pings older than this radius are discarded.
 const MAX_FRONT_RADIUS_KM: f64 = 100.0 * AU;
@@ -267,17 +410,46 @@ impl World {
             .map(|spec| {
                 let trajectory = ballistic_history(&system, spec.state, spec.thrust, history_s);
                 Body {
+                    ship_class: (spec.kind==BodyKind::Ship).then_some(ShipClass::Frigate),
+                    interceptor_battery:None,interceptor:None,
+                    point_defence: None,
+                    has_screen: spec.kind==BodyKind::Ship,
+                    baseline_emission_factor: if spec.kind==BodyKind::Station {STATION_EMISSION_FACTOR.value} else {1.0},
+                    sensors: match spec.kind {
+                        BodyKind::Missile=>sensors::SensorSuite::MISSILE,
+                        BodyKind::Station=>sensors::SensorSuite {passive:false,active:false,direction_finding:true},
+                        _=>sensors::SensorSuite::FULL,
+                    },
+                    probes: if spec.kind==BodyKind::Ship && spec.magazine>0 { PROBE_INVENTORY.value as u32 } else { 0 },
+                    probe_burn_until: None,
+                    probe_ping_at: 0.0,
+                    damage:crate::damage::Damage::default(),
+                    thermal: crate::thermal::Thermal { capacitor_j: if spec.kind==BodyKind::Station {0.0} else {BEAM_CAPACITOR_J.value}, ..Default::default() },
+                    launch_generation: 0,
                     name: spec.name,
                     kind: spec.kind,
                     faction: spec.faction,
                     trajectory,
-                    active_sensor: false,
                     commanded: spec.thrust,
                     autopilot: None,
                     avoidance: Avoidance { thrust: spec.thrust, active: false, impossible: false },
                     drive_limit: f64::INFINITY,
-                    magazine: spec.magazine,
+                    armed: spec.magazine > 0,
+                    controllable: spec.kind == BodyKind::Ship,
+                    beam_ready_at: 0.0,
+                    beam_target: None,
+                    beam_auto: false,
+                    beam_order: 0,
+                    beam_emitted_j: 0.0,
+                    last_beam: None,
+                    magazine: [spec.magazine; 2],
+                    missile_ready_at: [0.0; 2],
+                    missile_queued: [0; 2],
+                    missile_queue_ready_at: [0.0; 2],
                     missile: None,
+                    screen_up: false,
+                    screen_j: 0.0,
+                    hull_j: 0.0,
                 }
             })
             .collect();
@@ -286,23 +458,31 @@ impl World {
             scheduler.schedule(0.0, Event::Step(BodyId(i as u32)));
         }
         scheduler.schedule(0.0, Event::SensorFrame);
+        scheduler.schedule(0.0, Event::TacticalFrame);
         let perceptions = bodies.iter().map(|b| (b.faction, Perception::new(b.faction))).collect();
         let mut world = Self {
+            profile:std::env::var_os("LUMINAL_PROFILE").map(|_|SimulationProfile::default()),
+            probes_enabled:true,
+            interceptor_solutions:BTreeMap::new(),
+            refinement: refinements::Refinements::with_seed(seed),
             time: 0.0,
             system,
             last_step: vec![0.0; bodies.len()],
             bodies,
             losses: vec![],
+            hits: vec![],
             objective: None,
             outcome: None,
             alerts: vec![],
             scheduler,
             last_frame: -SENSOR_FRAME_S.value,
             pings: vec![],
+            ping_emissions: vec![],
             echoes: vec![],
             relays: vec![],
             perceptions,
             association: BTreeMap::new(),
+            reverse_association:BTreeMap::new(),
             rng: Rng::stream(seed, 1),
         };
         world.advance_to(0.0);
@@ -325,13 +505,18 @@ impl World {
     pub fn contact_truth(&self, f: FactionId) -> BTreeMap<ContactId, BodyId> {
         self.association.iter().filter(|((ff, _), _)| *ff == f).map(|((_, b), c)| (*c, *b)).collect()
     }
+    pub(crate) fn body_for_contact(&self,f:FactionId,c:ContactId)->Option<BodyId> {
+        self.reverse_association.get(&(f,c)).copied()
+    }
 
-    /// The ship that receives and decides for a faction: its lowest-numbered live ship.
+    /// One assigned command ship; destruction never transfers player command.
     pub fn decider(&self, f: FactionId, t: f64) -> Option<BodyId> {
         self.bodies
             .iter()
             .enumerate()
-            .find(|(_, b)| b.faction == f && b.kind == BodyKind::Ship && b.alive_at(t))
+            .filter(|(_, b)| b.faction == f && b.kind == BodyKind::Ship && b.controllable)
+            .min_by_key(|(i,b)| (!b.controllable, !b.armed, *i))
+            .filter(|(_,b)| b.alive_at(t))
             .map(|(i, _)| BodyId(i as u32))
     }
 
@@ -364,6 +549,27 @@ impl World {
 
     /// Close on a target and hold station near it.
     pub fn set_intercept(&mut self, id: BodyId, target: InterceptTarget) -> Result<(), OrderError> {
+        self.set_ship_approach(id, target, true)
+    }
+
+    pub fn set_flyby(&mut self, id: BodyId, target: InterceptTarget) -> Result<(), OrderError> {
+        self.set_ship_approach(id, target, false)
+    }
+
+    pub fn set_tactical_range(&mut self,id:BodyId,target:InterceptTarget,range:Option<f64>)->Result<(),OrderError> {
+        let faction=self.live_body_mut(id)?.faction;
+        if range.is_some_and(|r|!r.is_finite() || r<0.0) {return Err(OrderError::InvalidTarget);}
+        let valid=match target {
+            InterceptTarget::Contact(c)=>self.perceptions.get(&faction).is_some_and(|p|p.contacts.contains_key(&c)),
+            InterceptTarget::Own(other)=>other!=id && self.body(other).is_some_and(|b|b.faction==faction && b.alive_at(self.time)),
+        };
+        if !valid {return Err(OrderError::InvalidTarget);}
+        let order=range.map_or(Order::Evade(target),|r|Order::KeepRange(target,r));
+        self.live_body_mut(id)?.autopilot=Some(Autopilot {order,status:AutopilotStatus::Manoeuvring});
+        self.guide(id);Ok(())
+    }
+
+    fn set_ship_approach(&mut self, id: BodyId, target: InterceptTarget, match_velocity: bool) -> Result<(), OrderError> {
         let t = self.time;
         let faction = self.live_body_mut(id)?.faction;
         match target {
@@ -374,13 +580,13 @@ impl World {
                 }
             }
             InterceptTarget::Contact(c) => {
-                let has_track = self.perceptions.get(&faction).and_then(|p| p.contacts.get(&c)).is_some_and(|c| c.track.is_some());
+                let has_track = self.received_picture(id).and_then(|p| p.contacts.get(&c)).is_some_and(|c| c.resolved && c.track.is_some() && t-c.last.decider_received_at<=TRACK_STALE_S.value);
                 if !has_track {
                     return Err(OrderError::NoTrack);
                 }
             }
         }
-        let order = Order::Intercept(target);
+        let order = if match_velocity { Order::Intercept(target) } else { Order::Flyby(target) };
         self.live_body_mut(id)?.autopilot = Some(Autopilot { order, status: AutopilotStatus::Manoeuvring });
         self.guide(id);
         Ok(())
@@ -425,40 +631,99 @@ impl World {
     }
 
     /// Launch a missile from `id` at one of its faction's tracked contacts.
-    pub fn launch(&mut self, id: BodyId, target: ContactId, payload: Payload) -> Result<BodyId, OrderError> {
+    pub fn queue_launch(&mut self, id: BodyId, target: ContactId, payload: Payload) -> Result<(), OrderError> {
+        if payload==Payload::Beam {return Err(OrderError::InvalidTarget);}
         let t = self.time;
         let b = self.live_body_mut(id)?;
+        if b.kind != BodyKind::Ship { return Err(OrderError::InvalidTarget); }
+        let effectiveness=b.operating_effectiveness(crate::damage::System::Launcher);
+        if effectiveness==0.0 {return Err(OrderError::PowerOrHeat);}
+        if b.magazine[payload.index()] <= b.missile_queued[payload.index()] {
+            return Err(OrderError::EmptyMagazine);
+        }
+        let when = t.max(b.missile_ready_at[payload.index()]).max(b.missile_queue_ready_at[payload.index()]);
+        if !self.received_picture(id).is_some_and(|p|p.contacts.contains_key(&target)) {
+            return Err(OrderError::NoTrack);
+        }
+        if when <= t {
+            self.launch(id, target, payload)?;
+        } else {
+            self.bodies[id.0 as usize].missile_queued[payload.index()] += 1;
+            self.scheduler.schedule(when, Event::QueuedLaunch(id, target, payload, self.bodies[id.0 as usize].launch_generation));
+        }
+        self.bodies[id.0 as usize].missile_queue_ready_at[payload.index()] = when + payload.launch_interval()/effectiveness;
+        Ok(())
+    }
+
+    /// Execute a launch now; queued launches use this same rate and inventory gate.
+    pub fn launch(&mut self, id: BodyId, target: ContactId, payload: Payload) -> Result<BodyId, OrderError> {
+        if payload==Payload::Beam {return Err(OrderError::InvalidTarget);}
+        let t = self.time;
+        let b = self.live_body_mut(id)?;
+        let effectiveness=b.operating_effectiveness(crate::damage::System::Launcher);
+        if effectiveness==0.0 {return Err(OrderError::PowerOrHeat);}
         if b.kind != BodyKind::Ship {
             return Err(OrderError::InvalidTarget);
         }
-        if b.magazine == 0 {
+        if b.magazine[payload.index()] == 0 {
             return Err(OrderError::EmptyMagazine);
         }
-        let faction = b.faction;
-        let has_track = self.perceptions.get(&faction).and_then(|p| p.contacts.get(&target)).is_some_and(|c| c.track.is_some());
-        if !has_track {
-            return Err(OrderError::NoTrack);
+        if t < b.missile_ready_at[payload.index()] {
+            return Err(OrderError::LauncherRecharging);
         }
-        let target_body = *self.contact_truth(faction).get(&target).ok_or(OrderError::InvalidTarget)?;
+        let faction = b.faction;
+        let contact=self.received_picture(id).and_then(|p|p.contacts.get(&target)).ok_or(OrderError::NoTrack)?;
+        let bearing=match contact.last.measurement {
+            Measurement::Bearing {bearing,..}|Measurement::BearingRange {bearing,..}=>bearing,
+        };
+        let search_heading=Vec2::new(bearing.cos(),bearing.sin());
+        let target_body = self.body_for_contact(faction,target).ok_or(OrderError::InvalidTarget)?;
 
         let fired = self.bodies.iter().filter(|m| m.missile.is_some_and(|ms| ms.launcher == id)).count() + 1;
         let b = &mut self.bodies[id.0 as usize];
-        b.magazine -= 1;
+        b.magazine[payload.index()] -= 1;
+        b.missile_ready_at[payload.index()] = t + payload.launch_interval()/effectiveness;
         let name = format!("{} M{fired}", b.name);
         let start = b.trajectory.state_at(t).expect("alive");
-        let dv = MISSILE_DELTA_V_KMS.value;
+        let dv = payload.delta_v();
+        let aim_drift = Vec2::new(self.rng.gaussian(), self.rng.gaussian()) * MISSILE_NAV_DRIFT.value;
         let mid = BodyId(self.bodies.len() as u32);
         self.bodies.push(Body {
+            ship_class: None,
+            damage:crate::damage::Damage::default(),
+            interceptor_battery:None,interceptor:None,
+            point_defence: None,
+            has_screen: false,
+            baseline_emission_factor: 1.0,
+            sensors: sensors::SensorSuite::MISSILE,
+            probes: 0,
+            probe_burn_until: None,
+            probe_ping_at: 0.0,
+            thermal: crate::thermal::Thermal { last_t: t, ..Default::default() },
+            launch_generation: 0,
             name,
             kind: BodyKind::Missile,
             faction,
             trajectory: Trajectory::new(t, start),
-            active_sensor: false,
             commanded: Vec2::ZERO,
             autopilot: None,
             avoidance: Avoidance { thrust: Vec2::ZERO, active: false, impossible: false },
             drive_limit: f64::INFINITY,
-            magazine: 0,
+            magazine: [0; 2],
+            missile_ready_at: [0.0; 2],
+            missile_queued: [0; 2],
+            missile_queue_ready_at: [0.0; 2],
+            armed: true,
+            controllable: false,
+            beam_ready_at: 0.0,
+            beam_target: None,
+            beam_auto: false,
+            beam_order: 0,
+            beam_emitted_j: 0.0,
+            last_beam: None,
+            screen_up: false,
+            screen_j: 0.0,
+            hull_j: 0.0,
             missile: Some(MissileState {
                 payload,
                 target,
@@ -466,12 +731,19 @@ impl World {
                 phase: Phase::Burn,
                 dv_left: dv,
                 burn_left: dv * MISSILE_BURN_FRACTION.value,
+                search_heading,
+                active_seeker: false,
                 seeker: None,
+                local_fix: None,
                 last_guide: t,
+                closest: f64::INFINITY,
                 target_body,
+                launched_at: start.pos,
+                aim_drift,
             }),
         });
         self.last_step.push(t);
+        self.report_launch(mid);
         self.scheduler.schedule(t, Event::Step(mid));
         self.scheduler.schedule(t, Event::MissileGuide(mid));
         Ok(mid)
@@ -484,100 +756,199 @@ impl World {
         let i = id.0 as usize;
         let Some(me) = self.bodies[i].trajectory.state_at(t) else { return };
         let Some(mut ms) = self.bodies[i].missile else { return };
-        let faction = self.bodies[i].faction;
+        let previous_guide = ms.last_guide;
         let max_accel = self.bodies[i].max_accel();
         let target_traj = self.bodies[ms.target_body.0 as usize].trajectory.clone();
+        if t-self.bodies[i].trajectory.start()>=ms.payload.endurance() {
+            self.record_combat(t,me.pos,CombatKind::MissileMiss,Some(id),None);
+            self.destroy(id,t,LossCause::Expended);
+            return;
+        }
 
         // Fuel spent since the last cycle.
-        let spent = self.bodies[i].trajectory.last().thrust.length() * (t - ms.last_guide);
+        let spent = self.bodies[i].trajectory.thrust_impulse(ms.last_guide, t);
         ms.dv_left = (ms.dv_left - spent).max(0.0);
-        if ms.phase == Phase::Burn {
-            ms.burn_left = (ms.burn_left - spent).max(0.0);
-        }
+        ms.burn_left = (ms.burn_left - spent).max(0.0);
 
-        // Did the last interval bring us close enough? Resolved against truth.
+        // Truth resolves physical pellet intersections only after local acquisition.
+        // It must not reveal a closest pass to guidance or proximity fuses.
         let missile_traj = &self.bodies[i].trajectory;
         let sep = |tau: f64| Some(target_traj.state_at(tau)?.pos - missile_traj.state_at(tau)?.pos);
-        if t > ms.last_guide
+        if ms.payload==Payload::Kinetic && ms.local_fix.is_some() && t > ms.last_guide
             && let Some((tc, d)) = missile::closest_approach(ms.last_guide, t, sep)
         {
-            let lethal = match ms.payload {
-                Payload::Kinetic => SHIP_RADIUS_KM.value,
-                Payload::Nuclear => NUCLEAR_LETHAL_KM.value,
-                Payload::Laser => 0.0,
-            };
-            if d < lethal {
-                self.destroy(ms.target_body, tc, LossCause::Missile { payload: ms.payload, missile: id });
-                self.destroy(id, tc, LossCause::Expended);
-                return;
+            match ms.payload {
+                Payload::Kinetic if d < KINETIC_PATTERN_KM.value => {
+                    let v = match (target_traj.state_at(tc), missile_traj.state_at(tc)) {
+                        (Some(a), Some(b)) => (a.vel - b.vel).length(),
+                        _ => 0.0,
+                    };
+                    self.destroy(id, tc, LossCause::Expended);
+                    self.deliver(ms.target_body, tc, missile::kinetic_energy_j(KINETIC_SHOT_MASS_KG.value, v), Payload::Kinetic, id);
+                    return;
+                }
+                _ => {}
             }
+            ms.closest = ms.closest.min(d);
         }
         ms.last_guide = t;
-
         // What the missile knows: the faction track (datalink) and its own seeker.
         let track = self
-            .perceptions
-            .get(&faction)
+            .received_picture(id)
             .and_then(|p| p.contacts.get(&ms.target))
             .and_then(|c| c.track.as_ref())
             .map(|tr| {
                 let now = tr.at(t, &self.system);
                 (State { pos: now.pos(), vel: now.vel() }, now.accel())
             });
+        // The seeker's view: the target's light-delayed image, when bright enough.
+        // Begin active acquisition before terminal steering, using only received
+        // estimates. Bearing-only shots start blind search thirty seconds out.
+        ms.active_seeker |= ms.phase==Phase::Terminal || track.is_some_and(|(estimate,accel)| {
+            let (eta,_)=missile::zero_effort_miss(me,estimate,accel);
+            (estimate.pos-me.pos).length()<=MISSILE_ACTIVE_RANGE_LS*crate::units::LIGHT_SECOND
+                || (eta>0.0 && eta<=MISSILE_ACTIVE_LEAD_S)
+        }) || (track.is_none() && t-self.bodies[i].trajectory.start()>=MISSILE_BLIND_SEARCH_S);
+        if ms.active_seeker && t>=self.bodies[i].probe_ping_at {
+            self.ping(id);
+            self.bodies[i].probe_ping_at=t+MISSILE_ACTIVE_INTERVAL_S.value;
+        }
+        let search_heading=ms.local_fix.map(|f|f.pos+f.vel*(t-f.t)-me.pos)
+            .or_else(||track.map(|(s,_)|s.pos-me.pos)).unwrap_or(ms.search_heading);
+        ms.search_heading=search_heading.normalized();
         if let Some((t_e, src)) = retarded_state(&target_traj, me.pos, t)
+            && self.bodies[i].sensors.passive
+            && missile::in_search_cone(search_heading,src.pos-me.pos)
             && self.system.occluder(src.pos, t_e, me.pos, t).is_none()
         {
             let kind = self.bodies[ms.target_body.0 as usize].kind;
             let thrust = target_traj.thrust_at(t_e).unwrap_or(Vec2::ZERO);
-            let snr = sensors::intensity(emission_w(kind, thrust), (src.pos - me.pos).length()) / MISSILE_SEEKER_NOISE_FLOOR.value;
+            let target=&self.bodies[ms.target_body.0 as usize];
+            let power=emission_w(kind,target.baseline_emission_factor,thrust)+self.thermal_emission(ms.target_body,t_e);
+            let snr = sensors::intensity(power, (src.pos - me.pos).length()) / MISSILE_SEEKER_NOISE_FLOOR.value;
             if snr >= PASSIVE_DETECT_SNR.value {
-                let (bearing, _) = sensors::measure_bearing(bearing_of(src.pos - me.pos), snr, &mut self.rng);
+                let bearing = sensors::measure_seeker_bearing(bearing_of(src.pos - me.pos), snr, &mut self.rng);
                 ms.seeker = Some(Seeker::update(ms.seeker, t, bearing));
+                let distance=(src.pos-me.pos).length();
+                if distance <= SEEKER_RESOLVE_LS.value*crate::units::LIGHT_SECOND
+                    && ms.local_fix.is_none_or(|fix| t_e-fix.t >= SEEKER_FIX_INTERVAL_S.value) {
+                        let sigma=SEEKER_RANGE_SIGMA_KM.value/snr.sqrt();
+                        let measured_range=(distance+sigma*self.rng.gaussian()).max(0.0);
+                        let fine_bearing=bearing_of(src.pos-me.pos)+LASER_POINTING_RAD.value*self.rng.gaussian();
+                        let observed=me.pos+Vec2::new(fine_bearing.cos(),fine_bearing.sin())*measured_range;
+                        let prior=track.map_or(Vec2::ZERO,|(s,_)|s.vel);
+                        ms.local_fix=Some(sensors::SeekerFix::update(ms.local_fix,t_e,observed,prior));
+                        // Local seeker solutions are also observations for the command
+                        // ship, but only after the return datalink has travelled at c.
+                        let obs=Observation {contact:ms.target,sensor:id,origin:me.pos,emitted_at:t_e,
+                            sensor_received_at:t,decider_received_at:f64::NAN,
+                            measurement:Measurement::BearingRange {bearing:fine_bearing,sigma_bearing:LASER_POINTING_RAD.value,
+                                range:measured_range,sigma_range:sigma},snr,source:Source::Emission};
+                        self.relays.push(Relay {faction:self.bodies[i].faction,front:Front {origin:me.pos,t_emit:t},obs});
+                }
             }
         }
 
-        let Some((est, est_accel)) = track else {
-            // Nothing to steer by: coast and look again soon.
-            self.set_missile(i, ms, Vec2::ZERO, 1.0);
+        let local=ms.local_fix.filter(|fix| t-fix.t <= SEEKER_RESOLVE_LS.value+2.0*SEEKER_FIX_INTERVAL_S.value)
+            .map(|fix| (State {pos:fix.pos+fix.vel*(t-fix.t),vel:fix.vel},Vec2::ZERO));
+        let Some((mut est, est_accel)) = local.or(track) else {
+            // A bearing-only launch searches down the measured line of sight.
+            // No fictional range/velocity is supplied to the fuse or guidance.
+            if let Some(seeker)=ms.seeker {
+                ms.search_heading=Vec2::new(seeker.bearing.cos(),seeker.bearing.sin());
+                ms.phase=Phase::Terminal;
+            } else if ms.burn_left<=1e-9 {ms.phase=Phase::Terminal;}
+            let thrust=if ms.burn_left>0.0 {
+                ms.search_heading*max_accel.min(ms.burn_left).min(ms.dv_left)
+            } else {Vec2::ZERO};
+            self.set_missile(i, ms, thrust, 1.0);
             return;
         };
+        // The fuse must also work when the target has ceased emitting (for example,
+        // the lead warhead in a salvo destroyed it). Use the missile's received track
+        // unconditionally, not an omniscient "target dead" switch. Navigation drift
+        // biases steering below, but must not move the fuse's estimate of the target.
+        let mut estimated_pass = false;
+        // A noisy initial velocity fit is not a closest pass. Arm the estimated
+        // fuse only after clearing the launch platform and reaching the target.
+        let fuse_armed=(me.pos-ms.launched_at).length()>NUCLEAR_AOE_KM.value*2.0;
+        if t > previous_guide && fuse_armed && (local.is_some() || ms.phase==Phase::Terminal) {
+            let target_at = |tau: f64| {
+                let dt = tau - t;
+                State { pos: est.pos + est.vel * dt + est_accel * (0.5 * dt * dt), vel: est.vel + est_accel * dt }
+            };
+            let mt = &self.bodies[i].trajectory;
+            let radial = |tau: f64| mt.state_at(tau).map(|m| {
+                let target = target_at(tau);
+                (target.pos - m.pos).dot(target.vel - m.vel)
+            });
+            if radial(previous_guide).is_some_and(|r| r < 0.0)
+                && radial(t).is_some_and(|r| r >= 0.0)
+                && let Some((tc, _)) = missile::closest_approach(previous_guide, t, |tau| {
+                    Some(target_at(tau).pos - mt.state_at(tau)?.pos)
+                })
+            {
+                estimated_pass = true;
+                if ms.payload == Payload::Nuclear && local.is_some() {
+                    let at = mt.state_at(tc).unwrap().pos;
+                    self.destroy(id, tc, LossCause::Expended);
+                    self.detonate(id, tc, at);
+                    return;
+                }
+            }
+        }
+        // Aim error grows with distance flown: the longer the shot, the wider the spread.
+        if local.is_none() { est.pos = est.pos + ms.aim_drift * (me.pos - ms.launched_at).length(); }
         let (t_go, zem) = missile::zero_effort_miss(me, est, est_accel);
+        if std::env::var("LUMINAL_TRACE2").is_ok() {
+            let truth = target_traj.state_at(t).map(|s| s.pos);
+            eprintln!("TR t {t:.0} phase {:?} t_go {t_go:.0} zem {:.0} est_err {:.0} dv {:.0} accel_g {:.1}", ms.phase, zem.length(), truth.map_or(-1.0, |p| (p - est.pos).length()), ms.dv_left, est_accel.length() / crate::units::G0);
+        }
         let rel = est.pos - me.pos;
         let range = rel.length();
         let closing = -(est.vel - me.vel).dot(rel.normalized());
 
-        // Passed the target: spent.
-        if t_go <= 0.0 && closing < 0.0 && ms.phase != Phase::Burn {
-            self.destroy(id, t, LossCause::Expended);
-            return;
+        // A terminal missile with an opening range has completed its attack.
+        let receding = t_go <= 0.0 && closing < 0.0;
+        if std::env::var("LUMINAL_TRACE").is_ok() {
+            let tr = target_traj.state_at(t).map_or(0.0, |s| (s.pos - me.pos).length());
+            if tr < 60.0 {
+                let tb = target_traj.state_at(t).map_or(0.0, |s| bearing_of(s.pos - me.pos));
+                eprintln!("    true bearing {tb:.4} seeker bearing {:?} missile vel {:?} target vel {:?}", ms.seeker.map(|s| s.bearing), me.vel, target_traj.state_at(t).map(|s| s.vel));
+            }
+            if tr < 3000.0 {
+                eprintln!("    t {t:.3} {:?} true {tr:.1} est {range:.1} t_go {t_go:.2} closing {closing:.1} seeker {:?} thrust {:.0} g", ms.phase, ms.seeker.map(|s| (s.t == t, s.fit_rate(0.2))), self.bodies[i].trajectory.last().thrust.length() / crate::units::G0);
+            }
         }
-
+        if std::env::var("LUMINAL_DEBUG").is_ok() && receding { eprintln!("  receding t {t:.2} closest {:.1} dv {:.0} est range {range:.0} true range {:.0}", ms.closest, ms.dv_left, (target_traj.state_at(t).map_or(0.0, |s| (s.pos - me.pos).length()))); }
         if ms.phase == Phase::Burn && ms.burn_left <= 1e-9 {
             ms.phase = Phase::Cruise;
         }
-        if ms.phase != Phase::Terminal && t_go < MISSILE_TERMINAL_S.value && (ms.phase == Phase::Cruise || closing > 0.0) {
+        // Every payload can correct laterally once its own seeker resolves the target.
+        if ms.phase != Phase::Terminal
+            && (t_go < MISSILE_TERMINAL_S.value || local.is_some())
+            && (ms.phase == Phase::Cruise || closing > (max_accel*range).sqrt())
+        {
             ms.phase = Phase::Terminal;
         }
 
-        if ms.payload == Payload::Laser && range < LASER_STANDOFF_KM.value && closing > 0.0 {
-            // Aim where the target will be when the beam arrives. The seeker's image is
-            // one light-time old and the beam takes another; once emitted the beam does
-            // not share the missile's motion, so lead by the target's own velocity.
-            let delay = 2.0 * range / crate::units::C;
-            let image = match ms.seeker.filter(|s| s.t == t) {
-                Some(s) => me.pos + Vec2::new(s.bearing.cos(), s.bearing.sin()) * range,
-                None => est.pos - est.vel * (0.5 * delay),
-            };
-            let aim = image + est.vel * delay + est_accel * (0.5 * delay * delay);
-            let direction = (aim - me.pos).normalized();
-            let front = Front { origin: me.pos, t_emit: t };
-            self.scheduler.schedule(t + delay, Event::Beam(Beam { missile: id, target: ms.target_body, front, direction }));
+        // Resolve payload opportunities first, then retire misses. No second attack
+        // run after a completed pass, even with fuel left or a stale target track.
+        if estimated_pass || (receding && fuse_armed && (ms.phase == Phase::Terminal || ms.dv_left < 1.0)) {
             self.destroy(id, t, LossCause::Expended);
+            if ms.payload==Payload::Nuclear && local.is_some() {self.detonate(id,t,me.pos);}
+            else {self.record_combat(t,me.pos,CombatKind::MissileMiss,Some(id),None);}
             return;
         }
 
-        let reserve = MISSILE_DELTA_V_KMS.value * MISSILE_RESERVE_FRACTION.value;
+        let reserve = ms.payload.delta_v() * MISSILE_RESERVE_FRACTION.value;
         let (cmd, budget, dt_next) = match ms.phase {
+            _ if receding => {
+                // Initial pursuit can start with an opening range; completed
+                // terminal passes have already retired above.
+                let dir = missile::intercept_aim(me, est, est_accel, max_accel, 1e6).map_or(rel.normalized(), |(d, _)| d);
+                (dir * max_accel, ms.dv_left, 1.0)
+            }
             Phase::Burn => {
                 let dir = missile::intercept_aim(me, est, est_accel, max_accel, 1e6).map_or(rel.normalized(), |(d, _)| d);
                 (dir * max_accel, ms.burn_left, (ms.burn_left / max_accel).clamp(0.01, SENSOR_FRAME_S.value))
@@ -589,10 +960,14 @@ impl World {
             }
             Phase::Terminal => {
                 let a = match ms.seeker.filter(|s| s.t == t && s.samples >= 2) {
-                    Some(s) => missile::pn_accel(&s, closing),
-                    None => missile::cruise_correction(t_go, zem),
+                    // Closing speed comes from the track; if that is implausible, use the
+                    // relative speed, which is what matters in a head-on pass.
+                    Some(s) if ms.payload == Payload::Kinetic => missile::pn_accel(&s, closing.max(0.5 * (est.vel - me.vel).length())),
+                    _ => missile::cruise_correction(t_go, zem),
                 };
-                (a, ms.dv_left, (t_go / 40.0).clamp(0.002, 1.0))
+                // The faction track's range can be badly off for an evading target, so
+                // the seeker runs flat out for the whole terminal phase.
+                (a, ms.dv_left, MISSILE_SEEKER_FRAME_S.value)
             }
         };
         // Never command more than the drive or the remaining budget allows.
@@ -604,28 +979,156 @@ impl World {
         self.set_missile(i, ms, thrust, dt_next);
     }
 
+    /// Aim only from the faction's causally received track. Truth is retained solely
+    /// for resolving the intersection after the emitted pulse travels at c.
+    pub fn arm_beams(&mut self, id: BodyId) -> Result<(), OrderError> {
+        let b = self.live_body_mut(id)?;
+        if b.kind != BodyKind::Ship || !b.armed { return Err(OrderError::Unarmed); }
+        b.beam_auto = true;
+        b.beam_target = None;
+        b.beam_order += 1;
+        let order = b.beam_order;
+        self.control_beam(id, order);
+        Ok(())
+    }
+
+    pub fn engage_beam(&mut self, id: BodyId, target: Option<ContactId>) -> Result<(), OrderError> {
+        let b = self.live_body_mut(id)?;
+        if b.kind != BodyKind::Ship || !b.armed { return Err(OrderError::Unarmed); }
+        let faction = b.faction;
+        if let Some(target) = target
+            && !self.perceptions.get(&faction).and_then(|p| p.contacts.get(&target)).is_some_and(|c| c.track.is_some())
+        { return Err(OrderError::NoTrack); }
+        let b = &mut self.bodies[id.0 as usize];
+        b.beam_target = target;
+        b.beam_auto = false;
+        b.beam_order += 1;
+        let order = b.beam_order;
+        self.control_beam(id, order);
+        Ok(())
+    }
+
+    /// Expected coupled energy using only the received track and its transverse
+    /// uncertainty at pulse arrival, including pointing jitter. This is a firing
+    /// policy, not knowledge of the target's actual future manoeuvres.
+    fn beam_worth_firing(&self,id:BodyId,target:ContactId)->bool {
+        let Some(origin)=self.state(id,self.time).map(|s|s.pos) else {return false};
+        let Some(track)=self.received_picture(id).and_then(|p|p.contacts.get(&target)).and_then(|c|c.track.as_ref()) else {return false};
+        let range=(track.at(self.time,&self.system).pos()-origin).length();
+        if range<=SHIP_BEAM_AUTO_RANGE_LS.value*crate::units::LIGHT_SECOND {return true;}
+        let predicted=track.at(self.time+range/crate::units::C,&self.system);
+        let direction=(predicted.pos()-origin).normalized();
+        let transverse=Vec2::new(-direction.y,direction.x);
+        let p=predicted.pos_cov();
+        let variance=(transverse.x*transverse.x*p[0][0]+2.0*transverse.x*transverse.y*p[0][1]
+            +transverse.y*transverse.y*p[1][1]).max(0.0)+(range*SHIP_BEAM_POINTING_RAD.value).powi(2);
+        let spot=(range*SHIP_BEAM_DIVERGENCE.value).max(SHIP_RADIUS_KM.value);
+        let expected=SHIP_BEAM_ENERGY_J.value*(SHIP_RADIUS_KM.value/spot).powi(2)
+            / (1.0+2.0*variance/(spot*spot)).sqrt();
+        expected>=SHIP_BEAM_MIN_EXPECTED_J.value
+    }
+
+    fn control_beam(&mut self, id: BodyId, order: u64) {
+        let b = &self.bodies[id.0 as usize];
+        if !b.alive_at(self.time) || b.beam_order != order { return; }
+        let automatic = b.beam_auto;
+        let faction = b.faction;
+        let origin = b.trajectory.state_at(self.time).unwrap().pos;
+        let target = if automatic {
+            self.received_picture(id).into_iter().flat_map(|p| p.contacts.values())
+                .filter(|c| !self.contact_retired(faction, c.id) && self.track_fresh(id, c.id))
+                .filter(|c| self.body_for_contact(faction,c.id).is_none_or(|target|
+                    self.bodies[target.0 as usize].kind!=BodyKind::Missile))
+                .filter_map(|c| c.track.as_ref().map(|tr| (c.id, (tr.at(self.time, &self.system).pos() - origin).length())))
+                .filter(|(target, _)| self.beam_worth_firing(id,*target))
+                .min_by(|a, b| a.1.total_cmp(&b.1)).map(|(id, _)| id)
+        } else { b.beam_target };
+        if automatic { self.bodies[id.0 as usize].beam_target = target; }
+        let Some(target) = target else {
+            if automatic { self.scheduler.schedule(self.time + 1.0, Event::BeamControl(id, order)); }
+            return;
+        };
+        if self.track_fresh(id,target) && (!automatic || self.beam_worth_firing(id,target)) {
+            let _ = self.fire_beam(id, target);
+        }
+        let next = (self.time + 1.0).max(self.bodies[id.0 as usize].beam_ready_at);
+        self.scheduler.schedule(next, Event::BeamControl(id, order));
+    }
+
+    pub fn fire_beam(&mut self, id: BodyId, target: ContactId) -> Result<(), OrderError> {
+        let t = self.time;
+        let b = self.live_body_mut(id)?;
+        if b.kind != BodyKind::Ship || !b.armed { return Err(OrderError::Unarmed); }
+        let effectiveness=b.operating_effectiveness(crate::damage::System::Beam);
+        if effectiveness==0.0 {return Err(OrderError::PowerOrHeat);}
+        if t < b.beam_ready_at { return Err(OrderError::BeamRecharging); }
+        b.advance_thermal(t);
+        if !b.thermal.can_fire() { return Err(OrderError::PowerOrHeat); }
+        let faction = b.faction;
+        let origin = b.trajectory.state_at(t).unwrap().pos;
+        let track = self.received_picture(id).and_then(|p| p.contacts.get(&target))
+            .and_then(|c| c.track.as_ref()).ok_or(OrderError::NoTrack)?;
+        let mut flight = (track.at(t, &self.system).pos() - origin).length() / crate::units::C;
+        for _ in 0..12 {
+            flight = (track.at(t + flight, &self.system).pos() - origin).length() / crate::units::C;
+        }
+        let aim = track.at(t + flight, &self.system).pos() - origin;
+        if !flight.is_finite() || aim.length() == 0.0 { return Err(OrderError::InvalidTarget); }
+        let target_body = self.body_for_contact(faction,target).ok_or(OrderError::InvalidTarget)?;
+        let angle = bearing_of(aim) + SHIP_BEAM_POINTING_RAD.value * self.rng.gaussian();
+        let direction = Vec2::new(angle.cos(), angle.sin());
+        let beam = Beam { missile: id, target: target_body, front: Front { origin, t_emit: t }, direction,
+            ship_energy_j: SHIP_BEAM_ENERGY_J.value };
+        self.bodies[id.0 as usize].beam_ready_at = t + SHIP_BEAM_RECHARGE_S.value/effectiveness;
+        self.bodies[id.0 as usize].thermal.fire();
+        self.bodies[id.0 as usize].beam_emitted_j += SHIP_BEAM_ENERGY_J.value;
+        self.bodies[id.0 as usize].last_beam = Some((t, origin, origin + direction * aim.length()));
+        self.record_combat(t, origin, CombatKind::BeamPulse, Some(id), Some(faction));
+        self.scheduler.schedule(t + flight.max(0.001), Event::Beam(beam));
+        Ok(())
+    }
+
     fn set_missile(&mut self, i: usize, ms: MissileState, thrust: Vec2, dt_next: f64) {
         let t = self.time;
-        let b = &mut self.bodies[i];
-        b.missile = Some(ms);
-        if b.trajectory.last().thrust != thrust {
-            b.trajectory.set_thrust(t, thrust).expect("guidance applies at current time");
-        }
-        self.scheduler.schedule(t + dt_next, Event::MissileGuide(BodyId(i as u32)));
+        self.bodies[i].missile = Some(ms);
+        let id = BodyId(i as u32);
+        self.scheduler.schedule(t + MISSILE_RESPONSE_S.value, Event::MissileThrust(id, thrust));
+        self.scheduler.schedule(t + dt_next, Event::MissileGuide(id));
     }
 
     /// A laser beam's light has had time to reach its target: did the ray pass close
     /// enough to where the target really was when the light got there?
     fn resolve_beam(&mut self, beam: Beam) {
         let traj = self.bodies[beam.target.0 as usize].trajectory.clone();
-        let Some(t_arr) = beam.front.arrival(&traj, beam.front.t_emit, self.time) else { return };
+        if std::env::var("LUMINAL_DEBUG").is_ok() { eprintln!("  beam resolve at {:.2} emitted {:.2} target end {:?}", self.time, beam.front.t_emit, traj.end()); }
+        let Some(t_arr) = beam.front.arrival(&traj, beam.front.t_emit, self.time) else {
+            if traj.end().is_none() {
+                // The target can move after the shot. Keep the emitted pulse alive
+                // until its light reaches the target; never steer it after emission.
+                let range = (traj.state_at(self.time).unwrap().pos - beam.front.origin).length();
+                let wait = ((range - beam.front.radius_at(self.time)) / crate::units::C).max(0.001);
+                self.scheduler.schedule(self.time + wait, Event::Beam(beam));
+            }
+            return;
+        };
         let Some(s) = traj.state_at(t_arr) else { return };
         let rel = s.pos - beam.front.origin;
         let along = rel.dot(beam.direction);
         let miss = (rel - beam.direction * along).length();
         let blocked = self.system.occluder(beam.front.origin, beam.front.t_emit, s.pos, t_arr).is_some();
-        if along > 0.0 && miss < SHIP_RADIUS_KM.value && !blocked {
-            self.destroy(beam.target, t_arr, LossCause::Missile { payload: Payload::Laser, missile: beam.missile });
+        self.debug_note("BEAM_RESULT",format!("shooter={:?} target={:?} arrival={t_arr:.6} miss_km={miss} along_km={along} blocked={blocked}",beam.missile,beam.target));
+        {
+            let energy=beam.ship_energy_j;
+            if along > 0.0 && !blocked {
+                let spot = (along * SHIP_BEAM_DIVERGENCE.value).max(SHIP_RADIUS_KM.value);
+                // Gaussian fluence sampled over the target's projected area. The
+                // intercepted fraction is bounded, so widening a beam cannot create energy.
+                let fraction = (SHIP_RADIUS_KM.value / spot).powi(2) * (-miss * miss / (spot * spot)).exp();
+                let coupled = energy * fraction;
+                if coupled > 0.0 {
+                    self.deliver(beam.target, t_arr, coupled, Payload::Beam, beam.missile);
+                }
+            }
         }
     }
 
@@ -644,14 +1147,22 @@ impl World {
         let t = self.time;
         let i = id.0 as usize;
         let b = &self.bodies[i];
-        if b.missile.is_some() {
+        if b.missile.is_some() || b.interceptor.is_some() || matches!(b.kind,BodyKind::Probe|BodyKind::Station) {
             return;
         }
         let Some(s) = b.trajectory.state_at(t) else { return };
         let max_accel = b.max_accel();
         let limit = max_accel.min(b.drive_limit);
+        // No drive authority means ballistic drift, including collision avoidance.
+        // Keep the standing order so guidance can resume after repairs.
+        if limit<=0.0 {
+            let b=&mut self.bodies[i];
+            b.avoidance=Avoidance {thrust:Vec2::ZERO,active:false,impossible:false};
+            if b.trajectory.last().thrust!=Vec2::ZERO {b.trajectory.set_thrust(t,Vec2::ZERO).unwrap();}
+            return;
+        }
         let (desired, status) = match b.autopilot.map(|a| a.order) {
-            None => (b.commanded, None),
+            None => (if b.commanded.length()>limit {b.commanded.normalized()*limit} else {b.commanded}, None),
             Some(Order::Orbit { celestial, radius, sense }) => {
                 let thrust = autopilot::orbit_thrust(&self.system, celestial, s, t, radius, sense, limit);
                 let c = self.system.state(celestial, t);
@@ -659,16 +1170,17 @@ impl World {
                 let settled = ((rel.length() - radius) / radius).abs() < 0.02 && thrust.length() < 0.01 * crate::units::G0;
                 (thrust, Some(if settled { AutopilotStatus::Holding } else { AutopilotStatus::Manoeuvring }))
             }
-            Some(Order::Intercept(target)) => {
+            Some(Order::Intercept(target) | Order::Flyby(target) | Order::KeepRange(target,_) | Order::Evade(target)) => {
+                let flyby = matches!(b.autopilot.map(|a| a.order), Some(Order::Flyby(_)));
+                let evade=matches!(b.autopilot.map(|a|a.order),Some(Order::Evade(_)));
+                let keep=match b.autopilot.map(|a|a.order) {Some(Order::KeepRange(_,r))=>Some(r),_=>None};
                 let known = match target {
-                    InterceptTarget::Own(o) => self.bodies[o.0 as usize]
-                        .trajectory
-                        .state_at(t)
-                        .map(|ts| (ts, self.bodies[o.0 as usize].trajectory.thrust_at(t).unwrap_or(Vec2::ZERO))),
+                    InterceptTarget::Own(o) => self.known_body(b.faction,o).and_then(|known|
+                        known.trajectory.state_at(t).map(|ts| (ts,known.trajectory.thrust_at(t).unwrap_or(Vec2::ZERO)))),
                     InterceptTarget::Contact(c) => self
-                        .perceptions
-                        .get(&b.faction)
+                        .received_picture(id)
                         .and_then(|p| p.contacts.get(&c))
+                        .filter(|c|c.resolved && t-c.last.decider_received_at<=TRACK_STALE_S.value)
                         .and_then(|c| c.track.as_ref())
                         .map(|tr| {
                             let now = tr.at(t, &self.system);
@@ -676,12 +1188,35 @@ impl World {
                         }),
                 };
                 match known {
-                    None => (Vec2::ZERO, Some(AutopilotStatus::NoTrack)),
+                    None => {
+                        let bearing=if let InterceptTarget::Contact(c)=target {
+                            self.received_picture(id).and_then(|p|p.contacts.get(&c))
+                                .filter(|c|t-c.last.decider_received_at<=TRACK_STALE_S.value)
+                                .map(|c|match c.last.measurement {Measurement::Bearing {bearing,..}|Measurement::BearingRange {bearing,..}=>bearing})
+                        } else {None};
+                        if (evade || keep.is_some()) && let Some(bearing)=bearing {
+                            let direction=Vec2::new(bearing.cos(),bearing.sin());
+                            (direction*if evade {-limit} else {limit},Some(AutopilotStatus::Manoeuvring))
+                        }
+                        else {(Vec2::ZERO,Some(AutopilotStatus::NoTrack))}
+                    },
                     Some((ts, ta)) => {
-                        let r = autopilot::rendezvous(s, ts, ta, limit);
-                        let holding = r.gap < 0.5 * autopilot::STANDOFF_KM && r.rel_speed < 1.0;
-                        let status = if holding { AutopilotStatus::Holding } else { AutopilotStatus::Closing { eta: r.eta, range: r.gap } };
-                        (r.thrust, Some(status))
+                        let range = (ts.pos - s.pos).length();
+                        let passed = b.autopilot.is_some_and(|ap| match ap.status {
+                            AutopilotStatus::Passed => true,
+                            AutopilotStatus::Closing { range: previous, .. } =>
+                                range > previous && previous < (ts.vel - s.vel).length() * SENSOR_FRAME_S.value * 2.0,
+                            _ => false,
+                        });
+                        if evade {((s.pos-ts.pos).normalized()*limit,Some(AutopilotStatus::Manoeuvring))}
+                        else if flyby && passed {
+                            (Vec2::ZERO, Some(AutopilotStatus::Passed))
+                        } else {
+                            let r = if flyby { autopilot::flyby(s, ts, ta, limit) } else if let Some(range)=keep {autopilot::keep_range(s,ts,ta-self.system.gravity(s.pos,t),range,limit)} else { autopilot::rendezvous(s, ts, ta-self.system.gravity(s.pos,t),limit) };
+                            let holding = r.gap.abs() < keep.map_or(0.5*autopilot::STANDOFF_KM,|r|(r*0.01).max(500.0)) && r.rel_speed < 1.0;
+                            let status = if holding && !flyby { AutopilotStatus::Holding } else { AutopilotStatus::Closing { eta: r.eta, range: r.gap } };
+                            (r.thrust, Some(status))
+                        }
                     }
                 }
             }
@@ -708,7 +1243,7 @@ impl World {
         let faction = b.faction;
         let mut raised = vec![];
         if let (Some(a), Some(st)) = (&mut b.autopilot, status) {
-            if st == AutopilotStatus::Holding && a.status != AutopilotStatus::Holding {
+            if matches!(st, AutopilotStatus::Holding | AutopilotStatus::Passed) && a.status != st {
                 raised.push(AlertKind::OrderComplete(id));
             }
             a.status = st;
@@ -727,15 +1262,21 @@ impl World {
         }
     }
 
-    pub fn set_active_sensor(&mut self, id: BodyId, on: bool) -> bool {
+    pub fn ping(&mut self, id: BodyId) -> bool {
         let t = self.time;
-        match self.bodies.get_mut(id.0 as usize) {
-            Some(b) if b.alive_at(t) => {
-                b.active_sensor = on;
-                true
-            }
-            _ => false,
-        }
+        let Some(b) = self.bodies.get(id.0 as usize).filter(|b| b.alive_at(t)) else { return false };
+        let active=b.operating_effectiveness(crate::damage::System::Active);
+        if !b.sensors.active || active==0.0 { return false; }
+        let Some(s) = b.trajectory.state_at(t) else { return false };
+        let signature_w = (emission_w(b.kind,b.baseline_emission_factor,b.trajectory.thrust_at(t).unwrap_or(Vec2::ZERO))+b.thermal.emission(b.screen_j))
+            * ACTIVE_EXPOSURE_RANGE.value.powi(2);
+        let front = Front { origin: s.pos, t_emit: t };
+        let pending = (0..self.bodies.len()).filter(|&j| self.bodies[j].faction!=b.faction && self.bodies[j].alive_at(t)).map(|j| BodyId(j as u32)).collect();
+        let power_w=ACTIVE_PING_POWER_W.value * active * if matches!(b.kind,BodyKind::Probe|BodyKind::Missile) { PROBE_SENSOR_FACTOR.value } else { 1.0 };
+        self.pings.push(Ping { emitter: id, signature_w, front, pending, power_w,search_heading:b.missile.map(|m|m.search_heading) });
+        self.ping_emissions.push((id, front));
+        self.debug_note("PING",format!("emitter={id:?} origin={:?} power_w={power_w}",front.origin));
+        true
     }
 
     /// Process every event up to `t`, then set the clock to `t`.
@@ -746,20 +1287,68 @@ impl World {
     /// As `advance_to`, but stop at the first event that raises an alert for `watch`
     /// (or for everyone). Returns that alert; the clock then stands at its time.
     pub fn advance_until_alert(&mut self, t: f64, watch: Option<FactionId>) -> Option<Alert> {
-        while let Some((te, ev)) = self.scheduler.pop_due(t) {
+        self.advance_until_alert_budgeted(t,watch,None)
+    }
+    /// GUI work budget: yield between events without skipping simulation time or
+    /// removing queued events. Headless deterministic runs use no deadline.
+    pub fn advance_until_alert_budgeted(&mut self,t:f64,watch:Option<FactionId>,deadline:Option<std::time::Instant>)->Option<Alert> {
+        let mut count=0usize;
+        loop {
+            if count.is_multiple_of(32) && deadline.is_some_and(|d|std::time::Instant::now()>=d) {return None;}
+            let Some((te,ev))=self.scheduler.pop_due(t) else {break};
+            count+=1;
+            let timer=self.profile.as_ref().map(|_|std::time::Instant::now());
+            let category=match ev {Event::InterceptorGuide(_)=>0,Event::TacticalFrame=>1,Event::SensorFrame=>2,Event::MissileGuide(_)=>3,Event::PointDefence(_)=>4,_=>5};
             self.time = te.max(self.time);
             let seen = self.alerts.len();
             match ev {
+                Event::InterceptorGuide(id)=>self.guide_interceptor(id),
+                Event::PointDefence(id)=>self.point_defence_cycle(id),
+                Event::PointDefencePulse(pulse)=>self.resolve_point_defence(pulse),
+                Event::TacticalFrame => {
+                    self.tactical_frame();
+                    self.scheduler.schedule(self.time + TACTICAL_FRAME_S.value, Event::TacticalFrame);
+                }
                 Event::Step(id) => self.step(id),
+                Event::BeamControl(id, order) => self.control_beam(id, order),
                 Event::SensorFrame => {
                     self.sensor_frame();
                     self.scheduler.schedule(self.time + SENSOR_FRAME_S.value, Event::SensorFrame);
                 }
                 Event::MissileGuide(id) => self.guide_missile(id),
+                Event::MissileThrust(id, thrust) => {
+                    let t = self.time;
+                    let b = &mut self.bodies[id.0 as usize];
+                    if b.missile.is_some() && b.alive_at(t) && b.trajectory.last().thrust != thrust {
+                        b.trajectory.set_thrust(t, thrust).expect("thrust applies at current time");
+                    }
+                }
                 Event::Beam(beam) => self.resolve_beam(beam),
+                Event::QueuedLaunch(id, target, payload, generation) => {
+                    let b = &mut self.bodies[id.0 as usize];
+                    if b.launch_generation != generation { continue; }
+                    if b.alive_at(self.time) && self.time<b.missile_ready_at[payload.index()] {
+                        self.scheduler.schedule(b.missile_ready_at[payload.index()],Event::QueuedLaunch(id,target,payload,generation));
+                        continue;
+                    }
+                    b.missile_queued[payload.index()] -= 1;
+                    let faction = b.faction;
+                    if b.alive_at(self.time) && self.launch(id, target, payload).is_err() {
+                        self.alert(Some(faction), AlertKind::LaunchCancelled(id));
+                    }
+                }
+            }
+            if let (Some(profile),Some(timer))=(&mut self.profile,timer) {
+                profile.seconds[category]+=timer.elapsed().as_secs_f64();
+                profile.events[category]+=1;
+                if profile.since.elapsed().as_secs_f64()>5.0 {
+                    eprintln!("PROFILE sim={:.0}s wall={:.2}s seconds={:?} events={:?} [interceptor,tactical,sensors,missile,PD,other] sensor_parts={:?} [ping,echo,passive,relay,ingest]",self.time,profile.total.elapsed().as_secs_f64(),profile.seconds,profile.events,profile.sensor_parts);
+                    profile.since=std::time::Instant::now();
+                }
             }
             if let Some(w) = watch
-                && let Some(a) = self.alerts[seen..].iter().find(|a| a.faction.is_none_or(|f| f == w))
+                && let Some(a) = self.alerts[seen..].iter().filter(|a| a.faction.is_none_or(|f| f == w))
+                    .min_by_key(|a|matches!(a.kind,AlertKind::NewContact(_)|AlertKind::ContactLost(_)))
             {
                 return Some(a.clone());
             }
@@ -781,16 +1370,126 @@ impl World {
         }
     }
 
+    /// Energy lands on a body: a raised screen stores what it can, the hull takes the
+    /// rest, and the ship is lost once the hull has taken too much.
+    fn deliver(&mut self, id: BodyId, t: f64, energy_j: f64, payload: Payload, missile: BodyId) {
+        self.debug_note("DAMAGE",format!("event_time={t:.6} target={id:?} source={missile:?} payload={payload:?} energy_j={energy_j}"));
+        let b = &mut self.bodies[id.0 as usize];
+        if !b.alive_at(t) {
+            return;
+        }
+        b.advance_thermal(t);
+        let room = if b.has_screen { (SCREEN_CAPACITY_J.value * b.thermal.field*b.operating_effectiveness(crate::damage::System::Screens) - b.screen_j).max(0.0) } else {0.0};
+        let missile_hit=payload!=Payload::Beam;
+        let leak_chance=if missile_hit {crate::damage::MISSILE_SCREEN_LEAK_CHANCE} else {crate::damage::SCREEN_LEAK_CHANCE};
+        let leak=if room>0.0 && energy_j>=1e6 && self.rng.uniform()<leak_chance {energy_j*crate::damage::SCREEN_LEAK_FRACTION} else {0.0};
+        // Missile energy couples less efficiently into screen storage. The
+        // rejected portion dissipates outside the field, not into the hull.
+        let coupling=if payload==Payload::Beam {1.0} else {crate::damage::MISSILE_SCREEN_COUPLING};
+        let screened_j = (energy_j-leak).min(room/coupling);
+        b.screen_j += screened_j*coupling;
+        b.thermal.captured_j += screened_j*coupling;
+        let installed=b.installed_systems();
+        let before=b.damage;
+        let mut casualty=b.damage.penetrate(energy_j-screened_j,&installed,&mut self.rng);
+        // A missile's rare screen puncture also shocks one installed component.
+        if missile_hit && leak>0.0 && casualty.is_none() {casualty=b.damage.hit_system(&installed,&mut self.rng);}
+        b.hull_j=(b.damage.hull_max-b.damage.hull)*crate::damage::JOULES_PER_HP;
+        let (faction, lost) = (b.faction, b.damage.hull<=0.0 || b.damage.state(crate::damage::System::Power)==crate::damage::Condition::Destroyed);
+        let pos = b.trajectory.state_at(t).unwrap().pos;
+        let damage=b.damage;
+        let mut parts=vec![];
+        if screened_j>0.0 {parts.push(format!("SCREEN +{:.2} TJ",screened_j*coupling/1e12));}
+        if before.armour>damage.armour {parts.push(format!("ARMOUR -{:.2}",before.armour-damage.armour));}
+        if before.hull>damage.hull {parts.push(format!("HULL -{:.2}",before.hull-damage.hull));}
+        if let Some(system)=casualty {parts.push(format!("{} {}",system.code(),if damage.state(system)==crate::damage::Condition::Destroyed {"DESTROYED"} else {"DAMAGED"}));}
+        let summary=parts.join(" · ");
+        self.debug_note("DAMAGE_STATE",format!("target={id:?} hull={} armour={} leak_j={leak} system_hit={casualty:?}",damage.hull,damage.armour));
+        self.debug_note("DAMAGE_DETAIL",format!("event_time={t:.6} target={id:?} {summary}"));
+        self.record_combat_damage(t, pos, CombatKind::Impact, Some(id), Some(faction),Some(summary));
+        if self.bodies[missile.0 as usize].missile.is_some_and(|m|m.target_body==id) {
+            self.record_combat(t,pos,CombatKind::MissileHit,Some(missile),None);
+        }
+        self.hits.push(Hit { body: id, t, payload, missile, energy_j, screened_j });
+        if lost {
+            let cause = if self.bodies[missile.0 as usize].kind == BodyKind::Ship {
+                LossCause::ShipBeam { shooter: missile }
+            } else { LossCause::Missile { payload, missile } };
+            self.destroy(id, t, cause);
+        } else {
+            self.guide(id);
+            self.delay_alert(id, t, AlertKind::Hit(id));
+        }
+    }
+
+    /// A nuclear burst at `at`: every ship within the AoE takes its share.
+    fn detonate(&mut self, missile: BodyId, t: f64, at: Vec2) {
+        // Safing/arming distance prevents a bad early seeker fit detonating a
+        // nuclear round beside its own launcher.
+        if self.bodies[missile.0 as usize].missile.is_some_and(|m|(at-m.launched_at).length()<2.0*NUCLEAR_AOE_KM.value) {
+            self.record_combat(t,at,CombatKind::MissileMiss,Some(missile),None);
+            return;
+        }
+        self.record_combat(t, at, CombatKind::NuclearBurst, Some(missile), None);
+        let aoe = NUCLEAR_AOE_KM.value;
+        let hits_before=self.hits.len();
+        for j in 0..self.bodies.len() {
+            let b = &self.bodies[j];
+            if b.kind == BodyKind::Missile {
+                continue;
+            }
+            let Some(s) = b.trajectory.state_at(t) else { continue };
+            let d = (s.pos - at).length();
+            if d < aoe {
+                let share = (aoe / (2.0 * d.max(1e-9))).powi(2).min(1.0);
+                self.deliver(BodyId(j as u32), t, NUCLEAR_ENERGY_J.value * share, Payload::Nuclear, missile);
+            }
+        }
+        let intended=self.bodies[missile.0 as usize].missile.map(|m|m.target_body);
+        if !self.hits[hits_before..].iter().any(|hit|Some(hit.body)==intended) {
+            self.record_combat(t,at,CombatKind::MissileMiss,Some(missile),None);
+        }
+    }
+
+    /// Request buildup or collapse; thermal integration preserves stored energy.
+    pub fn set_screen(&mut self, id: BodyId, up: bool) -> Result<(), OrderError> {
+        if !self.live_body_mut(id)?.has_screen { return Err(OrderError::Unarmed); }
+        if up && self.live_body_mut(id)?.operating_effectiveness(crate::damage::System::Screens)==0.0 {return Err(OrderError::PowerOrHeat);}
+        self.live_body_mut(id)?.screen_up = up;
+        Ok(())
+    }
+
     /// A body stops existing at `t`.
     fn destroy(&mut self, id: BodyId, t: f64, cause: LossCause) {
+        if self.bodies[id.0 as usize].trajectory.end().is_some_and(|end|end<=t) {return;}
+        self.debug_note("LOSS",format!("event_time={t:.6} body={id:?} cause={cause:?}"));
         let b = &mut self.bodies[id.0 as usize];
+        let at = b.trajectory.state_at(t).map(|s| s.pos);
+        // Catastrophic loss releases remaining stored field/electrical/thermal
+        // energy into the destruction flash, rather than deleting the reservoirs.
+        b.thermal.radiated_j += b.screen_j + b.thermal.capacitor_j + b.thermal.heat_j;
+        b.screen_j = 0.0;
+        b.thermal.capacitor_j = 0.0;
+        b.thermal.heat_j = 0.0;
+        b.thermal.field = 0.0;
         b.trajectory.terminate(t);
-        b.active_sensor = false;
         b.autopilot = None;
         let (faction, name) = (b.faction, b.name.clone());
+        // An interceptor has one mission, not a second attack or an orphaned
+        // coast. Retire it with its target; observers still see causal telemetry.
+        let orphaned:Vec<_>=self.bodies.iter().enumerate().filter(|(_,b)|
+            b.alive_at(t) && b.trajectory.end().is_none_or(|end|end>t) && b.interceptor.is_some_and(|i|i.target==id))
+            .map(|(i,_)|BodyId(i as u32)).collect();
+        for interceptor in orphaned {
+            self.debug_note("INTERCEPT_RETIRE",format!("missile={interceptor:?} target={id:?} reason=target_destroyed"));
+            self.destroy(interceptor,t,LossCause::Expended);
+        }
         self.losses.push(Loss { body: id, t, cause });
+        if let Some(at) = at {
+            self.record_combat(t, at, if cause == LossCause::Expended { CombatKind::Expended } else { CombatKind::Destroyed }, Some(id), Some(faction));
+        }
         if cause != LossCause::Expended {
-            self.alert(Some(faction), AlertKind::ShipLost(id));
+            self.delay_alert(id, t, AlertKind::ShipLost(id));
         }
         if let Some(o) = &self.objective
             && o.protect == id
@@ -837,8 +1536,31 @@ impl World {
     }
 
     fn contact_id(&mut self, f: FactionId, body: BodyId) -> ContactId {
+        if let Some(c)=self.association.get(&(f,body)) {return *c;}
         let next = ContactId(self.association.keys().filter(|(ff, _)| *ff == f).count() as u32 + 1);
-        *self.association.entry((f, body)).or_insert(next)
+        self.association.insert((f,body),next);
+        self.reverse_association.insert((f,next),body);
+        next
+    }
+
+    /// Scenario briefing only: a supplied initial solution from historical light,
+    /// not an ongoing truth feed. Ordinary sensing takes over after setup.
+    pub(crate) fn seed_debug_contact(&mut self, observer:BodyId,target:BodyId)->ContactId {
+        assert_eq!(self.time,0.0,"briefings belong to initial scenario setup");
+        let faction=self.bodies[observer.0 as usize].faction;
+        let contact=self.contact_id(faction,target);
+        {
+            let received=0.0;
+            let origin=self.state(observer,received).unwrap().pos;
+            let trajectory=&self.bodies[target.0 as usize].trajectory;
+            let (emitted,seen)=retarded_state(trajectory,origin,received).unwrap();
+            let rel=seen.pos-origin;
+            let picture=self.perceptions.get_mut(&faction).unwrap();
+            picture.ingest(Observation {contact,sensor:observer,origin,emitted_at:emitted,
+                sensor_received_at:received,decider_received_at:received,source:Source::Emission,snr:9.0,
+                measurement:Measurement::Bearing {bearing:bearing_of(rel),sigma:0.002}},&self.system);
+        }
+        contact
     }
 
     fn state(&self, id: BodyId, t: f64) -> Option<State> {
@@ -846,6 +1568,7 @@ impl World {
     }
 
     fn sensor_frame(&mut self) {
+        let mut timer=self.profile.as_ref().map(|_|std::time::Instant::now());
         let t = self.time;
         let t_prev = self.last_frame;
         self.last_frame = t;
@@ -874,30 +1597,31 @@ impl World {
                     continue;
                 }
                 let out_km = ping.front.radius_at(t_hit);
-                self.echoes.push(Echo { emitter: ping.emitter, front: Front { origin: rx, t_emit: t_hit }, out_km });
-                if self.bodies[target.0 as usize].kind == BodyKind::Ship {
-                    let snr = sensors::intensity(ACTIVE_PING_POWER_W.value, out_km) / PASSIVE_NOISE_FLOOR.value;
-                    if snr >= PASSIVE_DETECT_SNR.value {
-                        let (bearing, sigma) =
-                            sensors::measure_bearing(bearing_of(ping.front.origin - rx), snr, &mut self.rng);
-                        reports.push(Observation {
-                            contact: self.contact_id(target_faction, ping.emitter),
-                            sensor: target,
-                            origin: rx,
-                            emitted_at: ping.front.t_emit,
-                            sensor_received_at: t_hit,
-                            decider_received_at: f64::NAN,
-                            measurement: Measurement::Bearing { bearing, sigma },
-                            snr,
-                            source: Source::Ping,
-                        });
-                    }
+                if ping.search_heading.is_none_or(|heading|out_km<=MISSILE_ACTIVE_RANGE_LS*crate::units::LIGHT_SECOND && missile::in_search_cone(heading,rx-ping.front.origin)) {
+                    self.echoes.push(Echo { target,emitter: ping.emitter, front: Front { origin: rx, t_emit: t_hit }, out_km, power_w: ping.power_w });
+                }
+                if let Some((measurement, snr)) = sensors::receive_measurement_scaled(
+                        self.bodies[target.0 as usize].sensors,
+                        ping.signature_w / (1.0 + self.bodies[target.0 as usize].thermal.emission(self.bodies[target.0 as usize].screen_j) / SCREEN_GLARE_W.value), out_km, bearing_of(ping.front.origin - rx),self.bodies[target.0 as usize].sensor_effectiveness(), &mut self.rng,
+                    ) {
+                    reports.push(Observation {
+                        contact: self.contact_id(target_faction, ping.emitter),
+                        sensor: target,
+                        origin: rx,
+                        emitted_at: ping.front.t_emit,
+                        sensor_received_at: t_hit,
+                        decider_received_at: f64::NAN,
+                        measurement,
+                        snr,
+                        source: Source::Ping,
+                    });
                 }
             }
             ping.pending = still;
         }
         pings.retain(|p| !p.pending.is_empty() && p.front.radius_at(t) < MAX_FRONT_RADIUS_KM);
         self.pings = pings;
+        self.profile_sensor_part(&mut timer,0);
 
         // Echoes returning to their pinger.
         let echoes = std::mem::take(&mut self.echoes);
@@ -917,14 +1641,38 @@ impl World {
                 continue;
             }
             let back_km = echo.front.radius_at(t_rx);
-            let snr = sensors::echo_intensity(ACTIVE_PING_POWER_W.value, echo.out_km, back_km) / ACTIVE_NOISE_FLOOR.value;
-            if snr < PASSIVE_DETECT_SNR.value {
+            let receiver = &self.bodies[echo.emitter.0 as usize];
+            if !receiver.sensors.active || receiver.operating_effectiveness(crate::damage::System::Active)==0.0 { continue; }
+            let snr = sensors::echo_intensity(echo.power_w, echo.out_km, back_km) / ACTIVE_NOISE_FLOOR.value
+                / (1.0 + receiver.thermal.emission(receiver.screen_j) / SCREEN_GLARE_W.value)
+                * if matches!(receiver.kind,BodyKind::Probe|BodyKind::Missile) { PROBE_SENSOR_FACTOR.value } else { 1.0 };
+            let resolved=sensors::echo_resolvable(snr);
+            if snr<9.0 || (!resolved && !sensors::detected(snr, &mut self.rng)) {
                 continue;
             }
             // Which body reflected it is truth; the report carries only the contact id.
             let faction = self.bodies[echo.emitter.0 as usize].faction;
-            let Some(target) = self.body_at(echo.front.origin, echo.front.t_emit) else { continue };
+            let target=echo.target;
             let m = sensors::measure_echo(bearing_of(echo.front.origin - rx), back_km, snr, &mut self.rng);
+            if !resolved {
+                reports.push(Observation {
+                    contact:self.contact_id(faction,target),sensor:echo.emitter,origin:rx,
+                    emitted_at:echo.front.t_emit,sensor_received_at:t_rx,decider_received_at:f64::NAN,
+                    measurement:Measurement::Bearing {bearing:m.bearing,sigma:m.sigma_bearing},snr,source:Source::Echo,
+                });
+                continue;
+            }
+            // A returned echo is available locally before its report reaches the
+            // frigate. Never substitute a current target truth state for the fix.
+            if let Some(ms)=self.bodies[echo.emitter.0 as usize].missile.as_mut()
+                && ms.target_body==target {
+                let pos=rx+Vec2::new(m.bearing.cos(),m.bearing.sin())*m.range;
+                if ms.local_fix.is_none_or(|fix|echo.front.t_emit>fix.t) {
+                    let prior=ms.local_fix.map_or(Vec2::ZERO,|fix|fix.vel);
+                    ms.local_fix=Some(sensors::SeekerFix::update(ms.local_fix,echo.front.t_emit,pos,prior));
+                    ms.seeker=Some(Seeker::update(ms.seeker,t_rx,m.bearing));
+                }
+            }
             reports.push(Observation {
                 contact: self.contact_id(faction, target),
                 sensor: echo.emitter,
@@ -944,14 +1692,20 @@ impl World {
         }
 
         // Passive: each live ship looks for the light now arriving from foreign bodies.
+        self.profile_sensor_part(&mut timer,1);
         for si in 0..self.bodies.len() {
             let sensor = BodyId(si as u32);
             let s = &self.bodies[si];
-            if s.kind != BodyKind::Ship {
+            if !s.alive_at(t) || s.missile.is_some() {
                 continue;
             }
             let Some(me) = s.trajectory.state_at(t) else { continue };
             let faction = s.faction;
+            let suite=s.sensors;
+            let glare = 1.0 + s.thermal.emission(s.screen_j) / SCREEN_GLARE_W.value;
+            let sensitivity = if matches!(s.kind,BodyKind::Probe|BodyKind::Missile) { PROBE_SENSOR_FACTOR.value } else { 1.0 };
+            let effectiveness=s.sensor_effectiveness();
+            let eccm=s.operating_effectiveness(crate::damage::System::Eccm);
             for ti in 0..self.bodies.len() {
                 let b = &self.bodies[ti];
                 if b.faction == faction {
@@ -963,11 +1717,11 @@ impl World {
                 }
                 let thrust = b.trajectory.thrust_at(t_e).unwrap_or(Vec2::ZERO);
                 let range = (src.pos - me.pos).length();
-                let snr = sensors::intensity(emission_w(b.kind, thrust), range) / PASSIVE_NOISE_FLOOR.value;
-                if snr < PASSIVE_DETECT_SNR.value {
-                    continue;
-                }
-                let (bearing, sigma) = sensors::measure_bearing(bearing_of(src.pos - me.pos), snr, &mut self.rng);
+                let countermeasures=(1.0+eccm)/(1.0+self.historical_ecm(BodyId(ti as u32),t_e));
+                let Some((measurement, snr)) = sensors::receive_measurement_scaled(suite,
+                    (emission_w(b.kind,b.baseline_emission_factor,thrust) + self.thermal_emission(BodyId(ti as u32), t_e))
+                        * sensitivity * countermeasures / glare, range, bearing_of(src.pos - me.pos),effectiveness, &mut self.rng,
+                ) else { continue };
                 reports.push(Observation {
                     contact: self.contact_id(faction, BodyId(ti as u32)),
                     sensor,
@@ -975,26 +1729,19 @@ impl World {
                     emitted_at: t_e,
                     sensor_received_at: t,
                     decider_received_at: f64::NAN,
-                    measurement: Measurement::Bearing { bearing, sigma },
+                    measurement,
                     snr,
                     source: Source::Emission,
                 });
             }
         }
 
-        // New pings leave active ships now.
-        for i in 0..self.bodies.len() {
-            let b = &self.bodies[i];
-            if !b.active_sensor {
-                continue;
-            }
-            let Some(s) = b.trajectory.state_at(t) else { continue };
-            let pending = (0..self.bodies.len()).filter(|&j| j != i).map(|j| BodyId(j as u32)).collect();
-            self.pings.push(Ping { emitter: BodyId(i as u32), front: Front { origin: s.pos, t_emit: t }, pending });
-        }
+        self.ping_emissions.retain(|(_, front)| (t - front.t_emit) * crate::units::C / 2.0 < AU);
+        self.profile_sensor_part(&mut timer,2);
 
         // Route reports to each faction's decider: directly, or by laser relay at c.
         for obs in reports {
+            let obs = self.bias_observation(obs);
             let faction = self.bodies[obs.sensor.0 as usize].faction;
             let front = Front { origin: self.state(obs.sensor, obs.sensor_received_at).unwrap().pos, t_emit: obs.sensor_received_at };
             self.relays.push(Relay { faction, front, obs });
@@ -1023,43 +1770,56 @@ impl World {
             }
         }
         delivered.sort_by(|a, b| a.decider_received_at.total_cmp(&b.decider_received_at));
+        self.profile_sensor_part(&mut timer,3);
         for obs in delivered {
             let faction = self.bodies[obs.sensor.0 as usize].faction;
+            if self.decider(faction,t).is_none_or(|id|self.bodies[id.0 as usize].operating_effectiveness(crate::damage::System::Mind)==0.0) {continue;}
+            self.observe_damage(&obs);
             let sys = &self.system;
             if let Some(p) = self.perceptions.get_mut(&faction) {
                 let new = !p.contacts.contains_key(&obs.contact);
                 p.ingest(obs, sys);
+                if obs.source == Source::Ping {
+                    let tr = p.contacts.get(&obs.contact).and_then(|c| c.track.as_ref());
+                    let (bearing,pos,radius) = match obs.measurement {
+                        Measurement::Bearing { bearing, .. } => (bearing, tr.map(|tr| tr.at(obs.emitted_at,sys).pos()),
+                            tr.map_or(0.0,|tr| 2.0*tr.pos_cov()[0][0].max(tr.pos_cov()[1][1]).sqrt())),
+                        Measurement::BearingRange { bearing, range, sigma_range, sigma_bearing } =>
+                            (bearing,Some(obs.origin+Vec2::new(bearing.cos(),bearing.sin())*range),2.0*sigma_range.max(range*sigma_bearing)),
+                    };
+                    let sighting=crate::session::PingSighting { contact:obs.contact,emitted_at:obs.emitted_at,
+                        received_at:obs.decider_received_at,pos,vel:tr.map_or(Vec2::ZERO,|tr| tr.vel()),initial_radius:radius,
+                        observer:obs.origin,bearing };
+                    self.refinement.record_ping(faction,sighting);
+                }
                 if new {
                     self.alerts.push(Alert { t, faction: Some(faction), kind: AlertKind::NewContact(obs.contact) });
                 }
             }
         }
 
-        // Orders and collision checks re-plan on the fresh picture. PLACEHOLDER: every
-        // ship uses its faction's flagship perception without relay delay.
+        // Each ship re-plans using its own delivered fire-control picture.
         for i in 0..self.bodies.len() {
             self.guide(BodyId(i as u32));
         }
+        self.profile_sensor_part(&mut timer,4);
     }
 
-    /// The body at `pos` at time `t` (the reflector of an echo).
-    fn body_at(&self, pos: Vec2, t: f64) -> Option<BodyId> {
-        self.bodies
-            .iter()
-            .enumerate()
-            .filter_map(|(i, b)| b.trajectory.state_at(t).map(|s| (i, (s.pos - pos).length())))
-            .filter(|(_, d)| *d < 1.0)
-            .min_by(|a, b| a.1.total_cmp(&b.1))
-            .map(|(i, _)| BodyId(i as u32))
+    fn profile_sensor_part(&mut self,timer:&mut Option<std::time::Instant>,part:usize) {
+        if let (Some(profile),Some(start))=(&mut self.profile,timer.as_mut()) {
+            profile.sensor_parts[part]+=start.elapsed().as_secs_f64();
+            *start=std::time::Instant::now();
+        }
     }
+
 }
 
+struct SimulationProfile {seconds:[f64;6],events:[u64;6],sensor_parts:[f64;5],since:std::time::Instant,total:std::time::Instant}
+impl Default for SimulationProfile {fn default()->Self {Self {seconds:[0.0;6],events:[0;6],sensor_parts:[0.0;5],since:std::time::Instant::now(),total:std::time::Instant::now()}}}
+
 /// Isotropic emission of a body of `kind` thrusting at `thrust`.
-fn emission_w(kind: BodyKind, thrust: Vec2) -> f64 {
-    match kind {
-        BodyKind::Missile => sensors::missile_emission_w(thrust),
-        BodyKind::Ship | BodyKind::Probe => sensors::ship_emission_w(thrust),
-    }
+fn emission_w(kind: BodyKind, baseline_factor:f64, thrust: Vec2) -> f64 {
+    sensors::platform_emission_w(kind==BodyKind::Missile,baseline_factor,thrust,0.0)
 }
 
 /// A trajectory that has held `thrust` under gravity for `history_s` and arrives at
@@ -1072,7 +1832,7 @@ fn ballistic_history(sys: &System, state: State, thrust: Vec2, history_s: f64) -
         let dt = sys.step_size(s.pos, t).min(t + history_s);
         // Midpoint rule, stepping backwards in time.
         let a = thrust + sys.gravity(s.pos - s.vel * (0.5 * dt), t - 0.5 * dt);
-        s = State { pos: s.pos - s.vel * dt + a * (0.5 * dt * dt), vel: s.vel - a * dt };
+        s = crate::kinematics::advance(s, a, -dt);
         t -= dt;
     }
     let mut traj = Trajectory::new(t, s);
@@ -1091,7 +1851,7 @@ fn ballistic_history(sys: &System, state: State, thrust: Vec2, history_s: f64) -
 mod tests {
     use super::*;
     use crate::celestial::{Celestial, CelestialKind, Orbit};
-    use crate::missile::Payload;
+    use crate::missile::{Payload, Phase};
     use crate::units::{G0, LIGHT_SECOND};
 
     fn sun() -> System {
@@ -1288,12 +2048,477 @@ mod tests {
             .sum()
     }
 
+    /// Controlled, accurate fire-control solution for testing physical beam delivery.
+    fn beam_trial() -> (World, ContactId) {
+        let base = Vec2::new(20.0 * AU, 0.0);
+        let mut w = World::new(sun(), vec![
+            ship("Emitter", 0, base, Vec2::ZERO, Vec2::ZERO),
+            ship("Target", 1, base + Vec2::new(LIGHT_SECOND, 0.0), Vec2::ZERO, Vec2::ZERO),
+        ], 10.0, 13);
+        let c = w.contact_id(FactionId(0), BodyId(1));
+        w.perceptions.get_mut(&FactionId(0)).unwrap().ingest(Observation {
+            contact: c, sensor: BodyId(0), origin: base, emitted_at: 0.0,
+            sensor_received_at: 0.0, decider_received_at: 0.0,
+            measurement: Measurement::BearingRange { bearing: 0.0, range: LIGHT_SECOND, sigma_bearing: 1e-10, sigma_range: 1e-5 },
+            snr: 1e9, source: Source::Echo,
+        }, &w.system);
+        (w, c)
+    }
+
+    #[test]
+    fn automatic_main_beam_leaves_missiles_to_dedicated_defences() {
+        let (mut w,c)=beam_trial();
+        w.bodies[1].kind=BodyKind::Missile;
+        w.arm_beams(BodyId(0)).unwrap();
+        assert_eq!(w.bodies[0].beam_target,None);
+        assert_eq!(w.bodies[0].beam_emitted_j,0.0);
+        w.engage_beam(BodyId(0),Some(c)).unwrap();
+        assert_eq!(w.bodies[0].beam_emitted_j,SHIP_BEAM_ENERGY_J.value,"explicit manual orders still work");
+    }
+
+    #[test]
+    fn armed_beams_acquire_without_target_orders_and_obey_hold_fire() {
+        let (mut w, c) = beam_trial();
+        w.arm_beams(BodyId(0)).unwrap();
+        assert!(w.bodies[0].beam_auto);
+        assert_eq!(w.bodies[0].beam_target, Some(c));
+        assert_eq!(w.bodies[0].beam_emitted_j, SHIP_BEAM_ENERGY_J.value);
+        w.advance_to(SHIP_BEAM_RECHARGE_S.value);
+        assert_eq!(w.bodies[0].beam_emitted_j, 2.0 * SHIP_BEAM_ENERGY_J.value);
+        w.engage_beam(BodyId(0), None).unwrap();
+        w.advance_to(40.0);
+        assert!(!w.bodies[0].beam_auto);
+        assert_eq!(w.bodies[0].beam_emitted_j, 2.0 * SHIP_BEAM_ENERGY_J.value);
+
+        let (mut w, c) = beam_trial();
+        w.perceptions.get_mut(&FactionId(0)).unwrap().contacts.get_mut(&c).unwrap().track.as_mut().unwrap().x[0] += 10.0 * LIGHT_SECOND;
+        w.arm_beams(BodyId(0)).unwrap();
+        assert_eq!(w.bodies[0].beam_target, None);
+        assert_eq!(w.bodies[0].beam_emitted_j, 0.0);
+        w.perceptions.get_mut(&FactionId(0)).unwrap().contacts.get_mut(&c).unwrap().track.as_mut().unwrap().x[0] -= 10.0 * LIGHT_SECOND;
+        w.advance_to(1.0);
+        assert_eq!(w.bodies[0].beam_target, Some(c));
+        assert_eq!(w.bodies[0].beam_emitted_j, SHIP_BEAM_ENERGY_J.value);
+        let scenario = crate::scenario::transport_intercept();
+        assert!(scenario.bodies[1].beam_auto && scenario.bodies[2].beam_auto);
+        assert!(!scenario.bodies[0].beam_auto && !scenario.bodies[3].beam_auto);
+    }
+
+    #[test]
+    fn automatic_beams_wait_for_estimated_range_and_a_track() {
+        let (mut w, c) = beam_trial();
+        let p = w.perceptions.get_mut(&FactionId(0)).unwrap();
+        p.contacts.get_mut(&c).unwrap().track.as_mut().unwrap().x[0] += 10.0 * LIGHT_SECOND;
+        w.arm_beams(BodyId(0)).unwrap();
+        assert_eq!(w.bodies[0].beam_emitted_j, 0.0);
+        w.perceptions.get_mut(&FactionId(0)).unwrap().contacts.get_mut(&c).unwrap().track.as_mut().unwrap().x[0] -= 10.0 * LIGHT_SECOND;
+        w.control_beam(BodyId(0), w.bodies[0].beam_order);
+        assert_eq!(w.bodies[0].beam_emitted_j, SHIP_BEAM_ENERGY_J.value);
+        w.perceptions.get_mut(&FactionId(0)).unwrap().contacts.get_mut(&c).unwrap().track = None;
+        w.time = 10.0;
+        w.control_beam(BodyId(0), w.bodies[0].beam_order);
+        assert_eq!(w.bodies[0].beam_emitted_j, SHIP_BEAM_ENERGY_J.value);
+    }
+
+    #[test]
+    fn long_range_beams_use_received_confidence_not_a_hard_cutoff() {
+        let (mut w,c)=beam_trial();
+        let tr=w.perceptions.get_mut(&FactionId(0)).unwrap().contacts.get_mut(&c).unwrap().track.as_mut().unwrap();
+        tr.x[0]+=29.0*LIGHT_SECOND;
+        tr.p=[[0.0;6];6];
+        assert!(w.beam_worth_firing(BodyId(0),c));
+        w.arm_beams(BodyId(0)).unwrap();
+        assert_eq!(w.bodies[0].beam_emitted_j,SHIP_BEAM_ENERGY_J.value);
+        let (mut w,c)=beam_trial();
+        w.perceptions.get_mut(&FactionId(0)).unwrap().contacts.get_mut(&c).unwrap().track.as_mut().unwrap().x[0]+=29.0*LIGHT_SECOND;
+        assert!(!w.beam_worth_firing(BodyId(0),c));
+        w.engage_beam(BodyId(0),Some(c)).unwrap();
+        assert_eq!(w.bodies[0].beam_emitted_j,SHIP_BEAM_ENERGY_J.value,"directed shots accept the player's risk");
+    }
+    #[test]
+    fn damaged_systems_change_capability_and_destroyed_weapons_stop() {
+        use crate::damage::{System as S,Condition as D};
+        let (mut w,c)=beam_trial();
+        let max=w.bodies[0].max_accel();
+        w.bodies[0].damage.systems[S::Propulsion as usize]=D::Damaged;
+        assert_eq!(w.bodies[0].max_accel(),max*0.5);
+        w.set_thrust(BodyId(0),Vec2::new(max,0.0)).unwrap();
+        assert!((w.bodies[0].trajectory.last().thrust.length()-max*0.5).abs()<1e-8);
+        w.bodies[0].damage.systems[S::Propulsion as usize]=D::Destroyed;
+        w.set_thrust(BodyId(0),Vec2::new(max,0.0)).unwrap();
+        assert_eq!(w.bodies[0].trajectory.last().thrust,Vec2::ZERO);
+        w.bodies[0].damage.systems[S::Beam as usize]=D::Damaged;
+        w.fire_beam(BodyId(0),c).unwrap();
+        assert_eq!(w.bodies[0].beam_ready_at,2.0*SHIP_BEAM_RECHARGE_S.value);
+        w.bodies[0].damage.systems[S::Beam as usize]=D::Destroyed;
+        assert_eq!(w.fire_beam(BodyId(0),c),Err(OrderError::PowerOrHeat));
+        w.bodies[0].damage.systems[S::Launcher as usize]=D::Destroyed;
+        assert_eq!(w.queue_launch(BodyId(0),c,Payload::Nuclear),Err(OrderError::PowerOrHeat));
+        w.bodies[0].damage.systems[S::Active as usize]=D::Destroyed;
+        assert!(!w.ping(BodyId(0)));
+        w.bodies[0].damage.systems[S::Passive as usize]=D::Damaged;
+        assert_eq!(w.bodies[0].sensor_effectiveness(),[0.5,1.0]);
+    }
+    #[test]
+    fn hull_damage_limits_thrust_at_inclusive_thresholds_and_stacks_with_system_damage() {
+        use crate::damage::{System as S,Condition as D};
+        let (mut w,_)=beam_trial();
+        let base=w.bodies[0].max_accel();
+        w.bodies[0].damage.hull_max=1000.0;
+        for (hull,factor) in [(1000.0,1.0),(501.0,1.0),(500.0,0.75),(251.0,0.75),(250.0,0.5),(100.0,0.5)] {
+            w.bodies[0].damage.hull=hull;
+            assert!((w.bodies[0].max_accel()-base*factor).abs()<1e-12);
+            w.set_thrust(BodyId(0),Vec2::new(base,0.0)).unwrap();
+            assert!((w.bodies[0].trajectory.last().thrust.length()-base*factor).abs()<1e-12);
+        }
+        w.bodies[0].damage.systems[S::Propulsion as usize]=D::Damaged;
+        assert_eq!(w.bodies[0].max_accel(),base*0.25);
+        w.bodies[0].damage.systems[S::Power as usize]=D::Damaged;
+        assert_eq!(w.bodies[0].max_accel(),0.0);
+        w.bodies[0].damage.systems[S::Power as usize]=D::Intact;
+        w.bodies[0].damage.systems[S::Propulsion as usize]=D::Intact;
+        w.bodies[0].damage.hull=501.0;
+        assert_eq!(w.bodies[0].max_accel(),base,"hull recovery restores thrust capacity");
+    }
+    #[test]
+    fn power_failure_drifts_with_backup_sensors_and_power_destruction_kills_with_hull_remaining() {
+        use crate::damage::{System as S,Condition as D};
+        let (mut w,c)=beam_trial();
+        w.set_thrust(BodyId(0),Vec2::new(G0,0.0)).unwrap();
+        w.bodies[0].damage.systems[S::Power as usize]=D::Damaged;
+        w.guide(BodyId(0));
+        assert_eq!(w.bodies[0].trajectory.last().thrust,Vec2::ZERO);
+        assert_eq!(w.bodies[0].sensor_effectiveness(),[1.0,1.0]);
+        assert_eq!(w.bodies[0].operating_effectiveness(S::Crew),1.0);
+        assert_eq!(w.bodies[0].operating_effectiveness(S::Repair),1.0);
+        assert!(!w.ping(BodyId(0)));
+        assert_eq!(w.fire_beam(BodyId(0),c),Err(OrderError::PowerOrHeat));
+        assert_eq!(w.queue_launch(BodyId(0),c,Payload::Nuclear),Err(OrderError::PowerOrHeat));
+        w.bodies[0].damage.systems[S::Power as usize]=D::Destroyed;
+        w.deliver(BodyId(0),0.0,1.0,Payload::Beam,BodyId(1));
+        assert!(w.bodies[0].damage.hull>0.0);
+        assert!(!w.bodies[0].alive_at(0.001));
+    }
+    #[test]
+    fn automatic_beams_and_thrust_stay_off_until_power_repair() {
+        use crate::damage::{System as S,Condition as D};
+        let (mut w,c)=beam_trial();
+        w.set_thrust(BodyId(0),Vec2::new(G0,0.0)).unwrap();
+        w.bodies[0].damage.systems[S::Power as usize]=D::Damaged;
+        w.guide(BodyId(0));
+        w.engage_beam(BodyId(0),Some(c)).unwrap();
+        let shots=w.bodies[0].beam_emitted_j;
+        w.advance_to(100.0);
+        assert_eq!(w.bodies[0].trajectory.last().thrust,Vec2::ZERO);
+        assert_eq!(w.bodies[0].beam_emitted_j,shots);
+        for s in [S::Active,S::Ecm,S::Eccm,S::Propulsion,S::Screens,S::PdMissiles,S::PdLaser,S::Beam,S::Launcher] {
+            assert_eq!(w.bodies[0].operating_effectiveness(s),0.0,"{s:?}");
+        }
+        w.advance_to(121.0);
+        assert_eq!(w.bodies[0].damage.state(S::Power),D::Intact);
+        assert!(w.bodies[0].trajectory.last().thrust.length()>0.0);
+    }
+    #[test]
+    fn exhausted_ui_budget_keeps_pending_simulation_events() {
+        let (mut w,c)=beam_trial();
+        w.fire_beam(BodyId(0),c).unwrap();
+        w.advance_until_alert_budgeted(5.0,None,Some(std::time::Instant::now()));
+        assert_eq!(w.time(),0.0);
+        assert!(w.hits.is_empty());
+        w.advance_to(5.0);
+        assert!(!w.hits.is_empty(),"budget yield must not drop the pending beam arrival");
+    }
+
+    #[test]
+    fn screens_can_leak_small_hits_without_losing_energy() {
+        let (mut w,_)=beam_trial();
+        w.bodies[1].screen_up=true;w.bodies[1].thermal.field=1.0;
+        let mut leaks=0;
+        for _ in 0..400 {
+            w.bodies[1].damage=crate::damage::Damage::default();
+            w.deliver(BodyId(1),0.0,1e10,Payload::Beam,BodyId(0));
+            let hit=w.hits.last().unwrap();
+            let d=w.bodies[1].damage;
+            let absorbed=(d.hull_max-d.hull+d.armour_max-d.armour)*crate::damage::JOULES_PER_HP;
+            assert!((hit.screened_j+absorbed-hit.energy_j).abs()<1.0);
+            if d.hull<d.hull_max {leaks+=1;assert!((hit.energy_j-hit.screened_j-1e8).abs()<1.0);}
+        }
+        assert!((5..40).contains(&leaks),"small leak probability: {leaks}/400");
+    }
+
+    #[test]
+    fn automatic_beams_repeat_and_cease_fire_cancels_pending_shots() {
+        let (mut w, c) = beam_trial();
+        w.engage_beam(BodyId(0), Some(c)).unwrap();
+        assert_eq!(w.bodies[0].beam_emitted_j, SHIP_BEAM_ENERGY_J.value);
+        w.advance_to(SHIP_BEAM_RECHARGE_S.value - 0.01);
+        assert_eq!(w.bodies[0].beam_emitted_j, SHIP_BEAM_ENERGY_J.value);
+        w.advance_to(SHIP_BEAM_RECHARGE_S.value);
+        assert_eq!(w.bodies[0].beam_emitted_j, 2.0 * SHIP_BEAM_ENERGY_J.value);
+        w.engage_beam(BodyId(0), None).unwrap();
+        w.advance_to(40.0);
+        assert_eq!(w.bodies[0].beam_emitted_j, 2.0 * SHIP_BEAM_ENERGY_J.value);
+    }
+
+    #[test]
+    fn automatic_beams_hold_on_stale_tracks_and_power_limits() {
+        let (mut w,c)=beam_trial();
+        w.time=TRACK_STALE_S.value+1.0;
+        w.engage_beam(BodyId(0),Some(c)).unwrap();
+        assert_eq!(w.bodies[0].beam_emitted_j,0.0);
+        let (mut w,c)=beam_trial();
+        w.bodies[0].thermal.capacitor_j=0.0;
+        assert_eq!(w.fire_beam(BodyId(0),c),Err(OrderError::PowerOrHeat));
+        assert_eq!(w.bodies[0].beam_emitted_j,0.0);
+        w.bodies[0].thermal.capacitor_j=BEAM_CAPACITOR_J.value;
+        w.bodies[0].thermal.heat_j=BEAM_HEAT_LIMIT_J.value;
+        assert_eq!(w.fire_beam(BodyId(0),c),Err(OrderError::PowerOrHeat));
+    }
+
+    #[test]
+    fn ship_beams_travel_at_c_and_survive_the_emitter() {
+        let (mut w, c) = beam_trial();
+        w.fire_beam(BodyId(0), c).unwrap();
+        w.advance_to(0.9);
+        assert!(w.hits.is_empty());
+        w.destroy(BodyId(0), 0.9, LossCause::Impact(0));
+        w.advance_to(2.0);
+        let hit = w.hits.first().expect("emitted light still hits");
+        assert!((hit.t - 1.0).abs() < 0.001);
+        assert!(hit.energy_j > 1e12 && hit.energy_j <= SHIP_BEAM_ENERGY_J.value);
+        assert!(w.bodies[1].damage.hull<100.0,"surviving target still takes damage from the emitted pulse");
+    }
+
+    #[test]
+    fn ship_beams_use_tracks_and_require_a_ready_emitter() {
+        let (mut w, c) = beam_trial();
+        assert_eq!(w.fire_beam(BodyId(0), ContactId(99)), Err(OrderError::NoTrack));
+        assert_eq!(w.bodies[0].beam_emitted_j, 0.0);
+        w.bodies[0].armed = false;
+        assert_eq!(w.fire_beam(BodyId(0), c), Err(OrderError::Unarmed));
+        w.bodies[0].armed = true;
+        w.bodies[0].magazine = [0; 2];
+        // False track: the pulse must follow the estimate, not snap onto truth.
+        w.perceptions.get_mut(&FactionId(0)).unwrap().contacts.get_mut(&c).unwrap().track.as_mut().unwrap().x[1] += 10_000.0;
+        w.fire_beam(BodyId(0), c).unwrap();
+        assert_eq!(w.fire_beam(BodyId(0), c), Err(OrderError::BeamRecharging));
+        w.advance_to(SHIP_BEAM_RECHARGE_S.value);
+        assert!(w.hits.is_empty(), "bad fire-control solution misses");
+        w.fire_beam(BodyId(0), c).unwrap();
+        assert_eq!(w.bodies[0].beam_emitted_j, 2.0 * SHIP_BEAM_ENERGY_J.value);
+        assert_eq!(w.bodies[0].magazine, [0; 2]);
+    }
+
+    #[test]
+    fn ship_beam_energy_enters_screens_and_obeys_occlusion() {
+        let (mut w, c) = beam_trial();
+        w.bodies[1].screen_up = true;
+        w.bodies[1].thermal.field = 1.0; // This fixture starts with an established field.
+        w.fire_beam(BodyId(0), c).unwrap();
+        w.advance_to(2.0);
+        assert!(w.bodies[1].screen_j > 0.0);
+        assert_eq!(w.bodies[1].hull_j, 0.0);
+        assert_eq!(w.bodies[1].thermal.captured_j, w.hits[0].energy_j);
+        assert!(w.bodies[1].thermal.balance_error(w.bodies[1].screen_j).abs() < 100.0);
+
+        let (mut w, c) = beam_trial();
+        // Insert a star directly in the shot path after establishing the test track.
+        let midpoint = (w.state(BodyId(0), 0.0).unwrap().pos + w.state(BodyId(1), 0.0).unwrap().pos) * 0.5;
+        w.system.bodies[0].orbit = crate::celestial::Orbit::Fixed(midpoint);
+        w.system.bodies[0].radius = 1000.0;
+        w.system.bodies[0].gm = 0.0;
+        w.fire_beam(BodyId(0), c).unwrap();
+        w.advance_to(2.0);
+        assert!(w.hits.is_empty(), "celestial body blocks the beam");
+    }
+
+    #[test]
+    fn missiles_deposit_reduced_heat_but_keep_unscreened_damage() {
+        for payload in Payload::ALL {
+            let (mut w, _) = beam_trial();
+            w.bodies[1].screen_up=true;
+            w.bodies[1].thermal.field=1.0;
+            w.deliver(BodyId(1),0.0,1e5,payload,BodyId(0));
+            assert_eq!(w.bodies[1].screen_j,4e4);
+            assert_eq!(w.bodies[1].thermal.captured_j,4e4);
+            assert_eq!(w.bodies[1].hull_j,0.0);
+            let (mut bare, _) = beam_trial();
+            bare.bodies[1].has_screen=false;
+            bare.deliver(BodyId(1),0.0,1e12,payload,BodyId(0));
+            assert_eq!(bare.hits[0].screened_j,0.0);
+            assert!(bare.bodies[1].hull_j>0.0);
+        }
+    }
+
+    #[test]
+    fn ship_beam_spreading_reduces_coupled_energy() {
+        let energy = |distance: f64| {
+            let (mut w, c) = beam_trial();
+            let origin = w.state(BodyId(0), 0.0).unwrap().pos;
+            let pos = origin + Vec2::new(distance * LIGHT_SECOND, 0.0);
+            w.bodies[1].trajectory = Trajectory::new(0.0, State { pos, vel: Vec2::ZERO });
+            w.bodies[1].screen_up = true;
+            let tr = w.perceptions.get_mut(&FactionId(0)).unwrap().contacts.get_mut(&c).unwrap().track.as_mut().unwrap();
+            tr.x[0] = pos.x;
+            tr.x[1] = pos.y;
+            w.fire_beam(BodyId(0), c).unwrap();
+            w.advance_to(distance + 1.0);
+            w.hits[0].energy_j
+        };
+        let (near, far) = (energy(2.0), energy(10.0));
+        assert!(near > far * 20.0 && near < far * 30.0, "{near} vs {far}");
+    }
+
+    #[test]
+    fn only_two_offensive_missile_types_are_launchable() {
+        let (mut w,c)=beam_trial();
+        assert_eq!(Payload::ALL.len(),2);
+        assert_eq!(w.launch(BodyId(0),c,Payload::Beam),Err(OrderError::InvalidTarget));
+        assert_eq!(w.queue_launch(BodyId(0),c,Payload::Beam),Err(OrderError::InvalidTarget));
+    }
+
+    #[test]
+    fn nuclear_fuse_detonates_at_closest_pass_even_outside_damage_radius() {
+        for (miss_distance, end) in [(1000.0, 2.0), (2.0 * NUCLEAR_AOE_KM.value, 2.0), (1000.0, 1.0)] {
+            let (mut w, c) = beam_trial();
+            let target = w.state(BodyId(1), 0.0).unwrap().pos;
+            let m = w.launch(BodyId(0), c, Payload::Nuclear).unwrap();
+            let mb = &mut w.bodies[m.0 as usize];
+            mb.trajectory = Trajectory::new(0.0, State {
+                pos: target + Vec2::new(-1000.0, miss_distance), vel: Vec2::new(1000.0, 0.0),
+            });
+            // Directly exercise one interval of committed motion, with no guidance
+            // events in between. The closest approach is exactly t=1.
+            let ms=mb.missile.as_mut().unwrap();
+            ms.phase=Phase::Terminal;
+            ms.local_fix=Some(sensors::SeekerFix::update(None,0.0,target,Vec2::ZERO));
+            mb.sensors.passive=false; // Isolate fuse timing from fresh measurement noise.
+            w.time = end;
+            w.guide_missile(m);
+            let ended = w.bodies[m.0 as usize].trajectory.end().expect("warhead detonated");
+            assert!((ended - 1.0).abs() < 1e-5, "burst at {ended}, miss {miss_distance}");
+            assert_eq!(w.hits.iter().any(|h| h.body == BodyId(1)), miss_distance < NUCLEAR_AOE_KM.value);
+        }
+    }
+
+    #[test]
+    fn nuclear_fuse_does_not_fire_while_still_closing() {
+        let (mut w, c) = beam_trial();
+        let target = w.state(BodyId(1), 0.0).unwrap().pos;
+        let m = w.launch(BodyId(0), c, Payload::Nuclear).unwrap();
+        w.bodies[m.0 as usize].trajectory = Trajectory::new(0.0, State {
+            pos: target + Vec2::new(-1000.0, 1000.0), vel: Vec2::new(1000.0, 0.0),
+        });
+        w.time = 0.5;
+        w.guide_missile(m);
+        assert!(w.bodies[m.0 as usize].trajectory.end().is_none());
+        assert!(w.hits.is_empty());
+    }
+
+    #[test]
+    fn nuclear_salvo_finishes_its_pass_after_the_target_is_destroyed() {
+        let (mut w, c) = beam_trial();
+        w.bodies[0].magazine = [10; 2];
+        for _ in 0..10 { w.queue_launch(BodyId(0), c, Payload::Nuclear).unwrap(); }
+        w.advance_to(4000.0);
+        let alive: Vec<_> = w.bodies.iter().filter(|b| b.kind == BodyKind::Missile && b.alive_at(w.time()))
+            .map(|b| (&b.name, b.missile.unwrap().phase, b.missile.unwrap().dv_left)).collect();
+        assert!(w.bodies[1].trajectory.end().is_some(), "lead warhead hits");
+        assert!(alive.is_empty(), "missiles should burst after their pass, not fly on: {alive:?}");
+    }
+
+    #[test]
+    fn kinetic_miss_retires_at_an_exact_guidance_boundary() {
+        let (mut w, c) = beam_trial();
+        let target = w.state(BodyId(1), 0.0).unwrap().pos;
+        let m = w.launch(BodyId(0), c, Payload::Kinetic).unwrap();
+        w.bodies[m.0 as usize].trajectory = Trajectory::new(0.0, State {
+            pos: target + Vec2::new(-1000.0, 1000.0), vel: Vec2::new(1000.0, 0.0),
+        });
+        let ms=w.bodies[m.0 as usize].missile.as_mut().unwrap();
+        ms.phase=Phase::Terminal;
+        ms.local_fix=Some(sensors::SeekerFix::update(None,0.0,target,Vec2::ZERO));
+        w.bodies[m.0 as usize].sensors.passive=false;
+        w.time = 1.0;
+        w.guide_missile(m);
+        assert!(w.bodies[m.0 as usize].trajectory.end().is_some());
+        assert!(w.hits.is_empty());
+    }
+
+    #[test]
+    fn missed_missiles_retire_even_with_fuel_and_a_dead_target() {
+        {
+            let payload=Payload::Kinetic;
+            let (mut w, c) = beam_trial();
+            let m = w.launch(BodyId(0), c, payload).unwrap();
+            w.advance_to(0.1);
+            w.destroy(BodyId(1), 0.1, LossCause::Impact(0));
+            w.advance_to(4000.0);
+            assert!(w.bodies[m.0 as usize].trajectory.end().is_some(), "{payload:?} should leave play after its pass");
+            assert!(w.bodies[m.0 as usize].missile.unwrap().dv_left > 0.0, "removal must not require exhausting fuel");
+        }
+    }
+
+    #[test]
+    fn active_sensors_do_not_resolve_the_out_of_range_scenario_target() {
+        let mut w = crate::scenario::transport_intercept();
+        w.ping(BodyId(2));
+        w.advance_to(1800.0);
+        let p = w.perception(crate::scenario::RAIDER).unwrap();
+        let echoes = p.log.iter().filter(|o| o.source == Source::Echo).count();
+        assert_eq!(echoes,0,"out-of-range returns must not produce range fixes");
+        assert!(p.contacts.values().all(|c|!c.resolved));
+    }
+
+    #[test]
+    fn evade_burns_away_using_the_received_target() {
+        let (mut w,c)=beam_trial();
+        let delta=w.state(BodyId(1),0.0).unwrap().pos-w.state(BodyId(0),0.0).unwrap().pos;
+        w.set_tactical_range(BodyId(0),InterceptTarget::Contact(c),None).unwrap();
+        let thrust=w.bodies[0].trajectory.last().thrust;
+        assert!(thrust.dot(delta)<0.0);
+        assert!((thrust.length()-w.bodies[0].max_accel().min(w.bodies[0].drive_limit)).abs()<1e-8);
+    }
+
+    #[test]
+    fn all_range_orders_close_on_bearings_then_hold_the_received_range() {
+        for range in [3.0*AU,AU,0.03*AU] {
+            let (mut w,c)=beam_trial();
+            let origin=w.state(BodyId(0),0.0).unwrap().pos;
+            let contact=w.perceptions.get_mut(&FactionId(0)).unwrap().contacts.get_mut(&c).unwrap();
+            contact.resolved=false; // Even a hidden triangulation must not steer range hold.
+            contact.last.measurement=Measurement::Bearing {bearing:0.0,sigma:0.01};
+            contact.last.decider_received_at=0.0;
+            w.set_tactical_range(BodyId(0),InterceptTarget::Contact(c),Some(range)).unwrap();
+            assert!(w.bodies[0].trajectory.last().thrust.x>0.0,"close on bearing: {range}");
+            // The first fix places the ship inside its selected separation: withdraw.
+            let contact=w.perceptions.get_mut(&FactionId(0)).unwrap().contacts.get_mut(&c).unwrap();
+            contact.resolved=true;
+            let tr=contact.track.as_mut().unwrap();
+            tr.x[0]=origin.x+range*0.5;tr.x[1]=origin.y;
+            tr.x[2]=0.0;tr.x[3]=0.0;tr.x[4]=0.0;tr.x[5]=0.0;
+            w.guide(BodyId(0));
+            assert!(w.bodies[0].trajectory.last().thrust.x<0.0,"withdraw after fix: {range}");
+            let contact=w.perceptions.get_mut(&FactionId(0)).unwrap().contacts.get_mut(&c).unwrap();
+            contact.last.decider_received_at=-TRACK_STALE_S.value-1.0;
+            w.guide(BodyId(0));
+            assert_eq!(w.bodies[0].trajectory.last().thrust,Vec2::ZERO,"coast on stale evidence");
+        }
+    }
+
     #[test]
     fn each_payload_kills_an_unaware_target() {
         for payload in Payload::ALL {
             let (mut w, c) = range(1.0);
+            // A fragile unarmoured target isolates payload delivery; combat
+            // frigates intentionally survive individual penetrating hits.
+            w.bodies[2].damage.hull=0.1;
+            w.bodies[2].damage.hull_max=0.1;
+            w.bodies[2].damage.armour=0.0;
             let m = w.launch(BodyId(0), c, payload).unwrap();
-            assert_eq!(w.bodies[0].magazine, 3);
+            // A perfect shot: this checks the payloads, not the spread.
+            w.bodies[m.0 as usize].missile.as_mut().unwrap().aim_drift = Vec2::ZERO;
+            assert_eq!(w.bodies[0].magazine[payload.index()], 3);
             w.advance_to(8.0 * 3600.0);
             let loss = w.losses.iter().find(|l| l.body == BodyId(2));
             assert!(
@@ -1307,6 +2532,203 @@ mod tests {
         }
     }
 
+    /// One engagement at a fixed closing speed `vc` (km/s) against a target jinking at
+    /// 100 g in a random direction every 2 s. Returns whether the target died.
+    fn closing_trial(vc: f64, payload: Payload, seed: u64) -> bool {
+        let base = Vec2::new(2.0 * AU, 0.0);
+        let target = base + Vec2::new(0.0, 0.0);
+        let flight = 150.0;
+        // The spotters come first so one of them is the flagship that fuses reports.
+        let specs = vec![
+            ship("SpotterA", 0, target + Vec2::new(0.0, 3.0 * LIGHT_SECOND), Vec2::ZERO, Vec2::ZERO),
+            ship("SpotterB", 0, target + Vec2::new(-2.0 * LIGHT_SECOND, -2.0 * LIGHT_SECOND), Vec2::ZERO, Vec2::ZERO),
+            ship("Shooter", 0, target - Vec2::new(vc * (flight + 30.0), 0.0), Vec2::new(vc, 0.0), Vec2::ZERO),
+            ship("Target", 1, target, Vec2::ZERO, Vec2::new(0.0, 100.0 * G0)),
+        ];
+        let mut w = World::new(sun(), specs, 600.0, seed);
+        let mut rng = crate::rng::Rng::stream(seed, 99);
+        let jink = |w: &mut World, rng: &mut crate::rng::Rng| {
+            let a = std::f64::consts::TAU * rng.uniform();
+            w.set_thrust(BodyId(3), Vec2::new(a.cos(), a.sin()) * (100.0 * G0)).unwrap();
+        };
+        while w.time() < 30.0 {
+            let t = w.time() + 2.0;
+            w.advance_to(t);
+            jink(&mut w, &mut rng);
+        }
+        let c = *w.contact_truth(FactionId(0)).iter().find(|(_, b)| **b == BodyId(3)).expect("tracked").0;
+        let m = w.launch(BodyId(2), c, payload).unwrap_or_else(|e| panic!("launch at {vc} km/s: {e:?}"));
+        // No launch burn: the missile keeps the shooter's closing speed.
+        if let Some(ms) = w.bodies[m.0 as usize].missile.as_mut() {
+            ms.burn_left = 0.0;
+            ms.phase = Phase::Cruise;
+        }
+        while w.time() < 30.0 + 2.0 * flight {
+            let t = w.time() + 2.0;
+            w.advance_to(t);
+            if w.bodies[3].trajectory.end().is_some() {
+                return true;
+            }
+            jink(&mut w, &mut rng);
+        }
+        false
+    }
+
+    /// Calibration: a missile launched from `range_km` at 0.01c closing, against a target
+    /// jinking at 10 g in a random direction every 60 s with its screen down. Spotters
+    /// fly the same jinks in formation 3 ls from the target, so the track stays fresh and
+    /// the spread comes from the shot itself.
+    /// Returns whether the payload hit on its first pass.
+    fn range_trial(payload: Payload, range_km: f64, seed: u64) -> bool {
+        let vc = 0.01 * crate::units::C;
+        let target = Vec2::new(40.0 * AU, 0.0);
+        let specs = vec![
+            ship("SpotterA", 0, target + Vec2::new(0.0, 3.0 * LIGHT_SECOND), Vec2::ZERO, Vec2::new(10.0 * G0, 0.0)),
+            ship("SpotterB", 0, target + Vec2::new(-2.0 * LIGHT_SECOND, -2.0 * LIGHT_SECOND), Vec2::ZERO, Vec2::new(10.0 * G0, 0.0)),
+            ship("Shooter", 0, target - Vec2::new(0.0, range_km), Vec2::ZERO, Vec2::ZERO),
+            ship("Target", 1, target, Vec2::ZERO, Vec2::new(10.0 * G0, 0.0)),
+        ];
+        let mut w = World::new(sun(), specs, 600.0, seed);
+        let mut rng = crate::rng::Rng::stream(seed, 99);
+        let jink = |w: &mut World, rng: &mut crate::rng::Rng| {
+            let a = std::f64::consts::TAU * rng.uniform();
+            let t = w.time();
+            let thrust = Vec2::new(a.cos(), a.sin()) * (10.0 * G0);
+            for k in [0, 1, 3] {
+                if w.bodies[k].alive_at(t) {
+                    w.set_thrust(BodyId(k as u32), thrust).unwrap();
+                }
+            }
+        };
+        w.advance_to(60.0);
+        let c = *w.contact_truth(FactionId(0)).iter().find(|(_, b)| **b == BodyId(3)).expect("tracked").0;
+        let m = w.launch(BodyId(2), c, payload).unwrap();
+        // Already coasting at the closing speed: no launch burn.
+        let t0 = w.time();
+        let start = w.bodies[2].trajectory.state_at(t0).unwrap();
+        let aim = (w.bodies[3].trajectory.state_at(t0).unwrap().pos - start.pos).normalized();
+        let mb = &mut w.bodies[m.0 as usize];
+        mb.trajectory = Trajectory::new(t0, State { pos: start.pos, vel: start.vel + aim * vc });
+        if let Some(ms) = mb.missile.as_mut() {
+            ms.burn_left = 0.0;
+            ms.phase = Phase::Cruise;
+            if std::env::var("LUMINAL_NO_DRIFT").is_ok() {
+                ms.aim_drift = Vec2::ZERO;
+            }
+        }
+        let end = t0 + range_km / vc + 120.0;
+        let mut closest = f64::INFINITY;
+        while w.time() < end {
+            let t_prev = w.time();
+            let t = (t_prev + 60.0).min(end);
+            w.advance_to(t);
+            let (mt, tt) = (&w.bodies[m.0 as usize].trajectory, &w.bodies[3].trajectory);
+            if let Some((_, d)) = missile::closest_approach(t_prev, t, |tau| Some(tt.state_at(tau)?.pos - mt.state_at(tau)?.pos)) {
+                closest = closest.min(d);
+            }
+            if w.hits.iter().any(|h| h.body == BodyId(3) && h.missile == m) {
+                return true;
+            }
+            jink(&mut w, &mut rng);
+        }
+        if std::env::var("LUMINAL_DEBUG").is_ok() {
+            eprintln!("  {payload:?} seed {seed}: missed, closest {closest:.0} km");
+        }
+        false
+    }
+
+    /// The design's 50 % hit ranges at 0.01c.
+    fn half_range(payload: Payload) -> f64 {
+        match payload {
+            Payload::Kinetic => 0.01 * AU,
+            Payload::Nuclear => AU,
+            Payload::Beam => 10.0 * AU,
+        }
+    }
+
+    /// `LUMINAL_SURVEY_N` trials per point (default 40); `LUMINAL_SURVEY_AT` a comma list
+    /// of range factors (default 0.3,1,3); `LUMINAL_SURVEY_PAYLOAD` one payload name.
+    #[test]
+    #[ignore]
+    fn range_survey() {
+        let n: u64 = std::env::var("LUMINAL_SURVEY_N").ok().and_then(|v| v.parse().ok()).unwrap_or(40);
+        let at: Vec<f64> = std::env::var("LUMINAL_SURVEY_AT")
+            .ok()
+            .map(|v| v.split(',').filter_map(|x| x.parse().ok()).collect())
+            .unwrap_or(vec![0.3, 1.0, 3.0]);
+        let only = std::env::var("LUMINAL_SURVEY_PAYLOAD").ok();
+        for payload in Payload::ALL.into_iter().filter(|p| only.as_deref().is_none_or(|o| o == p.name())) {
+            for &f in &at {
+                let r = f * half_range(payload);
+                let clock = std::time::Instant::now();
+                let hits = (0..n).filter(|&s| range_trial(payload, r, 1000 + s)).count();
+                println!("{payload:?} at {:.3} AU: {hits}/{n} hits ({:.1} s)", r / AU, clock.elapsed().as_secs_f64());
+            }
+        }
+    }
+
+    #[test]
+    #[ignore]
+    fn closing_debug() {
+        for (vc, p) in [(100.0, Payload::Kinetic)] {
+            for seed in 100..101 {
+                let hit = closing_trial(vc, p, seed);
+                eprintln!("{p:?} {vc} seed {seed}: hit {hit}");
+            }
+        }
+    }
+
+    #[test]
+    #[ignore]
+    fn closing_speed_survey() {
+        for payload in Payload::ALL {
+            for vc in [100.0, 1_000.0, 3_000.0, 10_000.0, 30_000.0, 100_000.0] {
+                let hits = (0..10).filter(|&s| closing_trial(vc, payload, 100 + s)).count();
+                println!("{payload:?} closing {vc:>8.0} km/s: {hits}/10");
+            }
+        }
+    }
+
+    #[test]
+    fn missile_active_search_starts_before_terminal_steering() {
+        let (mut w,c)=beam_trial();
+        let pos=w.state(BodyId(0),0.0).unwrap().pos+Vec2::new(4.0*LIGHT_SECOND,0.0);
+        w.bodies[1].trajectory=Trajectory::new(0.0,State {pos,vel:Vec2::ZERO});
+        let tr=w.perceptions.get_mut(&FactionId(0)).unwrap().contacts.get_mut(&c).unwrap().track.as_mut().unwrap();
+        tr.x[0]=pos.x;tr.x[1]=pos.y;
+        let m=w.launch(BodyId(0),c,Payload::Kinetic).unwrap();
+        w.bodies[m.0 as usize].sensors.passive=false;
+        w.advance_to(12.0);
+        assert!(w.bodies[m.0 as usize].missile.unwrap().active_seeker);
+        assert_eq!(w.bodies[m.0 as usize].missile.unwrap().phase,Phase::Burn);
+        assert!(w.ping_emissions.iter().any(|(id,_)|*id==m));
+    }
+
+    #[test]
+    fn missile_early_active_search_relays_target_reports() {
+        let (mut w,c)=range(1.0);
+        let m=w.launch(BodyId(0),c,Payload::Kinetic).unwrap();
+        assert_eq!(w.bodies[m.0 as usize].sensors,sensors::SensorSuite::MISSILE);
+        w.bodies[m.0 as usize].sensors.passive=false;
+        w.advance_to(61.0);
+        assert!(w.ping_emissions.iter().any(|(id,_)|*id==m));
+        w.bodies[m.0 as usize].missile.as_mut().unwrap().phase=Phase::Terminal;
+        // Disable passive sensing so the next local fix must come from an echo.
+        w.bodies[m.0 as usize].sensors.passive=false;
+        w.guide_missile(m); // Run the phase change now, not at the previous burn cadence.
+        w.advance_to(64.0);
+        assert!(w.ping_emissions.iter().any(|(id,_)|*id==m));
+        assert!(w.bodies[m.0 as usize].missile.unwrap().local_fix.is_none());
+        w.advance_to(100.0);
+        assert!(w.bodies[m.0 as usize].missile.unwrap().local_fix.is_some());
+        let reports=&w.perception(FactionId(0)).unwrap().log;
+        assert!(reports.iter().any(|o|o.sensor==m && o.contact==c && o.source==Source::Echo
+            && o.decider_received_at>o.sensor_received_at && o.sensor_received_at>o.emitted_at));
+        assert!(reports.iter().filter(|o|o.sensor==m).all(|o|matches!(o.measurement,Measurement::BearingRange {..})));
+        w.bodies[m.0 as usize].sensors.active=false;
+        assert!(!w.ping(m));
+    }
+
     #[test]
     fn the_target_sees_the_missile_burn() {
         let (mut w, c) = range(1.0);
@@ -1316,11 +2738,82 @@ mod tests {
     }
 
     #[test]
+    fn uncertain_contacts_allow_missile_launch_and_bearing_search() {
+        let (mut w,c)=beam_trial();
+        w.time=TRACK_STALE_S.value+1.0;
+        let m=w.launch(BodyId(0),c,Payload::Kinetic).expect("stale estimate is still launchable");
+        assert!(w.bodies[m.0 as usize].missile.is_some());
+
+        let (mut w,c)=beam_trial();
+        w.perceptions.get_mut(&FactionId(0)).unwrap().contacts.get_mut(&c).unwrap().track=None;
+        w.queue_launch(BodyId(0),c,Payload::Nuclear).expect("bearing-only contact is launchable");
+        let m=BodyId((w.bodies.len()-1) as u32);
+        w.bodies[m.0 as usize].sensors.passive=false;
+        w.guide_missile(m);
+        w.advance_to(MISSILE_RESPONSE_S.value+0.001);
+        assert!(w.bodies[m.0 as usize].trajectory.last().thrust.length()>0.0,"search must fly down the received bearing");
+        assert!(w.bodies[m.0 as usize].missile.unwrap().local_fix.is_none());
+        w.advance_to(1.1); // Target is one light-second away; its first light must arrive.
+        w.bodies[1].baseline_emission_factor=100.0; // Bright enough for the passive seeker.
+        w.bodies[m.0 as usize].sensors.passive=true;
+        w.guide_missile(m);
+        assert!(w.bodies[m.0 as usize].missile.unwrap().local_fix.is_some(),"local seeker acquires without a datalink range");
+        assert_eq!(w.bodies[m.0 as usize].missile.unwrap().phase,Phase::Burn,"acquisition must not cancel the departure boost");
+    }
+
+    #[test]
+    fn nuclear_round_is_safe_beside_its_launcher() {
+        let (mut w,c)=beam_trial();
+        let m=w.launch(BodyId(0),c,Payload::Nuclear).unwrap();
+        let origin=w.state(m,0.0).unwrap().pos;
+        w.detonate(m,0.0,origin);
+        assert!(w.hits.is_empty(),"unarmed warhead must not destroy its own launcher");
+    }
+
+    #[test]
     fn launching_needs_a_track_and_missiles() {
         let (mut w, c) = range(1.0);
         assert_eq!(w.launch(BodyId(0), ContactId(99), Payload::Kinetic), Err(OrderError::NoTrack));
-        w.bodies[0].magazine = 0;
+        w.bodies[0].magazine = [0; 2];
         assert_eq!(w.launch(BodyId(0), c, Payload::Kinetic), Err(OrderError::EmptyMagazine));
+    }
+
+    #[test]
+    fn rapid_clicks_queue_independent_srm_and_lrm_launchers() {
+        let (mut w, c) = beam_trial();
+        w.bodies[0].magazine = [10; 2];
+        for p in [Payload::Kinetic, Payload::Nuclear, Payload::Nuclear, Payload::Kinetic] {
+            w.queue_launch(BodyId(0), c, p).unwrap();
+        }
+        assert_eq!(w.bodies[0].magazine, [9, 9]);
+        assert_eq!(w.bodies[0].missile_queued, [1, 1]);
+        w.advance_to(4.999);
+        assert_eq!(w.bodies.iter().filter(|b| b.kind == BodyKind::Missile).count(), 2);
+        w.advance_to(60.0);
+        let shots: Vec<_> = w.bodies.iter().filter_map(|b| b.missile.map(|m| (b.trajectory.start(), m.payload))).collect();
+        assert_eq!(shots, vec![(0.0, Payload::Kinetic), (0.0, Payload::Nuclear), (5.0, Payload::Kinetic), (60.0, Payload::Nuclear)]);
+        assert_eq!(w.bodies[0].magazine, [8, 8]);
+        assert_eq!(w.bodies[0].missile_queued, [0; 2]);
+    }
+
+    #[test]
+    fn queued_shots_reserve_ammo_without_consuming_other_types() {
+        let (mut w, c) = beam_trial();
+        w.bodies[0].magazine = [10; 2];
+        assert_eq!(w.queue_launch(BodyId(0), ContactId(999), Payload::Nuclear), Err(OrderError::NoTrack));
+        for _ in 0..10 { w.queue_launch(BodyId(0), c, Payload::Nuclear).unwrap(); }
+        assert_eq!(w.queue_launch(BodyId(0), c, Payload::Nuclear), Err(OrderError::EmptyMagazine));
+        assert_eq!(w.bodies[0].magazine, [10, 9]);
+        assert_eq!(w.bodies[0].missile_queued, [0, 9]);
+        w.queue_launch(BodyId(0), c, Payload::Kinetic).unwrap();
+        assert_eq!(w.bodies[0].missile_queued, [0, 9]);
+        // Lose the track before queued shots fire: reserved ammunition is released.
+        for b in &mut w.bodies {b.sensors=sensors::SensorSuite {passive:false,active:false,direction_finding:false};}
+        w.relays.clear();
+        w.perceptions.get_mut(&FactionId(0)).unwrap().contacts.remove(&c);
+        w.advance_to(MISSILE_LAUNCH_INTERVAL_S.value);
+        assert_eq!(w.bodies[0].magazine, [9, 9]);
+        assert_eq!(w.bodies[0].missile_queued, [0, 8]);
     }
 
     #[test]
@@ -1328,12 +2821,67 @@ mod tests {
         let base = Vec2::new(2.0 * AU, 0.0);
         let specs = vec![
             ship("Alone", 0, base, Vec2::ZERO, Vec2::ZERO),
-            ship("Burner", 1, base + Vec2::new(60.0 * LIGHT_SECOND, 0.0), Vec2::ZERO, Vec2::new(0.0, 5.0 * G0)),
+            ship("Burner", 1, base + Vec2::new(AU, 0.0), Vec2::ZERO, Vec2::new(0.0, 5.0 * G0)),
         ];
         let mut w = World::new(sun(), specs, 3600.0, 1);
         w.advance_to(100.0);
         let c = *w.contact_truth(FactionId(0)).keys().next().unwrap();
         assert_eq!(w.set_intercept(BodyId(0), InterceptTarget::Contact(c)), Err(OrderError::NoTrack));
+        assert_eq!(w.set_flyby(BodyId(0), InterceptTarget::Contact(c)), Err(OrderError::NoTrack));
+    }
+
+    #[test]
+    fn a_lone_passive_ship_localizes_at_point_one_au() {
+        let base = Vec2::new(20.0 * AU, 0.0);
+        let mut w = World::new(sun(), vec![
+            ship("Observer", 0, base, Vec2::ZERO, Vec2::ZERO),
+            ship("Burner", 1, base + Vec2::new(0.1 * AU, 0.0), Vec2::ZERO, Vec2::new(0.0, 10.0 * G0)),
+        ], 600.0, 42);
+        w.advance_to(600.0);
+        let p = w.perception(FactionId(0)).unwrap();
+        let track = p.contacts.values().next().unwrap().track.as_ref().unwrap();
+        assert!(track.updates > 10);
+        let truth = w.bodies[1].trajectory.state_at(track.t).unwrap();
+        assert!((track.pos() - truth.pos).length() < 5.0 * track.pos_cov()[0][0].max(track.pos_cov()[1][1]).sqrt());
+        assert!(p.log.iter().all(|o| o.source == Source::Emission));
+    }
+
+    #[test]
+    fn active_ranging_and_exposure_arrive_at_light_speed() {
+        let base = Vec2::new(20.0 * AU, 0.0);
+        let mut w = World::new(sun(), vec![
+            ship("Pinger", 0, base, Vec2::ZERO, Vec2::new(0.0, 10.0 * G0)),
+            ship("Observer", 1, base + Vec2::new(0.95*AU, 0.0), Vec2::ZERO, Vec2::ZERO),
+        ], 1200.0, 42);
+        // Multiple returns avoid depending on a single probabilistic detection.
+        for _ in 0..10 { w.ping(BodyId(0)); }
+        w.advance_to(400.0);
+        assert!(w.perception(FactionId(1)).unwrap().log.iter().all(|o| o.source != Source::Ping));
+        w.advance_to(900.0);
+        let observer = w.perception(FactionId(1)).unwrap();
+        assert!(observer.log.iter().any(|o| o.source == Source::Ping && matches!(o.measurement, Measurement::BearingRange { .. })));
+        assert!(w.perception(FactionId(0)).is_none_or(|p| p.log.iter().all(|o| o.source != Source::Echo)));
+        w.advance_to(1300.0);
+        assert!(w.perception(FactionId(0)).unwrap().log.iter().any(|o| o.source == Source::Echo));
+    }
+
+    #[test]
+    fn flyby_retains_closing_speed_and_can_switch_to_matching() {
+        let base = Vec2::new(20.0 * AU, 0.0);
+        let specs = vec![
+            ship("Chaser", 0, base, Vec2::ZERO, Vec2::ZERO),
+            ship("Target", 0, base + Vec2::new(1e6, 0.0), Vec2::ZERO, Vec2::ZERO),
+        ];
+        let mut w = World::new(sun(), specs, 60.0, 1);
+        w.set_flyby(BodyId(0), InterceptTarget::Own(BodyId(1))).unwrap();
+        w.advance_to(1600.0);
+        assert_eq!(w.bodies[0].autopilot.unwrap().status, AutopilotStatus::Passed);
+        let speed = w.state(BodyId(0), w.time()).unwrap().vel.length();
+        assert!(speed > 1000.0, "flyby must not brake: {speed}");
+        w.set_intercept(BodyId(0), InterceptTarget::Own(BodyId(1))).unwrap();
+        w.advance_to(12000.0);
+        assert_eq!(w.bodies[0].autopilot.unwrap().status, AutopilotStatus::Holding);
+        assert!((w.state(BodyId(0), w.time()).unwrap().vel - w.state(BodyId(1), w.time()).unwrap().vel).length() < 1.0);
     }
 
     #[test]
@@ -1380,14 +2928,43 @@ mod tests {
         ];
         let mut w = World::new(sun(), specs, 3600.0, 3);
         // Cold ships at 3 ls are visible passively too; that is fine. Check echo use.
-        w.set_active_sensor(BodyId(0), true);
+        w.ping(BodyId(0));
         w.advance_to(60.0);
         let echo = w.perception(FactionId(0)).unwrap().log.iter().any(|o| o.source == Source::Echo);
         let seen = w.perception(FactionId(1)).unwrap().log.iter().any(|o| o.source == Source::Ping);
         assert!(echo && seen);
         let p = w.perception(FactionId(0)).unwrap();
         let t = p.contacts.values().next().unwrap().track.as_ref().unwrap();
-        assert!((t.pos() - (base + Vec2::new(3.0 * LIGHT_SECOND, 0.0))).length() < 50.0);
+        let truth = w.state(BodyId(1), t.t).unwrap().pos;
+        let sigma = t.pos_cov()[0][0].max(t.pos_cov()[1][1]).sqrt();
+        assert!((t.pos() - truth).length() < 5.0 * sigma, "one pulse must yield a statistically consistent fix");
+    }
+
+    #[test]
+    fn one_ping_resolves_inside_half_range_and_outer_echoes_only_give_bearings() {
+        for seed in 0..12 {
+            for (range,resolves) in [(0.45*AU,true),(0.75*AU,false)] {
+                let base=Vec2::new(20.0*AU,0.0);
+                let mut w=World::new(sun(),vec![
+                    ship("Pinger",0,base,Vec2::ZERO,Vec2::ZERO),
+                    ship("Target",1,base+Vec2::new(range,0.0),Vec2::ZERO,Vec2::ZERO),
+                ],1500.0,seed);
+                w.bodies[0].sensors.passive=false;
+                w.bodies[0].sensors.direction_finding=false;
+                assert!(w.ping(BodyId(0)));
+                w.advance_to(900.0);
+                let p=w.perception(FactionId(0)).unwrap();
+                let echoes:Vec<_>=p.log.iter().filter(|o|o.source==Source::Echo).collect();
+                if resolves {
+                    assert!(!echoes.is_empty(),"one inner-range ping must resolve, seed {seed}");
+                    assert!(p.contacts.values().any(|c|c.resolved));
+                    assert!(echoes.iter().all(|o|matches!(o.measurement,Measurement::BearingRange {..})));
+                } else {
+                    assert!(p.contacts.values().all(|c|!c.resolved));
+                    assert!(echoes.iter().all(|o|matches!(o.measurement,Measurement::Bearing {..})));
+                }
+            }
+        }
     }
 
     #[test]
