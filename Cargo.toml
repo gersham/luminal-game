@@ -1,0 +1,16 @@
+[workspace]
+resolver = "3"
+members = ["crates/luminal-core", "crates/luminal-app", "crates/luminal-cli"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "UNLICENSED"
+
+# Keep `cargo run` responsive at high warp: optimise the simulation and dependencies
+# even in debug builds, while the app crate itself stays quick to compile.
+[profile.dev.package.luminal-core]
+opt-level = 2
+
+[profile.dev.package."*"]
+opt-level = 2
