@@ -99,6 +99,28 @@ const WARPS: &[f64] = &[1.0, 5.0, 10.0, 50.0, 100.0, 1_000.0];
 mod tests {
     use super::*;
     #[test]
+    fn tactical_keys_map_orders_and_respect_missile_gates() {
+        use egui::Key;
+        let app=LuminalApp::new();
+        let view=app.session.view(Role::Faction(ESCORT));
+        let mut ship=view.bodies.iter().find(|b|b.controllable).unwrap().clone();
+        let contact=&view.contacts[0];
+        for (key,range) in [(Key::Num1,0.03*AU),(Key::Num2,AU),(Key::Num3,3.0*AU)] {
+            assert!(matches!(tactical_shortcut(key,&ship,Some(contact)),Some(Command::KeepRange {range:r,..}) if r==range));
+        }
+        assert!(matches!(tactical_shortcut(Key::Num0,&ship,Some(contact)),Some(Command::Evade {..})));
+        assert!(matches!(tactical_shortcut(Key::P,&ship,None),Some(Command::Ping {..})));
+        assert!(matches!(tactical_shortcut(Key::L,&ship,Some(contact)),Some(Command::Launch {payload:Payload::Nuclear,..})));
+        assert!(tactical_shortcut(Key::S,&ship,Some(contact)).is_none());
+        assert!(tactical_shortcut(Key::L,&ship,None).is_none());
+        assert!(tactical_shortcut(Key::Num4,&ship,Some(contact)).is_none());
+        ship.missile_queued[Payload::Nuclear.index()]=ship.magazine[Payload::Nuclear.index()];
+        assert!(tactical_shortcut(Key::L,&ship,Some(contact)).is_none());
+        ship.missile_queued[Payload::Nuclear.index()]=0;
+        ship.damage.damage.systems[System::Power as usize]=Condition::Damaged;
+        assert!(tactical_shortcut(Key::L,&ship,Some(contact)).is_none());
+    }
+    #[test]
     fn player_tracking_follows_own_ship_without_changing_zoom_or_target() {
         let mut app=LuminalApp::new();
         let mut view=app.session.view(Role::Faction(ESCORT));
@@ -774,6 +796,27 @@ fn missile_solution_launchable(target:Option<&ContactView>,payload:Payload,chanc
     target.is_some() && (payload==Payload::Nuclear || chance>=0.01)
 }
 
+fn tactical_shortcut(key:egui::Key,ship:&BodyView,target:Option<&ContactView>)->Option<Command> {
+    use egui::Key;
+    if key==Key::P {return Some(Command::Ping {body:ship.id});}
+    let contact=target?;
+    let target=InterceptTarget::Contact(contact.id);
+    match key {
+        Key::Num1|Key::Num2|Key::Num3=>Some(Command::KeepRange {body:ship.id,target,
+            range:match key {Key::Num1=>0.03*AU,Key::Num2=>AU,_=>3.0*AU}}),
+        Key::Num0=>Some(Command::Evade {body:ship.id,target}),
+        Key::L|Key::S=>{
+            let payload=if key==Key::L {Payload::Nuclear} else {Payload::Kinetic};
+            let available=ship.magazine[payload.index()].saturating_sub(ship.missile_queued[payload.index()]);
+            let chance=missile_hit_estimate(ship,Some(contact),payload);
+            (available>0 && ship.damage.operating_effectiveness(System::Launcher)>0.0
+                && missile_solution_launchable(Some(contact),payload,chance))
+                .then_some(Command::Launch {body:ship.id,target:contact.id,payload})
+        },
+        _=>None,
+    }
+}
+
 /// Conservative UI estimate from received information only, before defence.
 fn missile_hit_estimate(ship:&BodyView,target:Option<&ContactView>,payload:Payload)->f64 {
     let Some(track)=target.and_then(|c|c.track.as_ref()) else {return 0.0;};
@@ -821,6 +864,15 @@ impl eframe::App for LuminalApp {
             }
             if f {
                 self.fit_pending = true;
+            }
+            for key in [egui::Key::L,egui::Key::S,egui::Key::P,egui::Key::Num1,egui::Key::Num2,egui::Key::Num3,egui::Key::Num0] {
+                if ui.input(|i|i.key_pressed(key)) {
+                    let view=self.session.view(self.role);
+                    if let Some(ship)=view.bodies.iter().find(|b|b.controllable && b.kind==BodyKind::Ship) {
+                        let target=match self.inspected {Some(Selection::Contact(id))=>view.contacts.iter().find(|c|c.id==id),_=>None};
+                        if let Some(command)=tactical_shortcut(key,ship,target) {self.command(command);}
+                    }
+                }
             }
         }
 

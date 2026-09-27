@@ -115,6 +115,7 @@ pub fn transport_intercept() -> World {
         attacker: RAIDER,
     });
     let destination = world.objective.as_ref().unwrap().center;
+    world.bodies[0].ship_class=Some(crate::world::ShipClass::Transport);
     world.set_move(BodyId(0), destination).expect("escape destination is navigable");
     world.bodies[0].has_screen=false;
     // Temporarily listen for bearings only; no station ranging or auto pings.
@@ -129,7 +130,6 @@ pub fn transport_intercept() -> World {
     world.probes_enabled=crate::params::PROBES_ENABLED;
     if !world.probes_enabled {for b in &mut world.bodies {b.probes=0;}}
     for id in [BodyId(0),BodyId(1),BodyId(2),BodyId(3)] {world.fit_point_defence(id);}
-    world.bodies[0].ship_class=Some(crate::world::ShipClass::Transport);
     world.bodies[0].point_defence.as_mut().unwrap().rate_hz=0.5;
     for id in [BodyId(1),BodyId(2)] {world.bodies[id.0 as usize].point_defence.as_mut().unwrap().rate_hz=2.0;}
     for id in [BodyId(1), BodyId(2)] {
@@ -147,6 +147,15 @@ pub fn transport_intercept() -> World {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn transport_has_half_warship_acceleration_from_its_first_order() {
+        let world=transport_intercept();
+        let transport=&world.bodies[0];
+        let frigate=&world.bodies[1];
+        assert_eq!(transport.max_accel(),frigate.max_accel()*0.5);
+        assert!(transport.trajectory.last().thrust.length()<=transport.max_accel()+1e-9);
+        assert_eq!(world.bodies[2].max_accel(),frigate.max_accel());
+    }
 
     #[test]
     fn station_has_direction_finding_only() {

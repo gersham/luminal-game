@@ -203,7 +203,8 @@ impl Body {
     pub fn max_accel(&self) -> f64 {
         self.operating_effectiveness(crate::damage::System::Propulsion)*crate::units::G0
             * match self.kind {
-                BodyKind::Ship => SHIP_MAX_ACCEL_G.value*self.damage.hull_thrust_factor(),
+                BodyKind::Ship => SHIP_MAX_ACCEL_G.value*self.damage.hull_thrust_factor()
+                    * if self.ship_class==Some(ShipClass::Transport) {0.5} else {1.0},
                 BodyKind::Station => 0.0,
                 BodyKind::Probe => PROBE_MAX_ACCEL_G.value,
                 BodyKind::Missile => if self.interceptor.is_some() {INTERCEPTOR_ACCEL_G.value} else {self.missile.map_or(MISSILE_MAX_ACCEL_G.value,|m|m.payload.acceleration_g())},
