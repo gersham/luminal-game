@@ -342,6 +342,10 @@ impl LuminalApp {
             }
         }
 
+        if self.own_faction().is_some() {
+            self.weapons_panel(ui, view);
+        }
+
         match self.selected {
             Some(Selection::Body(id)) => {
                 if let Some(b) = view.bodies.iter().find(|b| b.id == id) {
@@ -374,6 +378,42 @@ impl LuminalApp {
              Planets, moons and the star block sensors and are fatal to touch.",
         );
         ui.small("Keys: Space pause, F fit. Drag to pan, scroll to zoom. Right-click to give orders. Ships steer around celestial bodies automatically unless it is impossible.");
+    }
+
+    /// Missile controls for every armed ship of the player's faction.
+    fn weapons_panel(&mut self, ui: &mut egui::Ui, view: &View) {
+        ui.separator();
+        ui.heading("Weapons");
+        let armed: Vec<(BodyId, String, u32)> =
+            view.bodies.iter().filter(|b| b.kind == BodyKind::Ship && b.magazine > 0).map(|b| (b.id, b.name.clone(), b.magazine)).collect();
+        if armed.is_empty() {
+            ui.weak("No armed ships.");
+            return;
+        }
+        ui.horizontal(|ui| {
+            ui.label("Payload:");
+            for p in Payload::ALL {
+                ui.selectable_value(&mut self.payload, p, p.name()).on_hover_text(match p {
+                    Payload::Kinetic => "Must physically hit: hardest to deliver, needs no warhead",
+                    Payload::Nuclear => "Kills within the proximity radius (placeholder 10 km)",
+                    Payload::Laser => "Fires a one-shot beam from standoff (placeholder 10,000 km)",
+                });
+            }
+        });
+        let tracked: Vec<ContactId> = view.contacts.iter().filter(|c| c.track.is_some()).map(|c| c.id).collect();
+        if tracked.is_empty() {
+            ui.weak("No tracked contacts. Bearing-only contacts have no range to fire at: get a second bearing or ping.");
+        }
+        for (id, name, n) in armed {
+            ui.horizontal_wrapped(|ui| {
+                ui.label(format!("{name} ({n})"));
+                for &c in &tracked {
+                    if ui.button(format!("Fire at C{}", c.0)).on_hover_text("Missiles re-plan on your track; range matters: 600 km/s delta-v").clicked() {
+                        self.command(Command::Launch { body: id, target: c, payload: self.payload });
+                    }
+                }
+            });
+        }
     }
 
     fn body_details(&mut self, ui: &mut egui::Ui, view: &View, b: &BodyView) {
@@ -451,27 +491,7 @@ impl LuminalApp {
                 }
             });
             if b.kind == BodyKind::Ship {
-                ui.separator();
-                ui.label(format!("Missiles: {}", b.magazine));
-                if b.magazine > 0 {
-                    ui.horizontal(|ui| {
-                        ui.label("Payload:");
-                        for p in Payload::ALL {
-                            ui.selectable_value(&mut self.payload, p, p.name());
-                        }
-                    });
-                    let tracked: Vec<_> = view.contacts.iter().filter(|c| c.track.is_some()).map(|c| c.id).collect();
-                    if tracked.is_empty() {
-                        ui.weak("No tracked contacts to fire at (bearing-only contacts need a range).");
-                    }
-                    ui.horizontal_wrapped(|ui| {
-                        for c in tracked {
-                            if ui.button(format!("Fire at C{}", c.0)).clicked() {
-                                self.command(Command::Launch { body: b.id, target: c, payload: self.payload });
-                            }
-                        }
-                    });
-                }
+                ui.label(if b.magazine > 0 { format!("Missiles: {} (fire from Weapons above)", b.magazine) } else { "Unarmed".into() });
             }
             let mut active = b.active_sensor;
             if ui.checkbox(&mut active, "Active sensor (ping)").on_hover_text("Ranges targets within ~10 ls, but the pings reveal you across AU.").changed() {
