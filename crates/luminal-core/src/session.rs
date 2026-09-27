@@ -7,6 +7,7 @@
 use crate::celestial::{CelestialKind, System};
 use crate::kinematics::Vec2;
 use crate::mind::{ContactId, Measurement, Source};
+pub use crate::missile::{Payload, Phase};
 use crate::params;
 use crate::units::G0;
 use crate::autopilot::Avoidance;
@@ -38,6 +39,8 @@ pub enum Command {
     AllStop { body: BodyId },
     /// Cap autopilot thrust, in g. Lower thrust means a fainter drive signature.
     SetDriveLimit { body: BodyId, g: f64 },
+    /// Launch a missile at a tracked contact.
+    Launch { body: BodyId, target: ContactId, payload: Payload },
     /// Ping once per sensor frame. Pings are visible far beyond their echo range.
     SetActiveSensor { body: BodyId, on: bool },
     SetWarp(f64),
@@ -54,6 +57,7 @@ pub enum Rejection {
     /// Intercept needs a track; a bearing alone gives no range.
     NoTrack,
     InvalidTarget,
+    EmptyMagazine,
 }
 
 impl From<OrderError> for Rejection {
@@ -62,6 +66,7 @@ impl From<OrderError> for Rejection {
             OrderError::Destroyed => Rejection::Destroyed,
             OrderError::NoTrack => Rejection::NoTrack,
             OrderError::InvalidTarget => Rejection::InvalidTarget,
+            OrderError::EmptyMagazine => Rejection::EmptyMagazine,
         }
     }
 }
@@ -84,6 +89,17 @@ pub struct BodyView {
     /// Cap on autopilot thrust, km/s² (infinite when unset).
     pub drive_limit: f64,
     pub active_sensor: bool,
+    pub magazine: u32,
+    pub missile: Option<MissileView>,
+}
+
+/// A missile's own status, as its faction knows it.
+#[derive(Clone, Copy, Debug)]
+pub struct MissileView {
+    pub payload: Payload,
+    pub target: ContactId,
+    pub phase: Phase,
+    pub dv_left: f64,
 }
 
 #[derive(Clone, Debug)]
@@ -254,6 +270,10 @@ impl LocalSession {
                 self.owned(role, body)?;
                 self.world.set_drive_limit(body, g * G0)?;
             }
+            Command::Launch { body, target, payload } => {
+                self.owned(role, body)?;
+                self.world.launch(body, target, payload)?;
+            }
             Command::SetActiveSensor { body, on } => {
                 self.owned(role, body)?;
                 if !self.world.set_active_sensor(body, on) {
@@ -302,6 +322,8 @@ impl LocalSession {
                     avoidance: b.avoidance,
                     drive_limit: b.drive_limit,
                     active_sensor: b.active_sensor,
+                    magazine: b.magazine,
+                    missile: b.missile.map(|m| MissileView { payload: m.payload, target: m.target, phase: m.phase, dv_left: m.dv_left }),
                 })
             })
             .collect();
@@ -360,13 +382,17 @@ impl LocalSession {
         let losses = w
             .losses
             .iter()
-            .filter(|l| w.body(l.body).is_some_and(|b| visible(b.faction)))
+            .filter(|l| l.cause != LossCause::Expended && w.body(l.body).is_some_and(|b| visible(b.faction)))
             .map(|l| LossView {
                 body: l.body,
                 name: w.body(l.body).map(|b| b.name.clone()).unwrap_or_default(),
                 t: l.t,
                 cause: match l.cause {
                     LossCause::Impact(i) => format!("hit {}", w.system.bodies[i].name),
+                    LossCause::Missile { payload, missile } => {
+                        format!("{} missile {}", payload.name(), w.body(missile).map_or("?".into(), |m| m.name.clone()))
+                    }
+                    LossCause::Expended => "expended".into(),
                 },
             })
             .collect();

@@ -53,7 +53,8 @@ crates/
 | `sensors` | Bands, SNR with own-screen glare, bearing/range measurement noise |
 | `screens` | E(T), greybody emission, Off/Building/Established/Collapsing, capture limits |
 | `ledger` | Energy and momentum accounting |
-| `payloads` | Standoff laser, near-contact nuclear, kinetic coupling |
+| `missile` | Payloads (standoff laser, near-contact nuclear, kinetic), burn/cruise/terminal guidance, seeker line-of-sight tracking, closest approach |
+| `autopilot` | Standing orders (move-and-stop, orbit, intercept) and collision avoidance |
 | `scheduler` | Discrete-event queue, deterministic tie-breaking |
 | `rng` | Seeded random streams |
 | `mind` | `Perception`, `Observation`, per-contact Kalman tracks — the only agent-facing API |

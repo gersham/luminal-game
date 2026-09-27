@@ -2,6 +2,7 @@
 
 use crate::celestial::{Celestial, CelestialKind, Orbit, System};
 use crate::kinematics::{State, Vec2};
+use crate::params::{MAGAZINE_CRUISER, MAGAZINE_FRIGATE};
 use crate::units::{AU, G0, LIGHT_SECOND};
 use crate::world::{BodyId, BodyKind, BodySpec, FactionId, Objective, World};
 use std::f64::consts::FRAC_PI_2;
@@ -52,21 +53,22 @@ pub fn home_system() -> System {
 pub fn transport_intercept() -> World {
     let system = home_system();
     let planet = system.state(1, 0.0);
-    let ship = |name: &str, faction, pos: Vec2, vel: Vec2, thrust: Vec2| BodySpec {
+    let ship = |name: &str, faction, pos: Vec2, vel: Vec2, thrust: Vec2, magazine: f64| BodySpec {
         name: name.into(),
         kind: BodyKind::Ship,
         faction,
         state: State { pos: planet.pos + pos, vel: planet.vel + vel },
         thrust,
+        magazine: magazine as u32,
     };
 
     let outbound = Vec2::new(1.0, 0.0);
     let cruiser_offset = Vec2::new(0.2 * AU, -0.25 * AU);
     let cruiser_heading = (-cruiser_offset).normalized();
     let specs = vec![
-        ship("Transport", ESCORT, Vec2::new(60_000.0, 0.0), outbound * 4.0, outbound * G0),
-        ship("Frigate", ESCORT, Vec2::new(60_000.0, -LIGHT_SECOND), outbound * 4.0, outbound * G0),
-        ship("Cruiser", RAIDER, cruiser_offset, Vec2::new(-10.0, 15.0), cruiser_heading * (20.0 * G0)),
+        ship("Transport", ESCORT, Vec2::new(60_000.0, 0.0), outbound * 4.0, outbound * G0, 0.0),
+        ship("Frigate", ESCORT, Vec2::new(60_000.0, -LIGHT_SECOND), outbound * 4.0, outbound * G0, MAGAZINE_FRIGATE.value),
+        ship("Cruiser", RAIDER, cruiser_offset, Vec2::new(-10.0, 15.0), cruiser_heading * (20.0 * G0), MAGAZINE_CRUISER.value),
     ];
     let mut world = World::new(system, specs, 3600.0, 42);
     world.objective = Some(Objective {

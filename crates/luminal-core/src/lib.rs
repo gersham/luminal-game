@@ -5,6 +5,7 @@ pub mod celestial;
 pub mod kinematics;
 pub mod lightcone;
 pub mod mind;
+pub mod missile;
 pub mod params;
 pub mod rng;
 pub mod scenario;

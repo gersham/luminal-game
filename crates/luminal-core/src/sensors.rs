@@ -14,6 +14,11 @@ pub fn ship_emission_w(accel: Vec2) -> f64 {
     SIGNATURE_COLD_W.value + SIGNATURE_DRIVE_W_PER_G.value * accel.length() / G0
 }
 
+/// Isotropic emission, W, of a missile thrusting at `accel` (km/s²).
+pub fn missile_emission_w(accel: Vec2) -> f64 {
+    MISSILE_SIGNATURE_COLD_W.value + MISSILE_DRIVE_W_PER_G.value * accel.length() / G0
+}
+
 /// Intensity, W/m², at `range_km` from an isotropic source of `power_w`.
 pub fn intensity(power_w: f64, range_km: f64) -> f64 {
     let r_m = (range_km * 1e3).max(1.0);

@@ -7,7 +7,7 @@ use luminal_core::mind::{ContactId, Source};
 use luminal_core::params;
 use luminal_core::scenario::{self, ESCORT, RAIDER};
 use luminal_core::session::{
-    AutopilotStatus, BodyId, BodyView, Command, ContactView, InterceptTarget, LocalSession, Order, Role, View,
+    AutopilotStatus, BodyId, BodyView, Command, ContactView, InterceptTarget, LocalSession, Order, Payload, Phase, Role, View,
 };
 use luminal_core::units::{AU, G0, LIGHT_SECOND};
 use luminal_core::world::{BodyKind, FactionId};
@@ -53,6 +53,7 @@ struct LuminalApp {
     fit_pending: bool,
     selected: Option<Selection>,
     last_message: Option<String>,
+    payload: Payload,
     dev: DevHooks,
 }
 
@@ -75,13 +76,14 @@ impl LuminalApp {
             fit_pending: true,
             selected: Some(Selection::Body(BodyId(0))),
             last_message: None,
+            payload: Payload::Kinetic,
             dev: DevHooks { screenshot: std::env::var_os("LUMINAL_SCREENSHOT").map(Into::into), frames: 0 },
         }
         .with_env_setup()
     }
 
     fn with_env_setup(mut self) -> Self {
-        // `LUMINAL_ORDERS=orbit:<body>:<celestial>;intercept:<body>:own:<body>;intercept:<body>:contact:<n>;move:<body>:objective`
+        // `LUMINAL_ORDERS=orbit:<body>:<celestial>;intercept:<body>:own:<body>;intercept:<body>:contact:<n>;move:<body>:objective;launch:<body>:<contact>:<payload>`
         // `LUMINAL_ORDERS_AT=<sim seconds>` runs the scenario that far before issuing them.
         let orders_at = std::env::var("LUMINAL_ORDERS_AT").ok().and_then(|v| v.parse::<f64>().ok()).unwrap_or(0.0);
         let _ = self.session.command(Role::Spectator, Command::SetPaused(false));
@@ -96,6 +98,11 @@ impl LuminalApp {
                 let Some(faction) = view.bodies.iter().find(|b| b.id == body).map(|b| b.faction) else { continue };
                 let cmd = match (f[0], f.get(2).copied()) {
                     ("orbit", _) => num(2).map(|c| Command::Orbit { body, celestial: c as usize }),
+                    ("launch", _) => num(2).zip(f.get(3)).map(|(c, p)| Command::Launch {
+                        body,
+                        target: ContactId(c),
+                        payload: Payload::ALL.into_iter().find(|x| x.name() == *p).unwrap_or(Payload::Kinetic),
+                    }),
                     ("move", Some("objective")) => view.objective.as_ref().map(|o| Command::MoveTo { body, point: o.center }),
                     ("intercept", Some("own")) => num(3).map(|t| Command::Intercept { body, target: InterceptTarget::Own(BodyId(t)) }),
                     ("intercept", Some("contact")) => {
@@ -373,6 +380,14 @@ impl LuminalApp {
         ui.separator();
         ui.heading(&b.name);
         ui.label(format!("{} · {:?}", faction_name(b.faction), b.kind));
+        if let Some(m) = b.missile {
+            let phase = match m.phase {
+                Phase::Burn => "burn",
+                Phase::Cruise => "cruise",
+                Phase::Terminal => "terminal (own seeker)",
+            };
+            ui.label(format!("{} missile → C{} · {phase} · {:.0} km/s delta-v left", m.payload.name(), m.target.0, m.dv_left));
+        }
         if let Some(nearest) = view
             .celestials
             .iter()
@@ -435,6 +450,29 @@ impl LuminalApp {
                     self.command(Command::SetThrust { body: b.id, thrust: Vec2::ZERO });
                 }
             });
+            if b.kind == BodyKind::Ship {
+                ui.separator();
+                ui.label(format!("Missiles: {}", b.magazine));
+                if b.magazine > 0 {
+                    ui.horizontal(|ui| {
+                        ui.label("Payload:");
+                        for p in Payload::ALL {
+                            ui.selectable_value(&mut self.payload, p, p.name());
+                        }
+                    });
+                    let tracked: Vec<_> = view.contacts.iter().filter(|c| c.track.is_some()).map(|c| c.id).collect();
+                    if tracked.is_empty() {
+                        ui.weak("No tracked contacts to fire at (bearing-only contacts need a range).");
+                    }
+                    ui.horizontal_wrapped(|ui| {
+                        for c in tracked {
+                            if ui.button(format!("Fire at C{}", c.0)).clicked() {
+                                self.command(Command::Launch { body: b.id, target: c, payload: self.payload });
+                            }
+                        }
+                    });
+                }
+            }
             let mut active = b.active_sensor;
             if ui.checkbox(&mut active, "Active sensor (ping)").on_hover_text("Ranges targets within ~10 ls, but the pings reveal you across AU.").changed() {
                 self.command(Command::SetActiveSensor { body: b.id, on: active });
@@ -572,7 +610,11 @@ impl LuminalApp {
                 draw_cross(&painter, end, DANGER);
             }
             let p = to_screen(&cam, rect, b.pos);
-            draw_ship(&painter, p, b.vel, b.thrust, c, true);
+            if b.kind == BodyKind::Missile {
+                draw_missile(&painter, p, b.vel, b.thrust, c);
+            } else {
+                draw_ship(&painter, p, b.vel, b.thrust, c, true);
+            }
             if b.active_sensor {
                 painter.circle_stroke(p, 13.0, Stroke::new(1.0, c.gamma_multiply(0.5)));
             }
@@ -960,6 +1002,17 @@ fn draw_ship(painter: &egui::Painter, p: Pos2, vel: Vec2, thrust: Vec2, color: C
     if thrust.length() > 0.0 {
         let flame = p - f * (len * 0.2);
         painter.line_segment([flame, flame - f * 6.0], Stroke::new(2.0, Color32::from_rgb(255, 200, 120)));
+    }
+}
+
+/// A missile: a small dart along thrust (or velocity), with a short flame when burning.
+fn draw_missile(painter: &egui::Painter, p: Pos2, vel: Vec2, thrust: Vec2, color: Color32) {
+    let facing = if thrust.length() > 0.0 { thrust } else { vel };
+    let f = if facing.length() > 0.0 { screen_dir(facing) } else { EVec2::new(0.0, -1.0) };
+    let side = EVec2::new(-f.y, f.x);
+    painter.add(Shape::convex_polygon(vec![p + f * 6.0, p - f * 3.0 + side * 2.5, p - f * 3.0 - side * 2.5], color, Stroke::NONE));
+    if thrust.length() > 0.0 {
+        painter.line_segment([p - f * 3.0, p - f * 7.0], Stroke::new(1.5, Color32::from_rgb(255, 200, 120)));
     }
 }
 

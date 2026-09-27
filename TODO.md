@@ -22,7 +22,7 @@ Read [GAME_MECHANICS.md](GAME_MECHANICS.md) (rules authority) and [ARCHITECTURE.
 
 ## Done
 
-- `crates/luminal-core` (52 tests, clippy clean):
+- `crates/luminal-core` (58 tests, clippy clean):
   - `units`, `params` — tagged constants. New sensor/signature/tracker values are all `Placeholder` (listed below).
   - `kinematics` — append-only constant-acceleration `Trajectory`; each segment records total accel **and** thrust; trajectories can `terminate` (destroyed body). History cannot be rewritten.
   - `celestial` — `System` of on-rails bodies (fixed star, circular orbits), gravity, adaptive step size (1 % of local free-fall time, 0.5–60 s), midpoint gravity sampling, surface-impact test, **occlusion test for light paths** (body motion linearised over the transit), display forecast.
@@ -36,12 +36,14 @@ Read [GAME_MECHANICS.md](GAME_MECHANICS.md) (rules authority) and [ARCHITECTURE.
 - `crates/luminal-app` — verified on the real Hyprland display (screenshot hook works): celestials at true size with minimum dot, orbit lines, off-screen edge markers; **sensor-shadow cones from the selected ship**; forecasts under gravity with ✖ impact marker and an impact warning in the panel; contacts as hollow arrows with 2σ ellipses and forecast, or bearing lines; spectator belief overlay; auto-fit (F), Space to pause; label declutter; active-sensor toggle, retro-burn button, losses list.
 - Orders (`autopilot` module + `world::guide`, re-planned every sensor frame): orbit (radius = current distance clamped between 1.5× surface radius and min(0.3 Hill radius, 0.6× innermost moon orbit); keeps current sense), rendezvous-intercept (braking-limited closing speed, velocity match, standoff), collision avoidance (1 h forecast under gravity; smallest deviation by thrust then direction; full 100 g if needed; cheap reachability bound first). The orbit law is exempt from avoidance. Enemy intercepts steer by the faction's **track**, never truth; bearing-only contacts are refused (`NoTrack`). UI: dashed target orbit / intercept line, avoidance ring (orange, red if impossible), autopilot status and ETA. Dev hook `LUMINAL_ORDERS` / `LUMINAL_ORDERS_AT`.
 - Slingshots: modelled implicitly by gravity, but worth at most ~2× a body's orbital speed (~60 km/s at the planet), which a 100 g ship gains in about a minute; they matter only once propellant budgets exist.
+- Missiles (`missile` module + `world::guide_missile`): launch needs a track and a magazine (Cruiser 12, Frigate 6, Transport 0). Inherit launcher velocity; 600 km/s delta-v; burn at 1,000 g along a constant-thrust intercept for 60 % of it, cruise with zero-effort-miss corrections keeping a 30 % reserve, terminal inside 60 s to go on the missile's own passive seeker with proportional navigation, re-planning down to 2 ms. Kinetic hits within the ship radius (100 m), nuclear within 10 km, laser fires at 10,000 km and its beam is resolved when the light reaches the target. No screens yet: an effective hit destroys the ship. Missiles are visible while burning (a full burn shines like a ship at 1 g) and go dark when coasting. UI: payload choice and Fire buttons per tracked contact; missiles drawn as small darts with phase and delta-v.
+- Objective and alerts: departure region, win/loss banner, alert-driven warp drop (see Next steps).
 - `crates/luminal-cli` — headless runner: `cargo run --release -p luminal-cli -- <hours> <report-minutes>` prints each faction's contacts with track error vs 2σ, and sim speed (~600,000× real time in release).
 - Dev profile optimises dependencies and `luminal-core` so `cargo run` stays smooth at 100,000× warp.
 
 ### Placeholder values to review (all in `params.rs`)
 
-sensor frame 10 s · cold emission 1e8 W · drive emission 1e11 W per g · passive noise floor 1e-13 W/m² · detection SNR 3 · bearing σ 1e-4 rad at SNR 1 · ping power 1e12 W · cross-section 1e4 m² · echo noise floor 1e-24 W/m² · range σ 1 km at SNR 1 · tracker manoeuvre 1 g per minute. With these: a cold ship is invisible beyond ~30 ls, a burning one is seen across AU, echoes reach ~10 ls, and a ping is visible for several AU.
+missile delta-v 600 km/s · burn 60 % · terminal reserve 30 % · terminal at 60 s to go · seeker noise floor 1e-11 W/m² · missile emission 1e5 W cold + 1e8 W per g · magazines 12 / 6 · ship radius 100 m · nuclear lethal radius 10 km · laser standoff 10,000 km · intercept standoff 1,000 km · sensor frame 10 s · cold emission 1e8 W · drive emission 1e11 W per g · passive noise floor 1e-13 W/m² · detection SNR 3 · bearing σ 1e-4 rad at SNR 1 · ping power 1e12 W · cross-section 1e4 m² · echo noise floor 1e-24 W/m² · range σ 1 km at SNR 1 · tracker manoeuvre 1 g per minute. With these: a cold ship is invisible beyond ~30 ls, a burning one is seen across AU, echoes reach ~10 ls, and a ping is visible for several AU.
 
 ## Next steps, in order
 
@@ -52,7 +54,7 @@ sensor frame 10 s · cold emission 1e8 W · drive emission 1e11 W per g · passi
 5. Bearing-only track initiation for a single ship (bearing-rate / own-manoeuvre, or a range-parameterised filter bank). Today a lone Cruiser never forms a track without pinging, which may be the desired pressure — confirm with the user.
 6. Data association: contacts are perfectly associated (flagged `PLACEHOLDER` in `world::association`).
 7. Screens: E(T), greybody emission, Off/Building/Established/Collapsing, energy ledger with invariant tests; own-screen glare in SNR.
-8. Missiles (burn/cruise/terminal, three payloads), beam emitters (hit resolved against truth; no P_hit formula), probes (laser-link reports/commands as light-fronts).
+8. ~~Missiles~~ — done (see below). Still to do: beam emitters on ships (hit resolved against truth; no P_hit formula), probes (laser-link reports/commands as light-fronts), point defence / interceptor missiles, detonation and laser flashes as bright emissions, missile datalink delay (today the missile uses its faction's track instantly), active seekers.
 9. Doctrine bots for cruiser / frigate / transport in `luminal-bots`; §15 variants in `luminal-cli`.
 10. ~~Departure region and win/loss~~ — done: Transport reaching the region (0.25 AU beyond the planet, radius 0.02 AU, placeholder) wins for the Escort; losing it wins for the Raider. Without weapons the Raider cannot win yet.
 11. Sun glare: sensing near the star's direction should be degraded, not just occluded.

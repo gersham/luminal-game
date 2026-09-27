@@ -166,6 +166,102 @@ pub const TRACK_MANEUVER_G: Param = Param {
     note: "Unmodelled target acceleration assumed by trackers (process noise).",
 };
 
+pub const MISSILE_DELTA_V_KMS: Param = Param {
+    key: "missile.delta_v",
+    value: 600.0,
+    unit: "km/s",
+    commitment: Placeholder,
+    note: "Total propulsion budget: one minute at full 1,000 g (§6 examples).",
+};
+
+pub const MISSILE_BURN_FRACTION: Param = Param {
+    key: "missile.burn_fraction",
+    value: 0.6,
+    unit: "",
+    commitment: Placeholder,
+    note: "Share of delta-v spent in the initial burn.",
+};
+
+pub const MISSILE_RESERVE_FRACTION: Param = Param {
+    key: "missile.terminal_reserve",
+    value: 0.3,
+    unit: "",
+    commitment: Placeholder,
+    note: "Share of delta-v cruise corrections may not touch; kept for terminal.",
+};
+
+pub const MISSILE_TERMINAL_S: Param = Param {
+    key: "missile.terminal_time",
+    value: 60.0,
+    unit: "s",
+    commitment: Placeholder,
+    note: "Time to go at which the missile switches to its own seeker.",
+};
+
+pub const MISSILE_SEEKER_NOISE_FLOOR: Param = Param {
+    key: "missile.seeker_noise_floor",
+    value: 1.0e-11,
+    unit: "W/m²",
+    commitment: Placeholder,
+    note: "Seeker sensitivity: 100× worse than a warship array.",
+};
+
+pub const MISSILE_SIGNATURE_COLD_W: Param = Param {
+    key: "missile.signature_cold",
+    value: 1.0e5,
+    unit: "W",
+    commitment: Placeholder,
+    note: "Missile emission when coasting.",
+};
+
+pub const MISSILE_DRIVE_W_PER_G: Param = Param {
+    key: "missile.drive_per_g",
+    value: 1.0e8,
+    unit: "W/g",
+    commitment: Placeholder,
+    note: "Missile drive emission per g: a full 1,000 g burn shines like a ship at 1 g.",
+};
+
+pub const MAGAZINE_CRUISER: Param = Param {
+    key: "magazine.cruiser",
+    value: 12.0,
+    unit: "missiles",
+    commitment: Placeholder,
+    note: "Missiles carried by the cruiser.",
+};
+
+pub const MAGAZINE_FRIGATE: Param = Param {
+    key: "magazine.frigate",
+    value: 6.0,
+    unit: "missiles",
+    commitment: Placeholder,
+    note: "Missiles carried by the frigate. The transport carries none.",
+};
+
+pub const SHIP_RADIUS_KM: Param = Param {
+    key: "ship.radius",
+    value: 0.1,
+    unit: "km",
+    commitment: Placeholder,
+    note: "Physical size for kinetic and beam hits.",
+};
+
+pub const NUCLEAR_LETHAL_KM: Param = Param {
+    key: "payload.nuclear_lethal_radius",
+    value: 10.0,
+    unit: "km",
+    commitment: Placeholder,
+    note: "Near-contact nuclear kill radius. With no screens yet, inside it the ship is lost.",
+};
+
+pub const LASER_STANDOFF_KM: Param = Param {
+    key: "payload.laser_standoff",
+    value: 10_000.0,
+    unit: "km",
+    commitment: Placeholder,
+    note: "Range at which a nuclear-pumped laser missile fires its one shot.",
+};
+
 pub const ALL: &[Param] = &[
     SHIP_MAX_ACCEL_G,
     PROBE_MAX_ACCEL_G,
@@ -185,6 +281,18 @@ pub const ALL: &[Param] = &[
     ACTIVE_NOISE_FLOOR,
     ACTIVE_RANGE_SIGMA_KM,
     TRACK_MANEUVER_G,
+    MISSILE_DELTA_V_KMS,
+    MISSILE_BURN_FRACTION,
+    MISSILE_RESERVE_FRACTION,
+    MISSILE_TERMINAL_S,
+    MISSILE_SEEKER_NOISE_FLOOR,
+    MISSILE_SIGNATURE_COLD_W,
+    MISSILE_DRIVE_W_PER_G,
+    MAGAZINE_CRUISER,
+    MAGAZINE_FRIGATE,
+    SHIP_RADIUS_KM,
+    NUCLEAR_LETHAL_KM,
+    LASER_STANDOFF_KM,
 ];
 
 #[cfg(test)]
