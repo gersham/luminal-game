@@ -81,7 +81,7 @@ impl LuminalApp {
     }
 
     fn with_env_setup(mut self) -> Self {
-        // `LUMINAL_ORDERS=orbit:<body>:<celestial>;intercept:<body>:own:<body>;intercept:<body>:contact:<n>`
+        // `LUMINAL_ORDERS=orbit:<body>:<celestial>;intercept:<body>:own:<body>;intercept:<body>:contact:<n>;move:<body>:objective`
         // `LUMINAL_ORDERS_AT=<sim seconds>` runs the scenario that far before issuing them.
         let orders_at = std::env::var("LUMINAL_ORDERS_AT").ok().and_then(|v| v.parse::<f64>().ok()).unwrap_or(0.0);
         let _ = self.session.command(Role::Spectator, Command::SetPaused(false));
@@ -96,6 +96,7 @@ impl LuminalApp {
                 let Some(faction) = view.bodies.iter().find(|b| b.id == body).map(|b| b.faction) else { continue };
                 let cmd = match (f[0], f.get(2).copied()) {
                     ("orbit", _) => num(2).map(|c| Command::Orbit { body, celestial: c as usize }),
+                    ("move", Some("objective")) => view.objective.as_ref().map(|o| Command::MoveTo { body, point: o.center }),
                     ("intercept", Some("own")) => num(3).map(|t| Command::Intercept { body, target: InterceptTarget::Own(BodyId(t)) }),
                     ("intercept", Some("contact")) => {
                         num(3).map(|t| Command::Intercept { body, target: InterceptTarget::Contact(ContactId(t)) })
@@ -214,6 +215,7 @@ fn contact_label(c: &ContactView) -> String {
 impl eframe::App for LuminalApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let dt = ui.input(|i| i.stable_dt) as f64;
+        self.session.set_watch(self.own_faction());
         self.session.tick(dt.min(0.1));
         ui.ctx().request_repaint();
 
@@ -284,6 +286,12 @@ impl LuminalApp {
             ui.separator();
             if ui.button("Fit (F)").clicked() {
                 self.fit_pending = true;
+            }
+            if let Some((t, msg)) = self.session.last_alert() {
+                ui.separator();
+                let fresh = view.time - t < 600.0;
+                let text = egui::RichText::new(format!("⚑ T+ {}  {msg}", fmt_time(*t)));
+                ui.label(if fresh { text.color(Color32::YELLOW) } else { text.weak() });
             }
         });
     }
@@ -474,6 +482,26 @@ impl LuminalApp {
             }
         }
 
+        if let Some(o) = &view.objective {
+            let center = to_screen(&cam, rect, o.center);
+            let r = ((o.radius / cam.km_per_px) as f32).max(6.0);
+            let col = Color32::from_rgb(120, 220, 140);
+            painter.circle_filled(center, r, col.gamma_multiply(0.06));
+            let pts: Vec<Pos2> = (0..=96)
+                .map(|k| {
+                    let a = std::f32::consts::TAU * k as f32 / 96.0;
+                    center + EVec2::new(a.cos(), a.sin()) * r
+                })
+                .collect();
+            painter.extend(Shape::dashed_line(&pts, Stroke::new(1.0, col.gamma_multiply(0.7)), 8.0, 5.0));
+            let label = format!("{} (goal: {})", o.name, view.bodies.iter().find(|b| b.id == o.protect).map_or("the transport".into(), |b| b.name.clone()));
+            if rect.contains(center) {
+                labels.add(center + EVec2::new(r * 0.7 + 4.0, -r * 0.7), label, col);
+            } else {
+                draw_edge_marker(&painter, rect, center, &label, col, &mut labels);
+            }
+        }
+
         for c in &view.celestials {
             let p = to_screen(&cam, rect, c.pos);
             let min_px = if c.kind == CelestialKind::Star { 6.0 } else { 3.0 };
@@ -575,6 +603,24 @@ impl LuminalApp {
         labels.paint(&painter);
         draw_scale_bar(&painter, &cam, rect);
 
+        if let Some(o) = &view.outcome {
+            let mine = self.own_faction().map(|f| f == o.winner);
+            let (title, col) = match mine {
+                Some(true) => ("VICTORY", Color32::from_rgb(120, 220, 140)),
+                Some(false) => ("DEFEAT", DANGER),
+                None => ("GAME OVER", Color32::WHITE),
+            };
+            let at = rect.center_top() + EVec2::new(0.0, 40.0);
+            painter.text(at, egui::Align2::CENTER_TOP, title, egui::FontId::proportional(32.0), col);
+            painter.text(
+                at + EVec2::new(0.0, 40.0),
+                egui::Align2::CENTER_TOP,
+                format!("{} wins at T+ {}: {}", faction_name(o.winner), fmt_time(o.t), o.reason),
+                egui::FontId::proportional(14.0),
+                Color32::LIGHT_GRAY,
+            );
+        }
+
         // Orders. Right-click a ship or contact to intercept it, a celestial body to
         // orbit it, or empty space to fly there and stop.
         if let (Some(Selection::Body(id)), Some(click)) =
@@ -622,6 +668,7 @@ impl LuminalApp {
     fn fit(&mut self, view: &View, rect: Rect) {
         let mut pts: Vec<Vec2> = view.bodies.iter().map(|b| b.pos).collect();
         pts.extend(view.contacts.iter().filter_map(|c| c.track.as_ref().map(|t| t.pos)));
+        pts.extend(view.objective.as_ref().map(|o| o.center));
         if pts.is_empty() {
             pts.push(Vec2::ZERO);
         }
@@ -753,19 +800,23 @@ impl Labels {
 
     fn paint(self, painter: &egui::Painter) {
         let font = egui::FontId::proportional(12.0);
+        let bounds = painter.clip_rect().shrink(4.0);
         let mut placed: Vec<Rect> = vec![];
         for (at, text, color) in self.items {
             let galley = painter.layout_no_wrap(text, font.clone(), color);
             let size = galley.size();
             let mut r = Rect::from_min_size(at - EVec2::new(0.0, size.y), size);
+            // Keep labels inside the map.
+            r = r.translate(EVec2::new((bounds.right() - r.right()).min(0.0) + (bounds.left() - r.left()).max(0.0), 0.0));
             for _ in 0..12 {
                 if !placed.iter().any(|p| p.expand(1.0).intersects(r)) {
                     break;
                 }
                 r = r.translate(EVec2::new(0.0, size.y + 1.0));
             }
-            if r.min != at - EVec2::new(0.0, size.y) {
-                painter.line_segment([at, r.left_center()], Stroke::new(0.5, color.gamma_multiply(0.4)));
+            if (r.min - (at - EVec2::new(0.0, size.y))).length() > 1.0 {
+                let anchor = if r.center().x < at.x { r.right_center() } else { r.left_center() };
+                painter.line_segment([at, anchor], Stroke::new(0.5, color.gamma_multiply(0.4)));
             }
             painter.galley(r.min, galley, color);
             placed.push(r);

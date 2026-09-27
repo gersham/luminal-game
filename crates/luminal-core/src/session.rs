@@ -10,7 +10,7 @@ use crate::mind::{ContactId, Measurement, Source};
 use crate::params;
 use crate::units::G0;
 use crate::autopilot::Avoidance;
-use crate::world::{Autopilot, BodyKind, FactionId, LossCause, OrderError, World};
+use crate::world::{Alert, AlertKind, Autopilot, BodyKind, FactionId, LossCause, Objective, OrderError, Outcome, World};
 use std::collections::BTreeMap;
 
 pub use crate::world::{AutopilotStatus, BodyId, InterceptTarget, Order};
@@ -152,24 +152,68 @@ pub struct View {
     pub losses: Vec<LossView>,
     /// Public ephemeris, for display forecasts.
     pub system: System,
+    /// The scenario goal, known to every side.
+    pub objective: Option<Objective>,
+    /// Referee's verdict once the game is decided.
+    pub outcome: Option<Outcome>,
 }
 
 pub struct LocalSession {
     world: World,
     warp: f64,
     paused: bool,
+    /// Whose alerts drop the warp (the local player's faction).
+    watch: Option<FactionId>,
+    last_alert: Option<(f64, String)>,
 }
+
+/// Warp that alerts drop to.
+pub const ALERT_WARP: f64 = 1.0;
 
 impl LocalSession {
     pub fn new(world: World) -> Self {
-        Self { world, warp: 1.0, paused: true }
+        Self { world, warp: 1.0, paused: true, watch: None, last_alert: None }
     }
 
-    /// Advance by elapsed wall-clock seconds, scaled by warp.
+    /// Advance by elapsed wall-clock seconds, scaled by warp. If the watched faction
+    /// perceives something needing attention, time stops there and warp drops; the game
+    /// ending pauses it.
     pub fn tick(&mut self, wall_dt: f64) {
-        if !self.paused {
-            let t = self.world.time() + wall_dt * self.warp;
-            self.world.advance_to(t);
+        if self.paused {
+            return;
+        }
+        let t = self.world.time() + wall_dt * self.warp;
+        if let Some(alert) = self.world.advance_until_alert(t, self.watch) {
+            self.last_alert = Some((alert.t, self.describe(&alert)));
+            self.warp = self.warp.min(ALERT_WARP);
+            if alert.kind == AlertKind::GameOver {
+                self.paused = true;
+            }
+        }
+    }
+
+    /// The faction whose perceived events should drop the warp; `None` for none.
+    pub fn set_watch(&mut self, f: Option<FactionId>) {
+        self.watch = f;
+    }
+
+    /// The most recent alert that dropped the warp, with its time.
+    pub fn last_alert(&self) -> Option<&(f64, String)> {
+        self.last_alert.as_ref()
+    }
+
+    fn describe(&self, a: &Alert) -> String {
+        let name = |id: BodyId| self.world.body(id).map_or("?".to_string(), |b| b.name.clone());
+        match &a.kind {
+            AlertKind::NewContact(c) => format!("New contact C{}", c.0),
+            AlertKind::ShipLost(b) => format!("{} lost", name(*b)),
+            AlertKind::CollisionWarning(b) => format!("{}: collision avoidance engaged", name(*b)),
+            AlertKind::CollisionUnavoidable(b) => format!("{}: collision unavoidable", name(*b)),
+            AlertKind::OrderComplete(b) => format!("{}: order complete", name(*b)),
+            AlertKind::GameOver => match &self.world.outcome {
+                Some(o) => format!("Game over: {}", o.reason),
+                None => "Game over".into(),
+            },
         }
     }
 
@@ -337,6 +381,8 @@ impl LocalSession {
             celestials,
             losses,
             system: w.system.clone(),
+            objective: w.objective.clone(),
+            outcome: w.outcome.clone(),
         }
     }
 
@@ -386,6 +432,20 @@ mod tests {
                 assert!(err < 4.0 * sigma + 100.0, "T+{} err {err} km, sigma {sigma} km", v.time);
             }
         }
+    }
+
+    #[test]
+    fn a_perceived_event_drops_the_warp() {
+        let mut s = LocalSession::new(scenario::transport_intercept());
+        s.set_watch(Some(ESCORT));
+        s.command(Role::Faction(ESCORT), Command::Orbit { body: BodyId(0), celestial: 1 }).unwrap();
+        s.command(Role::Spectator, Command::SetWarp(100_000.0)).unwrap();
+        s.command(Role::Spectator, Command::SetPaused(false)).unwrap();
+        s.tick(10.0); // a million seconds requested
+        let v = s.view(Role::Faction(ESCORT));
+        assert_eq!(v.warp, ALERT_WARP);
+        assert!(v.time < 1e6, "stopped at the event, not the end of the tick: {}", v.time);
+        assert_eq!(s.last_alert().unwrap().1, "Transport: order complete");
     }
 
     #[test]

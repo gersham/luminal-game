@@ -22,7 +22,7 @@ Read [GAME_MECHANICS.md](GAME_MECHANICS.md) (rules authority) and [ARCHITECTURE.
 
 ## Done
 
-- `crates/luminal-core` (49 tests, clippy clean):
+- `crates/luminal-core` (52 tests, clippy clean):
   - `units`, `params` — tagged constants. New sensor/signature/tracker values are all `Placeholder` (listed below).
   - `kinematics` — append-only constant-acceleration `Trajectory`; each segment records total accel **and** thrust; trajectories can `terminate` (destroyed body). History cannot be rewritten.
   - `celestial` — `System` of on-rails bodies (fixed star, circular orbits), gravity, adaptive step size (1 % of local free-fall time, 0.5–60 s), midpoint gravity sampling, surface-impact test, **occlusion test for light paths** (body motion linearised over the transit), display forecast.
@@ -46,7 +46,7 @@ sensor frame 10 s · cold emission 1e8 W · drive emission 1e11 W per g · passi
 ## Next steps, in order
 
 1. ~~First commit~~ — done 2026-09-26 with the user's approval. Feature work continues on branches.
-2. Warp auto-drop on **perceived** events (new contact, contact lost, own loss, impact warning), decided in the session from the faction's perception only.
+2. ~~Warp auto-drop~~ — done: alerts (new contact, own ship lost, collision warning/unavoidable, order complete, game over) stop the clock at the event and drop warp to 1×; game over pauses. "Contact lost" is not yet an alert.
 3. Orders to ships other than the flagship should travel at c; today they and the autopilot's use of flagship perception are instant (flagged `PLACEHOLDER` in `world::sensor_frame`).
 4. Own-loss news by light: a faction currently learns of its own losses instantly (flagged `PLACEHOLDER` in `session::View::losses`). Also impact flashes as bright emissions.
 5. Bearing-only track initiation for a single ship (bearing-rate / own-manoeuvre, or a range-parameterised filter bank). Today a lone Cruiser never forms a track without pinging, which may be the desired pressure — confirm with the user.
@@ -54,7 +54,7 @@ sensor frame 10 s · cold emission 1e8 W · drive emission 1e11 W per g · passi
 7. Screens: E(T), greybody emission, Off/Building/Established/Collapsing, energy ledger with invariant tests; own-screen glare in SNR.
 8. Missiles (burn/cruise/terminal, three payloads), beam emitters (hit resolved against truth; no P_hit formula), probes (laser-link reports/commands as light-fronts).
 9. Doctrine bots for cruiser / frigate / transport in `luminal-bots`; §15 variants in `luminal-cli`.
-10. A departure region for the transport (the scenario objective) and win/loss conditions.
+10. ~~Departure region and win/loss~~ — done: Transport reaching the region (0.25 AU beyond the planet, radius 0.02 AU, placeholder) wins for the Escort; losing it wins for the Raider. Without weapons the Raider cannot win yet.
 11. Sun glare: sensing near the star's direction should be degraded, not just occluded.
 
 ## Constraints to keep

@@ -3,7 +3,7 @@
 use crate::celestial::{Celestial, CelestialKind, Orbit, System};
 use crate::kinematics::{State, Vec2};
 use crate::units::{AU, G0, LIGHT_SECOND};
-use crate::world::{BodyKind, BodySpec, FactionId, World};
+use crate::world::{BodyId, BodyKind, BodySpec, FactionId, Objective, World};
 use std::f64::consts::FRAC_PI_2;
 
 pub const ESCORT: FactionId = FactionId(0);
@@ -46,6 +46,9 @@ pub fn home_system() -> System {
 /// The transport and frigate leave the planet outbound at 1 g. The cruiser starts about
 /// 160 light-seconds away and is burning hard toward them, so it is visible; a cold
 /// approach would be a separate variant.
+///
+/// Objective: the transport must reach a departure region 0.25 AU beyond the planet,
+/// on the far side from the cruiser. PLACEHOLDER geometry, not balanced.
 pub fn transport_intercept() -> World {
     let system = home_system();
     let planet = system.state(1, 0.0);
@@ -65,5 +68,14 @@ pub fn transport_intercept() -> World {
         ship("Frigate", ESCORT, Vec2::new(60_000.0, -LIGHT_SECOND), outbound * 4.0, outbound * G0),
         ship("Cruiser", RAIDER, cruiser_offset, Vec2::new(-10.0, 15.0), cruiser_heading * (20.0 * G0)),
     ];
-    World::new(system, specs, 3600.0, 42)
+    let mut world = World::new(system, specs, 3600.0, 42);
+    world.objective = Some(Objective {
+        name: "departure region".into(),
+        center: planet.pos + Vec2::new(0.25 * AU, 0.12 * AU),
+        radius: 0.02 * AU,
+        protect: BodyId(0),
+        defender: ESCORT,
+        attacker: RAIDER,
+    });
+    world
 }

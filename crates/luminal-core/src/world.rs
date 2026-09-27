@@ -117,6 +117,47 @@ pub struct Loss {
     pub cause: LossCause,
 }
 
+/// A scenario goal known to every side: `protect` must reach the region.
+#[derive(Clone, Debug)]
+pub struct Objective {
+    pub name: String,
+    /// Fixed in the system frame, km.
+    pub center: Vec2,
+    pub radius: f64,
+    pub protect: BodyId,
+    /// The side trying to get `protect` there.
+    pub defender: FactionId,
+    /// The side trying to stop it.
+    pub attacker: FactionId,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Outcome {
+    pub winner: FactionId,
+    pub t: f64,
+    pub reason: String,
+}
+
+/// Something a faction has noticed that deserves the player's attention. Raised only
+/// from that faction's own information (own losses are a PLACEHOLDER: known at once).
+#[derive(Clone, Debug, PartialEq)]
+pub enum AlertKind {
+    NewContact(ContactId),
+    ShipLost(BodyId),
+    CollisionWarning(BodyId),
+    CollisionUnavoidable(BodyId),
+    OrderComplete(BodyId),
+    GameOver,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Alert {
+    pub t: f64,
+    /// `None`: for everyone.
+    pub faction: Option<FactionId>,
+    pub kind: AlertKind,
+}
+
 /// Initial conditions for a body at `t = 0`.
 pub struct BodySpec {
     pub name: String,
@@ -159,6 +200,9 @@ pub struct World {
     pub system: System,
     pub bodies: Vec<Body>,
     pub losses: Vec<Loss>,
+    pub objective: Option<Objective>,
+    pub outcome: Option<Outcome>,
+    pub alerts: Vec<Alert>,
     scheduler: Scheduler<Event>,
     last_step: Vec<f64>,
     last_frame: f64,
@@ -208,6 +252,9 @@ impl World {
             last_step: vec![0.0; bodies.len()],
             bodies,
             losses: vec![],
+            objective: None,
+            outcome: None,
+            alerts: vec![],
             scheduler,
             last_frame: -SENSOR_FRAME_S.value,
             pings: vec![],
@@ -409,12 +456,25 @@ impl World {
             autopilot::avoid(&self.system, s, t, desired, max_accel)
         };
         let b = &mut self.bodies[i];
+        let faction = b.faction;
+        let mut raised = vec![];
         if let (Some(a), Some(st)) = (&mut b.autopilot, status) {
+            if st == AutopilotStatus::Holding && a.status != AutopilotStatus::Holding {
+                raised.push(AlertKind::OrderComplete(id));
+            }
             a.status = st;
+        }
+        if avoidance.active && !b.avoidance.active {
+            raised.push(if avoidance.impossible { AlertKind::CollisionUnavoidable(id) } else { AlertKind::CollisionWarning(id) });
+        } else if avoidance.impossible && !b.avoidance.impossible {
+            raised.push(AlertKind::CollisionUnavoidable(id));
         }
         b.avoidance = avoidance;
         if b.trajectory.last().thrust != avoidance.thrust {
             b.trajectory.set_thrust(t, avoidance.thrust).expect("orders apply at current time");
+        }
+        for kind in raised {
+            self.alert(Some(faction), kind);
         }
     }
 
@@ -431,8 +491,15 @@ impl World {
 
     /// Process every event up to `t`, then set the clock to `t`.
     pub fn advance_to(&mut self, t: f64) {
+        self.advance_until_alert(t, None);
+    }
+
+    /// As `advance_to`, but stop at the first event that raises an alert for `watch`
+    /// (or for everyone). Returns that alert; the clock then stands at its time.
+    pub fn advance_until_alert(&mut self, t: f64, watch: Option<FactionId>) -> Option<Alert> {
         while let Some((te, ev)) = self.scheduler.pop_due(t) {
             self.time = te.max(self.time);
+            let seen = self.alerts.len();
             match ev {
                 Event::Step(id) => self.step(id),
                 Event::SensorFrame => {
@@ -440,9 +507,56 @@ impl World {
                     self.scheduler.schedule(self.time + SENSOR_FRAME_S.value, Event::SensorFrame);
                 }
             }
+            if let Some(w) = watch
+                && let Some(a) = self.alerts[seen..].iter().find(|a| a.faction.is_none_or(|f| f == w))
+            {
+                return Some(a.clone());
+            }
         }
         if t > self.time {
             self.time = t;
+        }
+        None
+    }
+
+    fn alert(&mut self, faction: Option<FactionId>, kind: AlertKind) {
+        self.alerts.push(Alert { t: self.time, faction, kind });
+    }
+
+    fn decide(&mut self, winner: FactionId, reason: String) {
+        if self.outcome.is_none() {
+            self.outcome = Some(Outcome { winner, t: self.time, reason });
+            self.alert(None, AlertKind::GameOver);
+        }
+    }
+
+    /// A body stops existing at `t`.
+    fn destroy(&mut self, id: BodyId, t: f64, cause: LossCause) {
+        let b = &mut self.bodies[id.0 as usize];
+        b.trajectory.terminate(t);
+        b.active_sensor = false;
+        b.autopilot = None;
+        let (faction, name) = (b.faction, b.name.clone());
+        self.losses.push(Loss { body: id, t, cause });
+        self.alert(Some(faction), AlertKind::ShipLost(id));
+        if let Some(o) = &self.objective
+            && o.protect == id
+        {
+            let attacker = o.attacker;
+            self.decide(attacker, format!("{name} was destroyed"));
+        }
+    }
+
+    /// Has the protected body reached the objective?
+    fn check_objective(&mut self, id: BodyId) {
+        let Some(o) = &self.objective else { return };
+        if o.protect != id || self.outcome.is_some() {
+            return;
+        }
+        let Some(s) = self.bodies[id.0 as usize].trajectory.state_at(self.time) else { return };
+        if (s.pos - o.center).length() < o.radius {
+            let (winner, reason) = (o.defender, format!("{} reached the {}", self.bodies[id.0 as usize].name, o.name));
+            self.decide(winner, reason);
         }
     }
 
@@ -456,11 +570,11 @@ impl World {
         if t > t_prev
             && let Some((celestial, ti)) = self.system.impact(a.pos, s.pos, t_prev, t)
         {
-            b.trajectory.terminate(ti);
-            b.active_sensor = false;
-            self.losses.push(Loss { body: id, t: ti, cause: LossCause::Impact(celestial) });
+            self.destroy(id, ti, LossCause::Impact(celestial));
             return;
         }
+        self.check_objective(id);
+        let b = &mut self.bodies[i];
         let dt = self.system.step_size(s.pos, t);
         let thrust = b.trajectory.last().thrust;
         let g = self.system.step_gravity(s, thrust, t, dt);
@@ -660,7 +774,11 @@ impl World {
             let faction = self.bodies[obs.sensor.0 as usize].faction;
             let sys = &self.system;
             if let Some(p) = self.perceptions.get_mut(&faction) {
+                let new = !p.contacts.contains_key(&obs.contact);
                 p.ingest(obs, sys);
+                if new {
+                    self.alerts.push(Alert { t, faction: Some(faction), kind: AlertKind::NewContact(obs.contact) });
+                }
             }
         }
 
@@ -825,6 +943,59 @@ mod tests {
         let s = ship("Mover", 0, p.pos + Vec2::new(80_000.0, 0.0), p.vel, Vec2::ZERO);
         let mut w = World::new(sys, vec![s], 0.0, 1);
         assert_eq!(w.set_move(BodyId(0), p.pos), Err(OrderError::InvalidTarget));
+    }
+
+    #[test]
+    fn reaching_the_region_wins_and_losing_the_ship_loses() {
+        let base = Vec2::new(2.0 * AU, 0.0);
+        let make = |thrust: Vec2| {
+            let specs = vec![
+                ship("Runner", 0, base, Vec2::ZERO, thrust),
+                ship("Hunter", 1, base + Vec2::new(0.0, 0.2 * AU), Vec2::ZERO, Vec2::ZERO),
+            ];
+            let mut w = World::new(sun(), specs, 0.0, 1);
+            w.objective = Some(Objective {
+                name: "gate".into(),
+                center: base + Vec2::new(1e6, 0.0),
+                radius: 1e5,
+                protect: BodyId(0),
+                defender: FactionId(0),
+                attacker: FactionId(1),
+            });
+            w
+        };
+        let mut w = make(Vec2::new(G0, 0.0));
+        let mut kinds = vec![];
+        while let Some(a) = w.advance_until_alert(86_400.0, Some(FactionId(1))) {
+            kinds.push(a.kind.clone());
+            if a.kind == AlertKind::GameOver {
+                break;
+            }
+        }
+        assert!(matches!(kinds[0], AlertKind::NewContact(_)), "the hunter sees the runner's drive first");
+        assert_eq!(kinds.last(), Some(&AlertKind::GameOver), "everyone hears the result");
+        assert_eq!(w.outcome.as_ref().unwrap().winner, FactionId(0));
+        assert!(w.time() < 86_400.0, "stopped at the alert");
+
+        let mut w = make(Vec2::ZERO);
+        w.destroy(BodyId(0), 0.0, LossCause::Impact(0));
+        assert_eq!(w.outcome.as_ref().unwrap().winner, FactionId(1));
+    }
+
+    #[test]
+    fn a_new_contact_stops_the_clock_for_its_faction_only() {
+        let base = Vec2::new(2.0 * AU, 0.0);
+        let specs = vec![
+            ship("Watcher", 0, base, Vec2::ZERO, Vec2::ZERO),
+            // A cold ship that lights its drive at T+600; its light arrives ~100 s later.
+            ship("Sleeper", 1, base + Vec2::new(100.0 * LIGHT_SECOND, 0.0), Vec2::ZERO, Vec2::ZERO),
+        ];
+        let mut w = World::new(sun(), specs, 3600.0, 1);
+        assert!(w.advance_until_alert(600.0, Some(FactionId(0))).is_none());
+        w.bodies[1].trajectory.set_thrust(600.0, Vec2::new(0.0, 20.0 * G0)).unwrap();
+        let a = w.advance_until_alert(3600.0, Some(FactionId(0))).expect("noticed");
+        assert!(matches!(a.kind, AlertKind::NewContact(_)));
+        assert!(a.t >= 700.0 && a.t < 720.0, "when the light arrived: {}", a.t);
     }
 
     #[test]
