@@ -123,6 +123,7 @@ mod tests {
     #[test]
     fn player_tracking_follows_own_ship_without_changing_zoom_or_target() {
         let mut app=LuminalApp::new();
+        assert!(app.track_player,"tracking is on by default");
         let mut view=app.session.view(Role::Faction(ESCORT));
         let zoom=app.camera.km_per_px;
         let target=app.inspected;
@@ -260,6 +261,7 @@ mod tests {
         app.opening_fit=false;
         app.bearing_display.insert((ContactId(99),BodyId(99)),(1.0,1.0));
         app.restart_scenario();
+        assert!(app.track_player,"restart restores tracking");
         let view=app.session.view(Role::Faction(ESCORT));
         assert_eq!(view.time,0.0);
         assert_eq!(view.warp,50.0);
@@ -600,7 +602,7 @@ impl LuminalApp {
             role: Role::Faction(ESCORT),
             overlay: Some(ESCORT),
             camera: Camera { center: Vec2::ZERO, km_per_px: AU / 500.0 },
-            track_player:false,
+            track_player:true,
             fit_pending: true,
             opening_fit: true,
             selected: Some(Selection::Body(BodyId(1))),
@@ -926,6 +928,9 @@ impl LuminalApp {
             ui.horizontal(|ui| {for &warp in row {
                 if tac_button(ui,&format!("{warp}×"),EVec2::new(66.0,20.0),ACCENT,view.warp==warp,true).clicked() {self.command(Command::SetWarp(warp));}
             }});
+        }
+        if tac_button(ui,"TRACK OWN SHIP",EVec2::new(206.0,23.0),ACCENT,self.track_player,true).clicked() {
+            self.track_player = !self.track_player;self.fit_pending=false;
         }
         restart
     }
@@ -1449,7 +1454,7 @@ impl LuminalApp {
         painter.rect_filled(rect, 0.0, BACKGROUND);
 
         if self.fit_pending {
-            self.track_player=false;
+            if !self.opening_fit {self.track_player=false;}
             let safe = Rect::from_min_max(rect.min + EVec2::new(0.0, 150.0_f32.min(rect.height()*0.25)), rect.max - EVec2::new(0.0, 85.0));
             self.fit(view, safe);
             self.camera.center.y += (safe.center().y-rect.center().y) as f64*self.camera.km_per_px;
@@ -2420,6 +2425,16 @@ fn hint(ui: &mut egui::Ui, text: &str) {
 }
 
 /// Chamfered command button. Disabled buttons only sense hover so tooltips still show.
+fn button_shortcut(text:&str)->Option<&'static str> {
+    match text {
+        "PING"|"ACTIVE PING"=>Some("P"),
+        "SHORT"=>Some("1"),"MEDIUM"=>Some("2"),"LONG"=>Some("3"),"EVADE"=>Some("0"),
+        "FIT"=>Some("F"),"RUN"|"PAUSE"=>Some("SPACE"),"TRACK OWN SHIP"=>Some("T"),
+        _ if text.starts_with("LRM ")=>Some("L"),
+        _ if text.starts_with("SRM ")=>Some("S"),
+        _=>None,
+    }
+}
 fn tac_button(ui: &mut egui::Ui, text: &str, size: EVec2, tone: Color32, active: bool, enabled: bool) -> egui::Response {
     let (rect, resp) = ui.allocate_exact_size(size, if enabled { Sense::click() } else { Sense::hover() });
     if ui.is_rect_visible(rect) {
@@ -2435,7 +2450,14 @@ fn tac_button(ui: &mut egui::Ui, text: &str, size: EVec2, tone: Color32, active:
             (CARD_RAISED, Stroke::new(1.0, tone.gamma_multiply(0.45)), TEXT)
         };
         chamfer(ui.painter(), rect.shrink(0.5), 5.0, fill, stroke);
-        ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, text, mono(10.5), text_color);
+        let shortcut=button_shortcut(text);
+        let missile=text.starts_with("LRM ") || text.starts_with("SRM ");
+        let at=rect.center()-EVec2::new(0.0,if missile {5.5} else if shortcut.is_some() {3.5} else {0.0});
+        ui.painter().text(at, egui::Align2::CENTER_CENTER, text, mono(10.5), text_color);
+        if let Some(key)=shortcut {
+            ui.painter().text(rect.center_bottom()-EVec2::new(0.0,if missile {4.0} else {2.0}),egui::Align2::CENTER_BOTTOM,
+                format!("[{key}]"),mono(7.0),if enabled {tone} else {TEXT_DIM});
+        }
     }
     if enabled { resp.on_hover_cursor(egui::CursorIcon::PointingHand) } else { resp }
 }

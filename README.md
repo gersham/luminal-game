@@ -71,7 +71,7 @@ present. Other platforms are autonomous. Probes are currently disabled, and the
 station currently has direction finding only.
 The transport has half the nominal acceleration of a warship.
 
-The playtest starts at **50× speed**, with your frigate selected and a bearing-only
+The playtest starts at **50× speed**, tracking your selected frigate, with a bearing-only
 enemy contact designated. Use the top-left controls to pause, change speed, fit
 the map, or restart. Combat events do not automatically change game speed.
 
@@ -79,7 +79,7 @@ the map, or restart. Combat events do not automatically change game speed.
 | --- | --- |
 | Space | Pause / resume |
 | F / FIT | Fit the map |
-| T | Toggle camera tracking of your frigate; preserves zoom |
+| T | Toggle camera tracking of your frigate (on by default); preserves zoom |
 | L / S | Queue an LRM / SRM at the designated contact (same launch gates as buttons) |
 | P | Active sensor ping |
 | 1 / 2 / 3 | SHORT / MEDIUM / LONG separation |
