@@ -1,5 +1,27 @@
 # Luminal
 
+### Sound
+
+The client includes subtle generated interface, sensor, launch, beam, impact,
+explosion and alert effects, plus a beatless space-operatic ambient loop.
+The top-left inset has separate effects/music volume sliders and a global
+mute. Defaults are deliberately quiet (35% effects, 25% music). Combat sounds
+follow the player's light-delayed picture and are throttled in real time at
+high simulation speeds. Audio hardware is optional; the game works silently
+if no output device is available. Linux source builds require ALSA development
+headers (`alsa-lib` on Arch, `libasound2-dev` on Debian/Ubuntu).
+
+### Missile model
+
+Offensive missiles and interceptors use timed probabilistic engagements,
+not physical closest-pass guidance. Their displayed flights follow received
+tracks; terminal seekers can improve acquisition and share observations.
+Each surviving round resolves once at its deadline and is removed on hit,
+miss, or loss of its target. Hit probability depends on launch range, track
+quality/uncertainty, target evasion, and ECM/ECCM; point defence remains a
+separate layer. LRM proximity bursts and SRM direct hits retain distinct damage.
+The animation is intentionally an abstraction, not a fuel-accurate trajectory.
+
 A native, top-down space-combat prototype about fighting across light-seconds and
 astronomical units. Command a frigate, hunt uncertain contacts, launch missiles,
 and manage a ship that can lose individual systems before its hull gives out.
@@ -12,6 +34,19 @@ pings improve the picture but reveal your presence.
 Balance and interface details are experimental. No packaged releases yet.
 
 ## Install and run
+
+### Sol backdrop
+
+The map contains all eight planets, Earth's Moon, Phobos and Deimos, the four
+Galilean moons, Titan/Rhea/Iapetus, Titania/Oberon, and Triton. Sizes and orbital
+distances are rounded real-world values, with simple coplanar circular orbits
+for flavour—not a precision ephemeris. A shared randomized starting epoch sets
+their phases. All celestial positions remain frozen throughout the scenario;
+ships still experience gravity and can orbit them normally. Restart reshuffles
+the layout. Set `LUMINAL_SEED=42` when launching to reproduce a particular game;
+the seed is also written to `logs/latest.log`.
+
+### Build
 
 You need Git, a Rust toolchain, a native C/C++ build toolchain, and a desktop
 session with working OpenGL drivers. The current build is tested with **Rust
@@ -71,32 +106,53 @@ present. Other platforms are autonomous. Probes are currently disabled, and the
 station currently has direction finding only.
 The transport has half the nominal acceleration of a warship.
 
-The playtest starts at **50× speed**, tracking your selected frigate, with a bearing-only
+The playtest starts on **AUTO speed**, tracking your selected frigate, with a bearing-only
 enemy contact designated. Use the top-left controls to pause, change speed, fit
-the map, or restart. Combat events do not automatically change game speed.
+the map, or restart. AUTO smoothly ranges from 5× at 1 LS through 10× at 10 LS,
+50× at 0.1 AU and 300× at 1 AU to 1000× at 2 AU. It uses the nearest received
+enemy track, allowing for uncertainty and two wall-seconds of projected closure.
+Bearing-only search uses 100×; no contacts uses 1000×. Acceleration is gradual,
+deceleration quicker, and pause freezes the speed. AUTO ramps from 5× at startup.
+Selecting 1×, 10×, 50×, 100× or 1000× switches to manual speed; combat events
+never override manual speed. Restart restores AUTO.
 
 | Control | Action |
 | --- | --- |
 | Space | Pause / resume |
 | F / FIT | Fit the map |
-| T | Toggle camera tracking of your frigate (on by default); preserves zoom |
+| T | Track your frigate (default), smoothly auto-zooming to include the selected ranged target |
 | L / S | Queue an LRM / SRM at the designated contact (same launch gates as buttons) |
+| Shift+L / Shift+S | Queue all remaining LRMs / SRMs at that target; normal launch intervals still apply |
 | P | Active sensor ping |
+| E / R / B | Cycle ECM / Screens / Boost: Auto → On → Off |
+| A | Toggle automatic active pinging: Off / Auto |
 | 1 / 2 / 3 | SHORT / MEDIUM / LONG separation |
 | 0 | EVADE |
 | Drag with left or middle mouse button | Pan; cancels ship tracking |
 | Mouse wheel | Zoom |
-| Click a contact | Designate it; defaults to LONG manoeuvre |
+| Click a contact | Designate it; defaults to MATCH manoeuvre |
 | Hover an object | Inspect details |
 
-The bottom deck contains your weapon controls, your ship's condition, the target's
-last observed condition, and manoeuvre orders.
+The bottom deck contains weapon controls, your ship's condition, a central
+Ping/EF/system-control stack, the target's last observed condition, and manoeuvre orders.
 
 - **PING:** send one active sensor pulse. Returns arrive after the round-trip
-  light delay. The reference suite detects out to about 1 AU and resolves within
-  half that range. Outlying contacts remain bearings rather than identified ships.
-- **SCREEN ON/OFF:** toggle defensive screens. They store intercepted energy as
-  heat and radiate it away, increasing your signature.
+  light delay. Successful returns grant Identity, including condition, for 60 seconds.
+  Reach is the EF-scaled Approximate envelope, reduced by damage and opposing ECM.
+- **ACTIVE Auto/Off:** defaults Off. Auto repeats every 60 seconds until explicitly
+  switched Off, even without contacts. Manual Ping is independent.
+- **ECM On/Off/Auto:** defaults Auto; emits while a resolved enemy ship is known.
+  Ratings default to ECM 100 and ECCM 50. Net advantage is target ECM minus observer
+  ECCM, scaled by system health. Resolution reduction is `min(50%, net/(50+net))`
+  for positive net advantage; otherwise zero. Bearing/Approximate reach is unaffected,
+  and ECM still increases EF by 50%.
+- **SCREENS On/Off/Auto:** defaults Auto and latches on after resolving an enemy ship.
+  The scenario retains its initially raised warship screens. Raising and lowering
+  each take 60 seconds at full effectiveness. Stored absorption heat blocks lowering;
+  an Off request waits without discarding stored energy.
+- **BOOST On/Off/Auto:** defaults Auto. Boost adds 20% to full thrust and pauses main
+  and point-defence laser recharge; existing charged shots remain available. Auto
+  stops boosting when a received ship/missile position is within 10 light-seconds.
 - **LRM / SRM:** click to queue a launch. Long-range nuclear proximity missiles
   allow speculative bearing-only shots; short-range kinetic missiles need a
   minimally useful firing solution. Launch intervals are 60 s and 5 s respectively.
@@ -110,14 +166,16 @@ last observed condition, and manoeuvre orders.
 | --- | --- |
 | MATCH | Come alongside and match velocity |
 | FLYBY | Accelerate for a high-speed pass without matching velocity |
-| LONG | Seek a separation of 3 AU |
-| MEDIUM | Seek a separation of 1 AU |
-| SHORT | Seek a separation of 0.03 AU |
+| LONG · LRM | Hold 1 AU: half the LRM engagement envelope |
+| MEDIUM · SRM | Hold 0.1 AU: half the SRM's 0.2 AU engagement envelope |
+| SHORT · BEAM | Hold 1 LS: inside the beam knife-fight envelope |
 | EVADE | Burn away from the contact |
 
 LONG, MEDIUM and SHORT approach a fresh bearing-only contact until a range fix is
-available, then brake or withdraw to hold the requested separation. MATCH and
-FLYBY require a fresh resolved range. Stale evidence causes coasting. Ships still
+available, then brake or withdraw to hold the requested separation. MATCH is the
+default on target selection and restart: it approaches a fresh bearing, then
+brakes and matches velocity once a ranged estimate is available. FLYBY requires
+a fresh ranged track. Stale evidence causes coasting. Ships still
 retain momentum with their engines off.
 
 ### Damage and information
@@ -126,6 +184,32 @@ Warships have 1,000 hull points, ablative armour, screens, and discrete systems.
 Green systems are intact, orange damaged, and red destroyed. Grey means a known
 power/dependency outage; blue-grey means unknown or stale, **not confirmed disabled**.
 Target cards contain historical sensor reports, so they can lag visible actions.
+
+A hit pushing stored screen absorption beyond rated capacity destroys the screen
+generator, damages 1–3 other distinct installed systems, and removes 20% of maximum
+hull, in addition to ordinary penetrating damage. A second hit on a damaged system
+destroys it. Generator destruction vents the field and cannot trigger overload again.
+
+### Emissivity and sensing
+
+EF is `(1 + thrust%/100) × (1 + screen heat%/10) × (2 if screens active) ×
+(size/10) × (1 - stealth/100) × (1.5 if ECM emitting) ×
+(1.2 if missiles fired in the last minute) × (1.5 if beams fired in the last minute)`.
+An additional platform visibility multiplier scales the entire EF: normally ×1,
+but ×2 for the transport. Frigates use size 7; battleships 20; stations 20;
+other classes provisionally 10. Point-defence
+fire contributes. Boosted thrust can reach 120%.
+
+Multiply base sensing ranges by **target EF / 1.4**: passive Identity 0.01 AU,
+Resolved 0.1 AU, Approximate 2 AU, Bearing 10 AU; active ping Identity has a
+separate 1 AU baseline. EF 1.4 is a size-7, 50%-stealth frigate at full nominal
+thrust with raised, cold screens and ECM off. ECM and sensor damage still reduce
+effective ranges. Approximate contacts have a biased ellipse
+and estimated motion; resolved contacts gain class identity. Direction finding
+requires operational DF and screens, thrust, or recent weapons on the target.
+ECM alone does not qualify. Damaged sensors halve their range. Ping identity expires
+60 seconds after original sensor receipt, not after an allied relay.
+Learned class identity remains; condition reports become historical.
 
 Damaged power disables propulsion, active sensors, screens and weapons. Passive
 sensors, direction finding and the ship mind have backup power; crew and damage
@@ -156,6 +240,9 @@ cargo +1.98.0 clippy --locked --workspace --all-targets -- -D warnings
 # separation 0.002 AU, second ship's reaction delay 10 seconds
 cargo +1.98.0 run --locked --release -p luminal-cli -- \
   --frigate-battle 5 30 0.002 10
+
+# Cold, thrusting, screened and hot signatures across five ranges
+cargo +1.98.0 run --locked --release -p luminal-cli -- --sensor-sweep
 ```
 
 CLI trials write CSV results to standard output. `calibration/` contains historical

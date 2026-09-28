@@ -20,14 +20,14 @@ pub fn orbit_bounds(sys: &System, i: usize) -> (f64, f64) {
     let b = &sys.bodies[i];
     let min = 1.5 * b.radius;
     let hill = match b.orbit {
-        Orbit::Circular { parent, radius, .. } => 0.3 * radius * (b.gm / (3.0 * sys.bodies[parent].gm)).cbrt(),
+        Orbit::Circular { parent, radius, .. } | Orbit::Frozen { parent, radius, .. } => 0.3 * radius * (b.gm / (3.0 * sys.bodies[parent].gm)).cbrt(),
         Orbit::Fixed(_) => f64::INFINITY,
     };
     let satellites = sys
         .bodies
         .iter()
         .filter_map(|c| match c.orbit {
-            Orbit::Circular { parent, radius, .. } if parent == i => Some(0.6 * radius),
+            Orbit::Circular { parent, radius, .. } | Orbit::Frozen { parent, radius, .. } if parent == i => Some(0.6 * radius),
             _ => None,
         })
         .fold(f64::INFINITY, f64::min);
@@ -69,6 +69,15 @@ pub fn orbit_sense(rel: Vec2, vrel: Vec2) -> f64 {
 
 /// Distance at which an intercept holds station on its target, km. PLACEHOLDER.
 pub const STANDOFF_KM: f64 = 1_000.0;
+/// Combat manoeuvre presets sit inside the weapon's useful engagement envelope,
+/// not at its outer launch limit. Beam standoff assumes a manoeuvring opponent.
+pub fn weapon_standoff(payload:crate::missile::Payload)->f64 {
+    use crate::missile::Payload;
+    match payload {
+        Payload::Beam=>crate::params::SHIP_BEAM_AUTO_RANGE_LS.value*crate::units::LIGHT_SECOND/3.0,
+        Payload::Nuclear|Payload::Kinetic=>payload.engagement_range()*0.5,
+    }
+}
 /// Fraction of the drive a move order plans to brake with; the rest absorbs control lag
 /// and steers out cross-track velocity.
 const MOVE_BRAKE_FRACTION: f64 = 0.8;
@@ -222,6 +231,24 @@ fn clamp(v: Vec2, max: f64) -> Vec2 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn weapon_range_presets_settle_from_inside_and_outside_against_moving_targets() {
+        use crate::missile::Payload;
+        for payload in [Payload::Beam,Payload::Kinetic,Payload::Nuclear] {
+            let radius=weapon_standoff(payload);
+            for fraction in [0.5,2.0] {
+                let mut target=State {pos:Vec2::ZERO,vel:Vec2::new(10.0,-5.0)};
+                let mut ship=State {pos:Vec2::new(radius*fraction,0.0),vel:Vec2::ZERO};
+                for _ in 0..3600 {
+                    let a=keep_range(ship,target,Vec2::ZERO,radius,100.0*crate::units::G0);
+                    ship=crate::kinematics::advance(ship,a.thrust,10.0);
+                    target.pos=target.pos+target.vel*10.0;
+                }
+                assert!(((ship.pos-target.pos).length()-radius).abs()<10.0,"{payload:?} from {fraction}");
+                assert!((ship.vel-target.vel).length()<0.1,"holds relative velocity");
+            }
+        }
+    }
     #[test]
     fn range_orders_close_withdraw_and_hold_without_overspeed() {
         let target=State {pos:Vec2::ZERO,vel:Vec2::ZERO};

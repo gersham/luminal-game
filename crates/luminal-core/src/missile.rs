@@ -38,7 +38,7 @@ impl Payload {
     pub fn acceleration_g(self)->f64 {crate::params::MISSILE_MAX_ACCEL_G.value*if self==Self::Kinetic {2.0} else {1.0}}
     pub fn launch_interval(self)->f64 {if self==Self::Kinetic {crate::params::SRM_LAUNCH_INTERVAL_S.value} else {crate::params::MISSILE_LAUNCH_INTERVAL_S.value}}
     pub fn endurance(self)->f64 {if self==Self::Kinetic {4500.0} else {21600.0}}
-    pub fn engagement_range(self)->f64 {crate::units::AU*if self==Self::Kinetic {0.1} else {2.0}}
+    pub fn engagement_range(self)->f64 {crate::units::AU*if self==Self::Kinetic {0.2} else {2.0}}
 }
 
 /// Fixed limited field of regard about a received aim, never the true bearing.

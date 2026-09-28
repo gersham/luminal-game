@@ -1,4 +1,4 @@
-//! Stars, planets and moons: massive bodies on known analytic ephemerides.
+//! Stars, planets and moons: fixed snapshots or analytic circular orbits.
 //!
 //! Their motion is public knowledge, so every faction may use it without any light
 //! delay. Their gravity acts on ships; ships do not perturb them. Touching one is fatal.
@@ -16,6 +16,8 @@ pub enum CelestialKind {
 #[derive(Clone, Copy, Debug)]
 pub enum Orbit {
     Fixed(Vec2),
+    /// Snapshot of a circular orbit. Absolute position is cached once at setup.
+    Frozen { parent: usize, radius: f64, pos: Vec2 },
     /// Circular, counter-clockwise about another celestial body (by index).
     Circular { parent: usize, radius: f64, period: f64, phase: f64 },
 }
@@ -47,7 +49,7 @@ pub struct System {
 impl System {
     pub fn state(&self, i: usize, t: f64) -> State {
         match self.bodies[i].orbit {
-            Orbit::Fixed(pos) => State { pos, vel: Vec2::ZERO },
+            Orbit::Fixed(pos) | Orbit::Frozen { pos, .. } => State { pos, vel: Vec2::ZERO },
             Orbit::Circular { parent, radius, period, phase } => {
                 let p = self.state(parent, t);
                 let w = TAU / period;
@@ -68,7 +70,7 @@ impl System {
     pub fn soi_radius(&self, i: usize) -> f64 {
         match self.bodies[i].orbit {
             Orbit::Fixed(_) => f64::INFINITY,
-            Orbit::Circular { parent, radius, .. } => radius * (self.bodies[i].gm / self.bodies[parent].gm).powf(0.4),
+            Orbit::Circular { parent, radius, .. } | Orbit::Frozen { parent, radius, .. } => radius * (self.bodies[i].gm / self.bodies[parent].gm).powf(0.4),
         }
     }
 

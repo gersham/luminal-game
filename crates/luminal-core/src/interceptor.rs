@@ -23,43 +23,21 @@ fn reach(t:f64)->f64 {
 /// Earliest reachable coasting solution, capped by endurance, range and encounter
 /// speed. No current target truth state is supplied to this calculation.
 pub fn engagement(own:State,target:State)->Option<f64> {
-    let r=target.pos-own.pos; let v=target.vel-own.vel;
-    if r.length()>INTERCEPTOR_RANGE_LS.value*LIGHT_SECOND {return None;}
-    for step in 1..=(INTERCEPTOR_BURN_S.value.min(INTERCEPTOR_LIFETIME_S.value)*4.0) as usize {
-        let t=step as f64*0.25;
-        let aim=r+v*t;
-        if aim.length()<=reach(t) {
-            let velocity=aim.normalized()*(INTERCEPTOR_ACCEL_G.value*G0*t.min(INTERCEPTOR_BURN_S.value));
-            if hit_probability((velocity-v).length())==0.0 {return None;}
-            return Some(t);
-        }
-    }
-    // After burnout reach grows linearly. Solve the coast intersection directly
-    // rather than scanning hours of endurance every fire-control cycle.
-    let burn=INTERCEPTOR_BURN_S.value;
-    let speed=INTERCEPTOR_ACCEL_G.value*G0*burn;
-    let a=v.dot(v)-speed*speed;
-    let b=2.0*r.dot(v)+speed*speed*burn;
-    let c=r.dot(r)-0.25*speed*speed*burn*burn;
-    let mut roots=if a.abs()<1e-9 {
-        vec![if b.abs()>1e-9 {-c/b} else {f64::INFINITY}]
-    } else {
-        let disc=b*b-4.0*a*c;
-        if disc<0.0 {return None;}
-        vec![(-b-disc.sqrt())/(2.0*a),(-b+disc.sqrt())/(2.0*a)]
-    };
-    roots.sort_by(f64::total_cmp);
-    roots.into_iter().find(|&t| {
-        if !t.is_finite() || t<burn || t>INTERCEPTOR_LIFETIME_S.value {return false;}
-        let aim=r+v*t;
-        aim.length()<=reach(t)+1e-3 && hit_probability((aim.normalized()*speed-v).length())>0.0
-    })
+    let delta=target.pos-own.pos;
+    let range=delta.length();
+    let relative=target.vel-own.vel;
+    if range>nominal_range() || hit_probability(relative.length())<=0.0 {return None;}
+    let closing=-relative.dot(delta.normalized());
+    let speed=0.1*C;
+    if speed+closing<=0.0 {return None;}
+    let seconds=(range/(speed+closing)).max(range/C).max(0.1);
+    (seconds<=INTERCEPTOR_LIFETIME_S.value).then_some(seconds)
 }
 
 impl World {
     /// Launch and end-of-flight reports propagate at c. A remote commitment
     /// cannot suppress local defence before its report is actually received.
-    fn interceptor_committed(&self, receiver:BodyId, target:BodyId, before:Option<BodyId>)->bool {
+    pub(super) fn interceptor_committed(&self, receiver:BodyId, target:BodyId, before:Option<BodyId>)->bool {
         let rx=&self.bodies[receiver.0 as usize];
         let heard=|trajectory:&Trajectory, time:f64| {
             let Some(segment)=trajectory.segments().iter().rev().find(|s|s.t0<=time) else {return false};
@@ -129,7 +107,9 @@ impl World {
         battery.rounds-=1; battery.launched+=1; battery.ready_at=t+INTERCEPTOR_LAUNCH_INTERVAL_S.value/effectiveness;
         battery.status="Interceptor away";
         let number=battery.launched;
+        carrier.last_missile_launch=Some(t);
         let mut body=carrier.clone();
+        body.last_missile_launch=None;
         body.damage=crate::damage::Damage::default();
         body.name=format!("{} interceptor {number}",carrier.name);
         body.kind=BodyKind::Missile; body.controllable=false; body.armed=false;
@@ -147,102 +127,13 @@ impl World {
             dv_left:INTERCEPTOR_ACCEL_G.value*G0*INTERCEPTOR_BURN_S.value,last_update:t,solution,last_range:f64::INFINITY});
         self.bodies.push(body); self.last_step.push(t);
         self.report_launch(id);
-        self.scheduler.schedule(t,Event::Step(id));
+        self.start_probability_interceptor(id,solution);
         self.scheduler.schedule(t,Event::InterceptorGuide(id));
         id
     }
 
     pub(super) fn guide_interceptor(&mut self,id:BodyId) {
-        let t=self.time;
-        let Some(me)=self.state(id,t) else {return};
-        let Some(mut defence)=self.bodies[id.0 as usize].interceptor else {return};
-        // Simultaneous launches are possible before reports arrive. The later
-        // interceptor yields when it learns of the earlier allied commitment.
-        if self.interceptor_committed(id,defence.target,Some(id)) {
-            self.destroy(id,t,LossCause::Expended);
-            return;
-        }
-        let target_trajectory=&self.bodies[defence.target.0 as usize].trajectory;
-        if t>defence.last_update {
-            let own=&self.bodies[id.0 as usize].trajectory;
-            let separation=|at|Some(target_trajectory.state_at(at)?.pos-own.state_at(at)?.pos);
-            if let Some((at,distance))=missile::closest_approach(defence.last_update,t,separation) {
-                let radial=|tau| {
-                    let target=target_trajectory.state_at(tau)?;
-                    let missile=own.state_at(tau)?;
-                    Some((target.pos-missile.pos).dot(target.vel-missile.vel))
-                };
-                let passed=(at>defence.last_update+1e-9 && separation(t).is_some_and(|v|v.length()>distance+1e-3))
-                    || (radial(defence.last_update).is_some_and(|r|r<0.0) && radial(t).is_some_and(|r|r>=0.0));
-                if distance<=INTERCEPTOR_KILL_RADIUS_KM.value || passed {
-                    let speed=(target_trajectory.state_at(at).unwrap().vel-own.state_at(at).unwrap().vel).length();
-                    let kill=distance<=INTERCEPTOR_KILL_RADIUS_KM.value && self.rng.uniform()<hit_probability(speed);
-                    self.debug_note("INTERCEPT",format!("missile={id:?} target={:?} pass_time={at:.6} miss_km={distance} speed_kms={speed} fuel_kms={} chance={} kill={kill}",defence.target,defence.dv_left,hit_probability(speed)));
-                    self.destroy(id,at,LossCause::Expended);
-                    if kill && self.bodies[defence.target.0 as usize].alive_at(t) {
-                        self.destroy(defence.target,at,LossCause::Interceptor {missile:id});
-                    }
-                    return;
-                }
-            }
-        }
-        if t>=defence.expires {self.destroy(id,t,LossCause::Expended);return;}
-        defence.dv_left=(defence.dv_left-self.bodies[id.0 as usize].trajectory.thrust_impulse(defence.last_update,t)).max(0.0);
-        // Local passive seeker: observe retarded position, fit velocity from samples,
-        // and relay the observation home. No truth velocity enters guidance.
-        if let Some((emitted,seen))=retarded_state(target_trajectory,me.pos,t)
-            && self.system.occluder(seen.pos,emitted,me.pos,t).is_none() {
-            let target=&self.bodies[defence.target.0 as usize];
-            let power=emission_w(target.kind,target.baseline_emission_factor,target_trajectory.thrust_at(emitted).unwrap_or(Vec2::ZERO));
-            let range=(seen.pos-me.pos).length();
-            let snr=sensors::intensity(power,range)/PD_SENSOR_NOISE_FLOOR.value;
-            if snr>=PASSIVE_DETECT_SNR.value && emitted>defence.solution.t {
-                let bearing=bearing_of(seen.pos-me.pos)+LASER_POINTING_RAD.value*self.rng.gaussian();
-                let measured=(range+SEEKER_RANGE_SIGMA_KM.value*self.rng.gaussian()).max(0.0);
-                let pos=me.pos+Vec2::new(bearing.cos(),bearing.sin())*measured;
-                defence.solution=sensors::SeekerFix::update(Some(defence.solution),emitted,pos,defence.solution.vel);
-                let faction=self.bodies[id.0 as usize].faction;
-                let contact=self.contact_id(faction,defence.target);
-                self.relays.push(Relay {faction,front:Front {origin:me.pos,t_emit:t},obs:Observation {contact,sensor:id,origin:me.pos,
-                    emitted_at:emitted,sensor_received_at:t,decider_received_at:f64::NAN,source:Source::Emission,snr,
-                    measurement:Measurement::BearingRange {bearing,sigma_bearing:LASER_POINTING_RAD.value,range:measured,sigma_range:SEEKER_RANGE_SIGMA_KM.value}}});
-            }
-        }
-        let fix=defence.solution.accelerating();
-        let estimate=State {pos:fix.pos+fix.vel*(t-fix.t),vel:fix.vel};
-        let range=(estimate.pos-me.pos).length();
-        let (time_left,miss)=missile::zero_effort_miss(me,estimate,Vec2::ZERO);
-        if t>=self.bodies[id.0 as usize].probe_ping_at {
-            self.ping(id); self.bodies[id.0 as usize].probe_ping_at=t+MISSILE_ACTIVE_INTERVAL_S.value;
-        }
-        // Cruise observations need a useful velocity-fit baseline, not ten noisy
-        // fits per second. Keep fine physical pass checks in the final ten seconds.
-        let dt=(if time_left>10.0 {1.0} else {INTERCEPTOR_GUIDE_S.value}).min(defence.expires-t);
-        let accel=INTERCEPTOR_ACCEL_G.value*G0;
-        // A long-range head-on intercept can have zero lateral miss while still
-        // needing a departure burn. The old boost-only solver returned None
-        // beyond the fuel duration, so ZEM guidance left the interceptor parked.
-        // Accelerate toward the reachable boost-and-coast intercept, retaining
-        // half of propulsion for terminal corrections after the initial boost.
-        let reserve=0.5*accel*INTERCEPTOR_BURN_S.value;
-        let coast_aim=if defence.dv_left>reserve && (time_left<=0.0 || time_left>defence.dv_left/accel) {
-            engagement(me,estimate).map(|eta|estimate.pos+estimate.vel*eta-me.pos-me.vel*eta)
-        } else {None};
-        let desired=if let Some(aim)=coast_aim {aim.normalized()*accel}
-            else if time_left>0.0 {miss*(3.0/time_left.max(dt).powi(2))}
-            else {(estimate.pos-me.pos).normalized()*accel};
-        // Do not spend the entire terminal reserve chasing a noisy distant fit.
-        // This budget converges toward full authority as closest approach nears.
-        let correction_budget=if coast_aim.is_none() && time_left>10.0 {defence.dv_left/(0.5*time_left)} else {defence.dv_left/dt};
-        let limit=accel.min(correction_budget);
-        let thrust=if desired.length()>limit {desired.normalized()*limit} else {desired};
-        if (t/100.0).floor()>(defence.last_update/100.0).floor() {
-            self.debug_note("INTERCEPT_GUIDANCE",format!("missile={id:?} target={:?} range_km={range} tgo_s={time_left} fuel_kms={} fit_age_s={} desired_accel={} applied_accel={}",defence.target,defence.dv_left,t-fix.t,desired.length(),thrust.length()));
-        }
-        defence.last_range=range; defence.last_update=t;
-        let body=&mut self.bodies[id.0 as usize]; body.interceptor=Some(defence);
-        body.trajectory.set_thrust(t,thrust).unwrap();
-        self.scheduler.schedule(t+dt,Event::InterceptorGuide(id));
+        self.guide_probability_weapon(id);
     }
 }
 
@@ -259,6 +150,24 @@ mod tests {
         w.bodies[0].interceptor_battery=Some(Battery {rounds:20,launched:0,ready_at:0.0,status:"Ready"});
         w
     }
+    #[test]
+    fn interceptors_make_no_bearing_contacts_but_still_allow_resolved_points() {
+        let mut w=fixture(123);
+        let target=w.state(BodyId(1),0.0).unwrap();
+        let fix=sensors::SeekerFix::update(None,0.0,target.pos,target.vel);
+        let id=w.launch_interceptor(BodyId(0),BodyId(1),fix);
+        w.bodies[id.0 as usize].faction=FactionId(1);
+        w.bodies[id.0 as usize].trajectory=Trajectory::new(-10.0,target);
+        w.bodies[0].sensors=sensors::SensorSuite {passive:false,active:false,direction_finding:true};
+        w.sensor_frame();
+        assert!(!w.contact_truth(FactionId(0)).values().any(|body|*body==id),"DF must not allocate an interceptor track");
+        assert!(w.contact_truth(FactionId(0)).values().any(|body|*body==BodyId(1)),"ordinary missiles retain bearings");
+        w.bodies[0].sensors=sensors::SensorSuite::FULL;
+        w.sensor_frame();
+        let contact=w.contact_truth(FactionId(0)).into_iter().find_map(|(c,b)|(b==id).then_some(c)).expect("resolved interceptor remains visible");
+        assert!(w.perception(FactionId(0)).unwrap().contacts[&contact].resolved);
+    }
+
     #[test]
     fn defensive_interceptors_are_not_interceptor_targets() {
         let mut w=fixture(123);

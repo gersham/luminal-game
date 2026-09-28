@@ -30,7 +30,7 @@ pub fn weapon_trial_with_error(payload:Payload,range_au:f64,closure_kms:f64,evas
     ];
     let mut w=World::new(system,specs,60.0,seed);
     let cid=w.contact_id(FactionId(0),BodyId(1));
-    w.perceptions.get_mut(&FactionId(0)).unwrap().ingest(Observation {
+    w.perceptions.get_mut(&FactionId(0)).unwrap().ingest(Observation {detection:crate::sensors::DetectionLevel::Resolved,
         contact:cid,sensor:BodyId(0),origin:base,emitted_at:0.0,sensor_received_at:0.0,decider_received_at:0.0,
         measurement:Measurement::BearingRange {bearing:std::f64::consts::FRAC_PI_2,range:range_au*AU,sigma_range:0.001,sigma_bearing:1e-10},
         snr:1e9,source:Source::Echo,
@@ -85,7 +85,7 @@ pub fn beam_trial(range_ls:f64,evasion_g:f64,seed:u64)->f64 {
     let mut w=World::new(system,(0..2).map(|i|BodySpec {name:format!("Ship {i}"),kind:BodyKind::Ship,faction:FactionId(i),
         state:State {pos:base+Vec2::new(i as f64*range_ls*crate::units::LIGHT_SECOND,0.0),vel:Vec2::ZERO},thrust:Vec2::ZERO,magazine:1}).collect(),1000.0,seed);
     let c=w.contact_id(FactionId(0),BodyId(1));
-    w.perceptions.get_mut(&FactionId(0)).unwrap().ingest(Observation {
+    w.perceptions.get_mut(&FactionId(0)).unwrap().ingest(Observation {detection:crate::sensors::DetectionLevel::Resolved,
         contact:c,sensor:BodyId(0),origin:base,emitted_at:0.0,sensor_received_at:0.0,decider_received_at:0.0,
         measurement:Measurement::BearingRange {bearing:0.0,range:range_ls*crate::units::LIGHT_SECOND,sigma_range:1e-5,sigma_bearing:1e-12},
         snr:1e12,source:Source::Echo},&w.system);
@@ -142,7 +142,7 @@ fn run_frigate_duel(depth:u32,seed:u64,range_au:f64,battle:Option<f64>)->DuelRes
         let origin=w.state(id,0.0).unwrap().pos;
         let rel=w.state(other,0.0).unwrap().pos-origin;
         let c=w.contact_id(FactionId(i as u8),other);
-        w.perceptions.get_mut(&FactionId(i as u8)).unwrap().ingest(Observation {
+        w.perceptions.get_mut(&FactionId(i as u8)).unwrap().ingest(Observation {detection:crate::sensors::DetectionLevel::Resolved,
             contact:c,sensor:id,origin,emitted_at:0.0,sensor_received_at:0.0,decider_received_at:0.0,
             measurement:Measurement::BearingRange {bearing:bearing_of(rel),range:range_au*AU,sigma_range:0.001,sigma_bearing:1e-10},
             snr:1e9,source:Source::Echo},&w.system);

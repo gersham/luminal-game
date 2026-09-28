@@ -63,6 +63,7 @@ impl World {
 
     pub(super) fn point_defence_cycle(&mut self,id:BodyId) {
         let t=self.time;
+        self.bodies[id.0 as usize].advance_thermal(t);
         let b=&self.bodies[id.0 as usize];
         let Some(pd)=b.point_defence else {return};
         if !b.alive_at(t) || !pd.rate_hz.is_finite() || pd.rate_hz<=0.0 {return;}
@@ -93,7 +94,7 @@ impl World {
         if let Some((range,target,aim,emitted,measurement,snr))=candidates.first().copied()
             && laser_effectiveness>0.0 && t>=pd.next_shot_at && range<=PD_LASER_MAX_RANGE_LS.value*LIGHT_SECOND {
             let contact=self.contact_id(faction,target);
-            self.relays.push(Relay {faction,front:Front {origin,t_emit:t},obs:Observation {
+            self.relays.push(Relay {faction,front:Front {origin,t_emit:t},obs:Observation {detection:crate::sensors::DetectionLevel::Resolved,
                 contact,sensor:id,origin,emitted_at:emitted,sensor_received_at:t,decider_received_at:f64::NAN,
                 measurement,snr,source:Source::Emission}});
             let pd=self.bodies[id.0 as usize].point_defence.as_mut().unwrap();

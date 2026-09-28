@@ -67,8 +67,8 @@ impl Thermal {
             let loss = self.heat_j * (1.0 - (-dt / HULL_COOLING_S.value).exp());
             self.heat_j -= loss;
             self.radiated_j += loss;
-            if !up {
-                self.field = (self.field - dt / SCREEN_COOL_SHUTDOWN_S.value).max(*screen_j / SCREEN_CAPACITY_J.value).clamp(0.0, 1.0);
+            if !up && *screen_j==0.0 {
+                self.field = (self.field - dt / SCREEN_COOL_SHUTDOWN_S.value).clamp(0.0, 1.0);
             }
         }
         self.last_t = self.last_t.max(t);
@@ -92,6 +92,17 @@ impl Thermal {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test] fn screen_transitions_take_one_minute_and_absorption_blocks_shutdown() {
+        let mut thermal=Thermal::default();let mut heat=0.0;
+        thermal.advance(30.0,true,&mut heat);assert!((thermal.field-0.5).abs()<1e-9);
+        thermal.advance(60.0,true,&mut heat);assert!((thermal.field-1.0).abs()<1e-9);
+        heat=SCREEN_CAPACITY_J.value*0.5;
+        thermal.advance(120.0,false,&mut heat);assert_eq!(thermal.field,1.0);
+        assert!(heat>0.0 && heat<SCREEN_CAPACITY_J.value*0.5);
+        heat=0.0;
+        thermal.advance(150.0,false,&mut heat);assert!((thermal.field-0.5).abs()<1e-9);
+        thermal.advance(180.0,false,&mut heat);assert!(thermal.field<1e-9);
+    }
     #[test]
     fn doubled_beam_cadence_is_supported_by_power_and_cooling() {
         let mut thermal=Thermal::default();

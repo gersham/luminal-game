@@ -2,7 +2,7 @@
 //! No world, target identity, or spectator access is available here.
 use crate::session::{Command, InterceptTarget, Payload, View};
 use crate::params::*;
-use crate::units::{AU, LIGHT_SECOND};
+use crate::units::AU;
 use crate::world::BodyKind;
 use std::collections::BTreeMap;
 
@@ -51,20 +51,19 @@ impl Doctrine {
             // Let beam fire control judge useful long-range shots from the
             // received solution; do not force wasteful directed fire at 1 AU.
             if !b.beam_auto {out.push(Command::ArmBeams {body:b.id});}
-            if b.has_screen && !b.screen_up && range < 10.0*LIGHT_SECOND { out.push(Command::SetScreen { body: b.id, up: true }); }
-            if b.has_screen && b.screen_up && range > 30.0*LIGHT_SECOND { out.push(Command::SetScreen { body: b.id, up: false }); }
+            // Screen policy belongs to the platform's On/Off/Auto controller.
             if range <= 2.0*AU && view.time >= *self.salvo_at.get(&b.id).unwrap_or(&0.0) {
                 let close=range<0.1*AU;
                 let conserve=escort_known && view.objective.as_ref().is_some_and(|o|o.attacker==b.faction)
                     && !close;
                 let reserve=if close {0} else {4};
                 for payload in [Payload::Nuclear, Payload::Kinetic] {
-                    if payload == Payload::Kinetic && !close { continue; }
                     if range>payload.engagement_range() {continue;}
-                    let sigma=(tr.cov[0][0]+tr.cov[1][1]).max(0.0).sqrt();
-                    let velocity_sigma=tr.velocity_sigma;
-                    let confidence=crate::missile::launch_confidence(range,sigma,velocity_sigma,payload);
-                    if confidence<0.5 {
+                    let eta=crate::world::weapon_probability::flight_seconds(payload,range,0.0);
+                    let sigma=(tr.cov[0][0]+tr.cov[1][1]+(tr.velocity_sigma*eta).powi(2)).max(0.0).sqrt();
+                    let confidence=crate::world::weapon_probability::hit_chance(payload,range,
+                        crate::world::weapon_probability::quality(c.detection),sigma,0.0,1.0);
+                    if confidence<0.5 || c.detection<crate::sensors::DetectionLevel::Resolved {
                         if range<crate::units::AU && view.time>=*self.ping_at.get(&b.id).unwrap_or(&0.0) {
                             out.push(Command::Ping {body:b.id});
                             self.ping_at.insert(b.id,view.time+BOT_PING_S.value);
@@ -88,6 +87,7 @@ impl Doctrine {
 
 #[cfg(test)]
 mod tests {
+    use crate::units::LIGHT_SECOND;
     use super::*;
     use crate::session::{LocalSession,Role,ContactView,TrackView};
     use crate::mind::{ContactId,Source};
@@ -98,7 +98,7 @@ mod tests {
         let session=LocalSession::new(crate::scenario::transport_intercept());
         let mut view=session.view(Role::Faction(crate::scenario::RAIDER));
         let ship=view.bodies.iter().find(|b|b.controllable).unwrap().clone();
-        view.contacts=(1..=2).map(|id|ContactView {resolved_class:None,
+        view.contacts=(1..=2).map(|id|ContactView {detection:crate::sensors::DetectionLevel::Resolved,ping_remaining:0.0,reporting_sensor:None,resolved_class:None,
             resolved_interceptor:false,
             damage:None,
             id:ContactId(id),resolved_kind:Some(BodyKind::Ship),resolved_missile:false,

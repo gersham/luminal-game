@@ -54,6 +54,7 @@ pub enum Command {
     ArmBeams { body: BodyId },
     /// Request gradual screen buildup or energy-conserving collapse.
     SetScreen { body: BodyId, up: bool },
+    SetSystemMode {body:BodyId,system:crate::world::controls::ControlledSystem,mode:crate::world::controls::Mode},
     SetWarp(f64),
     SetPaused(bool),
 }
@@ -82,7 +83,7 @@ impl Command {
             Self::SetThrust { body, .. } | Self::Orbit { body, .. } | Self::Intercept { body, .. }
             | Self::Flyby { body, .. } | Self::KeepRange {body,..} | Self::Evade {body,..} | Self::MoveTo { body, .. } | Self::AllStop { body }
             | Self::SetDriveLimit { body, .. } | Self::Launch { body, .. } | Self::FireBeam { body, .. }
-            | Self::Ping { body } | Self::EngageBeam { body, .. } | Self::SetScreen { body, .. }
+            | Self::Ping { body } | Self::EngageBeam { body, .. } | Self::SetScreen { body, .. } | Self::SetSystemMode {body,..}
             | Self::CancelLaunches { body } | Self::DeployProbe {body,..} | Self::ArmBeams { body } => Some(body),
             Self::SetWarp(_) | Self::SetPaused(_) => None,
         }
@@ -107,6 +108,8 @@ impl From<OrderError> for Rejection {
 /// Command-ship state, delayed friendly telemetry, or truth for the spectator.
 #[derive(Clone, Debug)]
 pub struct BodyView {
+    pub controls:crate::world::controls::Controls,
+    pub emissivity:crate::sensors::EmissivityFactors,
     pub damage:crate::damage::Report,
     pub interceptor_battery:Option<crate::world::interceptor::Battery>,
     pub interceptor:Option<(f64,f64)>, // Remaining delta-v and expiry, not truth target IDs.
@@ -188,6 +191,9 @@ pub struct BearingView {
 /// Something the faction has sensed. Identity and truth are not included.
 #[derive(Clone, Debug)]
 pub struct ContactView {
+    pub detection:crate::sensors::DetectionLevel,
+    pub reporting_sensor:Option<BodyId>,
+    pub ping_remaining:f64,
     pub resolved_class:Option<crate::world::ShipClass>,
     pub resolved_interceptor:bool,
     pub damage:Option<crate::damage::Report>,
@@ -473,6 +479,10 @@ impl LocalSession {
                 self.owned(role, body)?;
                 self.world.set_screen(body, up)?;
             }
+            Command::SetSystemMode {body,system,mode}=>{
+                self.owned(role,body)?;
+                self.world.set_system_mode(body,system,mode)?;
+            }
         }
         Ok(())
     }
@@ -508,6 +518,8 @@ impl LocalSession {
                 let b = if let Role::Faction(f) = role { known = w.known_body(f, BodyId(i as u32))?; &known } else { b };
                 let s = b.trajectory.state_at(t)?;
                 Some(BodyView {
+                    controls:b.controls,
+                    emissivity:b.emissivity_factors(t),
                     damage:crate::damage::Report {damage:b.damage,installed:b.installed_systems(),observed_at:b.trajectory.start(),screen_heat:b.screen_j},
                     interceptor_battery:b.interceptor_battery,interceptor:b.interceptor.map(|i|(i.dv_left,i.expires)),
                     point_defence: b.point_defence.map(|mut pd| {pd.rate_hz*=b.operating_effectiveness(crate::damage::System::PdLaser);pd}),
@@ -556,11 +568,13 @@ impl LocalSession {
             Role::Faction(f) => w.perception(f).map(|p| {
                 p.contacts
                     .values()
-                    .filter(|c| !w.contact_retired(f, c.id))
+                    .filter(|c| !w.contact_retired(f, c.id) && c.detection(t)!=crate::sensors::DetectionLevel::None)
+                    .filter(|c| c.detection(t)>=crate::sensors::DetectionLevel::Resolved
+                        || !w.body_for_contact(f,c.id).is_some_and(|id|w.bodies[id.0 as usize].interceptor.is_some()))
                     .map(|c| {
-                        let track = c.track.as_ref().filter(|_|c.resolved).map(|tr| {
-                            let now = tr.at(t, &w.system);
-                            TrackView { velocity_sigma:now.p[2][2].max(now.p[3][3]).max(0.0).sqrt(),pos: now.pos(), vel: now.vel(), accel: now.accel(), cov: now.pos_cov(), updated_at: tr.t, updates: tr.updates }
+                        let detection=c.detection(t);
+                        let track = c.estimate(t,&w.system).map(|now| {
+                            TrackView { velocity_sigma:now.p[2][2].max(now.p[3][3]).max(0.0).sqrt(),pos: now.pos(), vel: now.vel(), accel: now.accel(), cov: now.pos_cov(), updated_at: c.track.as_ref().unwrap().t, updates: now.updates }
                         });
                         let bearings = c
                             .bearings
@@ -582,16 +596,16 @@ impl LocalSession {
                             Measurement::Bearing { .. } => None,
                         };
                         ContactView {
-                            resolved_class:track.as_ref().and_then(|_|w.body_for_contact(f,c.id).and_then(|id|w.bodies[id.0 as usize].ship_class)),
-                            resolved_interceptor:track.is_some() && w.body_for_contact(f,c.id).is_some_and(|id|w.bodies[id.0 as usize].interceptor.is_some()),
+                            detection,reporting_sensor:c.best_evidence(t).map(|o|o.sensor),ping_remaining:c.ping_remaining(t),
+                            resolved_class:if c.resolved {w.body_for_contact(f,c.id).and_then(|id|w.bodies[id.0 as usize].ship_class)} else {None},
+                            resolved_interceptor:c.resolved && w.body_for_contact(f,c.id).is_some_and(|id|w.bodies[id.0 as usize].interceptor.is_some()),
                             damage:w.known_damage(f,c.id),
-                            resolved_kind:track.as_ref().and_then(|_|w.body_for_contact(f,c.id).map(|id|w.bodies[id.0 as usize].kind)),
-                            resolved_missile: track.is_some() && w.body_for_contact(f,c.id)
+                            resolved_kind:if c.resolved {w.body_for_contact(f,c.id).map(|id|w.bodies[id.0 as usize].kind)} else {None},
+                            resolved_missile: c.resolved && w.body_for_contact(f,c.id)
                                 .is_some_and(|id|w.bodies[id.0 as usize].kind==BodyKind::Missile),
                             quality: if t - c.last.decider_received_at > params::TRACK_LOST_S.value { "lost" }
                                 else if t - c.last.decider_received_at > params::TRACK_STALE_S.value { "stale" }
-                                else if track.as_ref().is_some_and(|tr| tr.updates >= 3 && tr.velocity_sigma <= params::TRACK_VELOCITY_SIGMA.value) { "velocity resolved" }
-                                else if track.is_some() { "position resolution" } else { "direction indication" },
+                                else {detection.label()},
                             stale: t - c.last.decider_received_at > params::TRACK_STALE_S.value,
                             id: c.id,
                             track,
@@ -644,7 +658,8 @@ impl LocalSession {
             warp: self.warp,
             paused: self.paused,
             bodies,
-            pings: w.ping_emissions.iter().filter(|(id, _)| visible(w.bodies[id.0 as usize].faction)
+            pings: w.ping_emissions.iter().filter(|(id, front)| visible(w.bodies[id.0 as usize].faction)
+                && !w.hidden_ping_circles.contains(&(*id,front.t_emit.to_bits()))
                 && !matches!(w.bodies[id.0 as usize].kind, BodyKind::Station | BodyKind::Missile)).map(|(id, front)| OwnPing {
                 origin:front.origin,t_emit:front.t_emit,useful_range:crate::units::AU * if matches!(w.bodies[id.0 as usize].kind,BodyKind::Probe|BodyKind::Missile) { params::PROBE_SENSOR_FACTOR.value.sqrt() } else {1.0}
             }).collect(),
@@ -674,6 +689,14 @@ mod tests {
         s.tick(secs);
         s
     }
+    /// Close geometry for perception/relay tests, independent of opening balance.
+    fn close_scenario()->World {
+        let mut w=scenario::transport_intercept();
+        let own=w.bodies[1].trajectory.state_at(0.0).unwrap();
+        w.bodies[2].trajectory=crate::kinematics::Trajectory::new(-2000.0,crate::kinematics::State {pos:own.pos+Vec2::new(3.0*crate::units::LIGHT_SECOND,0.0),vel:Vec2::ZERO});
+        for b in &mut w.bodies {b.beam_auto=false;}
+        w
+    }
 
     #[test]
     fn doctrine_engages_without_truth_and_is_warp_independent() {
@@ -690,12 +713,12 @@ mod tests {
 
     #[test]
     fn faction_view_holds_own_ships_and_contacts_only() {
-        let s = running(60.0);
+        let mut s = LocalSession::new(close_scenario());s.world.advance_to(60.0);
         let v = s.view(Role::Faction(ESCORT));
         assert!(v.bodies.iter().all(|b| b.faction == ESCORT));
         assert_eq!(v.bodies.len(), 3);
-        let c = v.contacts.first().expect("burning cruiser is detected at once");
-        assert!(c.last_emitted_at < v.time - 100.0, "its light is old");
+        let c = v.contacts.first().expect("nearby raider is detected");
+        assert!(c.last_emitted_at < v.time, "its light is old");
         // Coarse passive bearings from escorts 1 ls apart cannot fix a target ~160 ls
         // away: the opening is bearing-only until they spread out or ping.
         // The lunar station supplies a wider baseline than the two escort ships.
@@ -777,9 +800,15 @@ mod tests {
 
     #[test]
     fn lunar_station_is_autonomous_and_reports_without_visible_pulses() {
-        let mut s=running(0.0);
+        let mut s=LocalSession::new(close_scenario());
         // Exercise the optional active station configuration, disabled in playtests.
         s.world.bodies[3].sensors=crate::sensors::SensorSuite::FULL;
+        // Keep this relay fixture clear of lunar occultation for any Sol phase.
+        let station_pos=s.world.bodies[3].trajectory.state_at(0.0).unwrap().pos;
+        s.world.bodies[1].trajectory=crate::kinematics::Trajectory::new(-2000.0,crate::kinematics::State {
+            pos:station_pos+Vec2::new(20_000.0,0.0),vel:Vec2::ZERO});
+        s.world.bodies[2].trajectory=crate::kinematics::Trajectory::new(-2000.0,crate::kinematics::State {
+            pos:station_pos+Vec2::new(3.0*crate::units::LIGHT_SECOND,0.0),vel:Vec2::ZERO});
         let station=BodyId(3);
         assert_eq!(s.command(Role::Faction(ESCORT),Command::Ping {body:station}),Err(Rejection::NotControllable));
         assert!(s.world.set_screen(station,true).is_err());
@@ -872,14 +901,13 @@ mod tests {
 
     #[test]
     fn raider_salvo_has_one_track_per_source_not_duplicate_cruiser_tracks() {
-        let mut s=LocalSession::new(scenario::transport_intercept());
-        s.enable_bot(RAIDER,true);
+        let mut s=LocalSession::new(close_scenario());
         s.command(Role::Spectator,Command::SetPaused(false)).unwrap();
-        s.tick(1560.0); // The raider now starts twice as far away; reports arrive later.
+        s.tick(20.0);
         // Explicit speculative launches exercise association independently of AI doctrine.
         let target=s.view(Role::Faction(RAIDER)).contacts.first().unwrap().id;
         for _ in 0..3 {s.command(Role::Faction(RAIDER),Command::Launch {body:BodyId(2),target,payload:Payload::Nuclear}).unwrap();}
-        s.tick(900.0);
+        s.tick(130.0);
         let v=s.view(Role::Faction(ESCORT));
         let association=s.contact_truth(Role::Spectator,ESCORT).unwrap();
         let sources:Vec<_>=v.contacts.iter().map(|c|association[&c.id]).collect();
@@ -887,8 +915,8 @@ mod tests {
         assert_eq!(sources.len(),unique.len(),"each source has exactly one displayed contact");
         for contact in &v.contacts {
             let kind=s.world.bodies[association[&contact.id].0 as usize].kind;
-            assert_eq!(contact.resolved_kind,contact.track.as_ref().map(|_|kind));
-            assert_eq!(contact.resolved_missile,contact.track.is_some() && kind==BodyKind::Missile);
+            if let Some(resolved)=contact.resolved_kind {assert_eq!(resolved,kind);}
+            assert_eq!(contact.resolved_missile,contact.resolved_kind==Some(BodyKind::Missile));
         }
         assert_eq!(sources.iter().filter(|id|**id==BodyId(2)).count(),1,"one cruiser track");
         assert_eq!(sources.iter().filter(|id|s.world.bodies[id.0 as usize].kind==BodyKind::Probe).count(),0,"probes disabled in the scenario");
@@ -898,7 +926,7 @@ mod tests {
 
     #[test]
     fn new_contacts_preserve_selected_warp_and_full_tick() {
-        let mut s=LocalSession::new(scenario::transport_intercept());
+        let mut s=LocalSession::new(close_scenario());
         s.set_watch(Some(ESCORT));
         s.command(Role::Spectator,Command::SetWarp(100.0)).unwrap();
         s.command(Role::Spectator,Command::SetPaused(false)).unwrap();
@@ -934,7 +962,7 @@ mod tests {
         let s = running(60.0);
         let v = s.view(Role::Spectator);
         assert_eq!(v.bodies.len(), 4);
-        assert_eq!(v.celestials.len(), 3);
+        assert_eq!(v.celestials.len(), 22);
         assert!(s.contact_truth(Role::Faction(ESCORT), ESCORT).is_none());
         assert!(s.contact_truth(Role::Spectator, ESCORT).is_some());
     }

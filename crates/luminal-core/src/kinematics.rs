@@ -218,6 +218,15 @@ impl Trajectory {
         self.push(t, thrust, last.accel - last.thrust)
     }
 
+    /// An abstract weapon flight changes its displayed course, not a physical
+    /// thrust integration. Preserve position and all previously emitted history.
+    pub(crate) fn weapon_course(&mut self,t:f64,velocity:Vec2,signature_thrust:Vec2) {
+        assert!(t>=self.last().t0);
+        let pos=self.last().state_at(t).pos;
+        let segment=Segment {t0:t,pos,vel:velocity,accel:Vec2::ZERO,thrust:signature_thrust};
+        if t==self.last().t0 {*self.segments.last_mut().unwrap()=segment;} else {self.segments.push(segment);}
+    }
+
     /// Begin a new constant-acceleration segment at `t` with the given thrust and
     /// gravity sample.
     pub fn push(&mut self, t: f64, thrust: Vec2, gravity: Vec2) -> Result<(), TrajectoryError> {

@@ -36,6 +36,20 @@ pub struct Damage {
 }
 impl Default for Damage {fn default()->Self {Self {hull:100.0,hull_max:100.0,armour:100.0,armour_max:100.0,systems:[Condition::Intact;15],repair_progress:0.0,repair_target:None}}}
 impl Damage {
+    /// Catastrophic field feedback bypasses armour. Each secondary casualty is
+    /// distinct, installed, and not already destroyed.
+    pub fn screen_overload(&mut self,installed:&[bool;15],rng:&mut Rng)->Vec<System> {
+        self.systems[System::Screens as usize]=Condition::Destroyed;
+        self.hull=(self.hull-0.2*self.hull_max).max(0.0);
+        let mut eligible=*installed;
+        eligible[System::Screens as usize]=false;
+        let count=1+(rng.uniform()*3.0) as usize;
+        let mut hit=vec![System::Screens];
+        for _ in 0..count {
+            if let Some(s)=self.hit_system(&eligible,rng) {eligible[s as usize]=false;hit.push(s);}
+        }
+        hit
+    }
     pub fn hull_thrust_factor(&self)->f64 {
         let fraction=self.hull/self.hull_max.max(1e-9);
         if fraction<=0.25 {0.5} else if fraction<=0.5 {0.75} else {1.0}
@@ -106,6 +120,22 @@ impl Report {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test] fn screen_overload_destroys_generator_hits_distinct_systems_and_bypasses_armour() {
+        for seed in 0..100 {
+            let mut d=Damage {hull:1000.0,hull_max:1000.0,..Default::default()};
+            let hit=d.screen_overload(&[true;15],&mut Rng::new(seed));
+            assert!((2..=4).contains(&hit.len()));
+            assert_eq!(d.hull,800.0);assert_eq!(d.armour,100.0);
+            assert_eq!(d.state(System::Screens),Condition::Destroyed);
+            for (i,s) in hit.iter().enumerate() {assert!(!hit[..i].contains(s));}
+        }
+        let mut d=Damage {hull:100.0,hull_max:1000.0,..Default::default()};
+        let mut installed=[false;15];installed[System::Beam as usize]=true;
+        d.systems[System::Beam as usize]=Condition::Damaged;
+        let hit=d.screen_overload(&installed,&mut Rng::new(1));
+        assert_eq!(hit,vec![System::Screens,System::Beam]);
+        assert_eq!(d.state(System::Beam),Condition::Destroyed);assert_eq!(d.hull,0.0);
+    }
     #[test] fn system_damage_chance_increases_below_hull_thresholds() {
         for (hull,chance) in [(1000.0,0.2),(500.0,0.2),(499.0,0.4),(250.0,0.4),(249.0,0.8)] {
             let damage=Damage {hull,hull_max:1000.0,..Default::default()};

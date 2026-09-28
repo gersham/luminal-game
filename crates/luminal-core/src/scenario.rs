@@ -1,57 +1,36 @@
 //! Starting situations. Geometry here is placeholder, not a balanced scenario.
-
-use crate::celestial::{Celestial, CelestialKind, Orbit, System};
+use crate::celestial::System;
 use crate::kinematics::{State, Vec2};
 use crate::params::{MAGAZINE_CRUISER, MAGAZINE_FRIGATE};
 use crate::units::{AU, G0};
 use crate::world::{BodyId, BodyKind, BodySpec, FactionId, Objective, World};
-use std::f64::consts::FRAC_PI_2;
 
 pub const ESCORT: FactionId = FactionId(0);
 pub const RAIDER: FactionId = FactionId(1);
 
 pub const DAY: f64 = 86_400.0;
 
+/// Deterministic Sol snapshot for tests and CLI scenarios.
+pub fn home_system() -> System {
+    crate::sol::system(42)
+}
+
 /// Desktop testing preset: retain the escort scenario, but supply the frigate
 /// with a historical direction indication, not a free range/course solution.
 pub fn transport_intercept_debug()->World {
-    let mut world=transport_intercept();
+    transport_intercept_debug_seeded(42)
+}
+
+pub fn transport_intercept_debug_seeded(seed: u64)->World {
+    let mut world=transport_intercept_seeded(seed);
     let contact=world.seed_debug_contact(BodyId(1),BodyId(2));
-    world.set_tactical_range(BodyId(1),crate::world::InterceptTarget::Contact(contact),Some(3.0*AU)).unwrap();
+    world.set_intercept(BodyId(1),crate::world::InterceptTarget::Contact(contact)).unwrap();
     world
 }
 
 /// Radius of the escorts' starting orbit about the planet, km.
 const PARKING_ORBIT_KM: f64 = 60_000.0;
 
-/// A Sun-like star, an Earth-like planet at 1 AU and a Moon-like satellite.
-pub fn home_system() -> System {
-    System {
-        bodies: vec![
-            Celestial {
-                name: "Sun".into(),
-                kind: CelestialKind::Star,
-                gm: 1.327_124_4e11,
-                radius: 696_000.0,
-                orbit: Orbit::Fixed(Vec2::ZERO),
-            },
-            Celestial {
-                name: "Planet".into(),
-                kind: CelestialKind::Planet,
-                gm: 398_600.4,
-                radius: 6_371.0,
-                orbit: Orbit::Circular { parent: 0, radius: AU, period: 365.256 * DAY, phase: 0.0 },
-            },
-            Celestial {
-                name: "Moon".into(),
-                kind: CelestialKind::Moon,
-                gm: 4_902.8,
-                radius: 1_737.4,
-                orbit: Orbit::Circular { parent: 1, radius: 384_400.0, period: 27.32 * DAY, phase: FRAC_PI_2 },
-            },
-        ],
-    }
-}
 
 /// GAME_MECHANICS.md §15: a cruiser intercepting a transport before it reaches a
 /// departure region, with a defending frigate.
@@ -64,7 +43,11 @@ pub fn home_system() -> System {
 /// Objective: the transport must reach a departure region about 2.8 AU map-north
 /// of its starting position. PLACEHOLDER geometry, not balanced.
 pub fn transport_intercept() -> World {
-    let system = home_system();
+    transport_intercept_seeded(42)
+}
+
+pub fn transport_intercept_seeded(seed: u64) -> World {
+    let system = crate::sol::system(seed);
     let planet = system.state(1, 0.0);
     let ship = |name: &str, faction, pos: Vec2, vel: Vec2, thrust: Vec2, magazine: f64| BodySpec {
         name: name.into(),
@@ -101,8 +84,9 @@ pub fn transport_intercept() -> World {
             state: State { pos: station_pos, vel: station_vel },
             thrust: Vec2::ZERO, magazine: 0 },
     ];
-    let mut world = World::new(system, specs, 3600.0, 42);
+    let mut world = World::new(system, specs, 3600.0, seed);
     world.bodies[0].baseline_emission_factor=crate::params::TRANSPORT_EMISSION_FACTOR.value;
+    world.bodies[0].visibility_multiplier=2.0;
     world.bodies[1].baseline_emission_factor=crate::params::FRIGATE_EMISSION_FACTOR.value;
     let transport_start=world.bodies[0].trajectory.state_at(0.0).unwrap().pos;
     let departure_distance=(planet.pos+Vec2::new(2.5*AU,1.2*AU)-transport_start).length();
@@ -125,6 +109,8 @@ pub fn transport_intercept() -> World {
     for id in [BodyId(1),BodyId(2)] {
         world.set_screen(id,true).expect("combatant has screens");
         world.bodies[id.0 as usize].thermal.field=1.0;
+        // Preserve the scenario's established screens, now under latched Auto.
+        world.bodies[id.0 as usize].controls.screens=crate::world::controls::Mode::Auto;
     }
     world.bodies[0].controllable = false;
     world.probes_enabled=crate::params::PROBES_ENABLED;
@@ -225,6 +211,20 @@ mod tests {
             assert_eq!(b.thermal.field,1.0);
             assert_eq!(b.screen_j,0.0,"raised does not mean full of absorbed damage");
         }
+    }
+
+    #[test]
+    fn civilian_visibility_and_station_size_feed_the_shared_ef() {
+        let w=transport_intercept();
+        let transport=w.bodies[0].emissivity_factors(0.0);
+        assert_eq!(transport.visibility_multiplier,2.0);
+        let normal=crate::sensors::EmissivityFactors {visibility_multiplier:1.0,..transport};
+        assert_eq!(transport.value(),2.0*normal.value());
+        let a=crate::sensors::detection_ranges(transport.value());
+        let b=crate::sensors::detection_ranges(normal.value());
+        for i in 0..4 {assert_eq!(a[i],2.0*b[i]);}
+        assert_eq!(w.bodies[3].emissivity_factors(0.0).size,20.0);
+        assert_eq!(w.bodies[1].visibility_multiplier,1.0);
     }
 
     #[test]

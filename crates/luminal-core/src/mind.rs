@@ -44,6 +44,7 @@ pub enum Source {
 
 #[derive(Clone, Copy, Debug)]
 pub struct Observation {
+    pub detection:crate::sensors::DetectionLevel,
     pub contact: ContactId,
     /// Our ship whose sensor made it.
     pub sensor: BodyId,
@@ -292,6 +293,7 @@ pub fn triangulate(a: (Vec2, f64, f64), b: (Vec2, f64, f64)) -> Option<(Vec2, [[
 
 #[derive(Clone, Debug)]
 pub struct Contact {
+    evidence:BTreeMap<(BodyId,u8),Observation>,
     /// Identification requires a direct passive localisation or a usable echo,
     /// not triangulated bearings or interception of the target's ping.
     pub resolved: bool,
@@ -301,6 +303,55 @@ pub struct Contact {
     /// Latest bearing report from each of our sensors.
     pub bearings: BTreeMap<BodyId, Observation>,
     pub last: Observation,
+}
+
+impl Contact {
+    pub fn best_evidence(&self,t:f64)->Option<&Observation> {
+        self.evidence.values().filter(|o|o.detection!=crate::sensors::DetectionLevel::None &&
+            t-o.decider_received_at<=crate::params::TRACK_STALE_S.value &&
+            (o.source!=Source::Echo || t-o.sensor_received_at<crate::sensors::PING_RESOLUTION_S*2.0))
+            .max_by(|a,b|self.report_level(a,t).cmp(&self.report_level(b,t)).then(a.emitted_at.total_cmp(&b.emitted_at)))
+    }
+    fn report_level(&self,o:&Observation,t:f64)->crate::sensors::DetectionLevel {
+        use crate::sensors::DetectionLevel as D;
+        if o.source!=Source::Echo {return o.detection;}
+        let age=t-o.sensor_received_at;
+        // A minute between emissions is slightly longer between echoes from a
+        // receding target. Coast the existing vector briefly; this is not fresh
+        // identity telemetry and does not extend the ping's stats lease.
+        if age<crate::sensors::PING_RESOLUTION_S {o.detection}
+        else if age<crate::sensors::PING_RESOLUTION_S+15.0 {o.detection.min(D::Resolved)}
+        else {o.detection.min(D::Approximate)}
+    }
+    pub fn detection(&self,t:f64)->crate::sensors::DetectionLevel {
+        self.best_evidence(t).map_or(crate::sensors::DetectionLevel::None,|o|self.report_level(o,t))
+    }
+    pub fn ping_remaining(&self,t:f64)->f64 {
+        self.evidence.values().filter(|o|o.source==Source::Echo && o.detection>=crate::sensors::DetectionLevel::Resolved)
+            .map(|o|(o.sensor_received_at+crate::sensors::PING_RESOLUTION_S-t).max(0.0)).fold(0.0,f64::max)
+    }
+    pub fn usable_track(&self,t:f64)->Option<&Track> {
+        (self.detection(t)>=crate::sensors::DetectionLevel::Approximate).then_some(self.track.as_ref()).flatten()
+    }
+    pub fn estimate(&self,t:f64,sys:&System)->Option<Track> {
+        let mut track=self.usable_track(t)?.at(t,sys);
+        if self.detection(t)==crate::sensors::DetectionLevel::Approximate {
+            let evidence=self.best_evidence(t)?;
+            let last_ping=self.evidence.values().filter(|o|o.source==Source::Echo && o.detection>=crate::sensors::DetectionLevel::Resolved)
+                .map(|o|o.sensor_received_at).max_by(f64::total_cmp);
+            let blend=last_ping.map_or(1.0,|at|((t-at-crate::sensors::PING_RESOLUTION_S)/60.0).clamp(0.0,1.0));
+            if let Measurement::BearingRange {bearing,range,sigma_range,sigma_bearing}=evidence.measurement {
+                let min=crate::units::LIGHT_SECOND*0.5*blend;
+                let cap=crate::units::LIGHT_SECOND*5.0;
+                let radial=sigma_range.clamp(min,cap);
+                let angular=(range*sigma_bearing).clamp(min*0.65,cap)/range.max(1.0);
+                let cov=polar_cov(bearing,range,radial,angular);
+                track.p[0][0]=track.p[0][0].max(cov[0][0]);
+                track.p[1][1]=track.p[1][1].max(cov[1][1]);
+            }
+        }
+        Some(track)
+    }
 }
 
 /// A report whose light left this long before the track's newest one is too stale to
@@ -328,6 +379,7 @@ impl Perception {
 
     /// Fold a report that has reached the decider into the picture.
     pub fn ingest(&mut self, obs: Observation, sys: &System) {
+        if obs.detection==crate::sensors::DetectionLevel::None && !self.contacts.contains_key(&obs.contact) {return;}
         self.log.push_back(obs);
         if self.log.len() > LOG_LEN {
             self.log.pop_front();
@@ -335,19 +387,27 @@ impl Perception {
         let c = self
             .contacts
             .entry(obs.contact)
-            .or_insert_with(|| Contact { resolved:false, systematic_floor:None,id: obs.contact, track: None, bearings: BTreeMap::new(), last: obs });
+            .or_insert_with(|| Contact { evidence:BTreeMap::new(),resolved:false, systematic_floor:None,id: obs.contact, track: None, bearings: BTreeMap::new(), last: obs });
+        let mut obs=obs;
+        if matches!(obs.measurement,Measurement::Bearing {..}) {obs.detection=obs.detection.min(crate::sensors::DetectionLevel::Bearing);}
+        let key=(obs.sensor,obs.source as u8);
+        if c.evidence.get(&key).is_none_or(|old|obs.emitted_at>=old.emitted_at &&
+            (old.detection==obs.detection || obs.source==Source::Echo || obs.sensor_received_at-old.sensor_received_at>=crate::sensors::CONTACT_TRANSITION_S)) {
+            c.evidence.insert(key,obs);
+        }
+        if obs.detection==crate::sensors::DetectionLevel::None {return;}
         if obs.emitted_at >= c.last.emitted_at {
             c.last = obs;
         }
         match obs.measurement {
             Measurement::BearingRange { bearing, sigma_bearing, range, sigma_range } => {
-                if matches!(obs.source, Source::Emission | Source::Echo) { c.resolved = true; }
+                if matches!(obs.source, Source::Emission | Source::Echo) && obs.detection>=crate::sensors::DetectionLevel::Resolved { c.resolved = true; }
                 if c.bearings.get(&obs.sensor).is_none_or(|old|obs.emitted_at>=old.emitted_at) {
-                    c.bearings.insert(obs.sensor, Observation {measurement:Measurement::Bearing {bearing,sigma:sigma_bearing},..obs});
+                    c.bearings.insert(obs.sensor, Observation {detection:crate::sensors::DetectionLevel::Resolved,measurement:Measurement::Bearing {bearing,sigma:sigma_bearing},..obs});
                 }
                 let pos = obs.origin + Vec2::new(bearing.cos(), bearing.sin()) * range;
-                let radial=crate::sensors::systematic_range(range,obs.snr,obs.source);
-                let angular=crate::params::DIRECTION_SYSTEMATIC_RAD.value/obs.snr.sqrt().max(1.0);
+                let radial=if obs.detection>=crate::sensors::DetectionLevel::Approximate {0.0} else {crate::sensors::systematic_range(range,obs.snr,obs.source)};
+                let angular=if obs.detection>=crate::sensors::DetectionLevel::Approximate {0.0} else {crate::params::DIRECTION_SYSTEMATIC_RAD.value/obs.snr.sqrt().max(1.0)};
                 let cov = polar_cov(bearing, range, sigma_range.hypot(radial), sigma_bearing.hypot(angular));
                 match &mut c.track {
                     Some(t) if obs.emitted_at < t.t - STALE_REPORT_S => {}
@@ -399,8 +459,10 @@ impl Perception {
                 Measurement::BearingRange {bearing,range,..} => (bearing,range),
                 Measurement::Bearing {bearing,..} => (bearing,(tr.pos()-obs.origin).length()),
             };
-            let radial=crate::sensors::systematic_range(range,obs.snr,obs.source);
-            let angular=crate::params::DIRECTION_SYSTEMATIC_RAD.value/obs.snr.sqrt().max(1.0);
+            let (radial,angular)=match obs.measurement {
+                Measurement::BearingRange {sigma_range,sigma_bearing,..} => (sigma_range,sigma_bearing),
+                _ => (crate::sensors::systematic_range(range,obs.snr,obs.source),crate::params::DIRECTION_SYSTEMATIC_RAD.value/obs.snr.sqrt().max(1.0)),
+            };
             let candidate=polar_cov(bearing,range,radial,angular);
             // A weak newer report must not inflate the retained solution to that
             // report's much larger calibration uncertainty. Motion still grows P.
@@ -423,26 +485,54 @@ impl Perception {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test] fn ping_identity_expires_from_sensor_receipt_not_relay_receipt() {
+        use crate::sensors::DetectionLevel as D;
+        let mut p=Perception::new(FactionId(0));let sys=System::default();
+        let report=Observation {detection:D::Identity,contact:ContactId(1),sensor:BodyId(0),origin:Vec2::ZERO,
+            emitted_at:0.0,sensor_received_at:10.0,decider_received_at:50.0,source:Source::Echo,snr:100.0,
+            measurement:Measurement::BearingRange {bearing:0.0,range:1000.0,sigma_range:0.1,sigma_bearing:1e-7}};
+        p.ingest(report,&sys);
+        let c=&p.contacts[&ContactId(1)];
+        assert_eq!(c.detection(50.0),D::Identity);assert_eq!(c.ping_remaining(50.0),20.0);
+        assert_eq!(c.detection(70.0),D::Resolved);assert_eq!(c.ping_remaining(70.0),0.0);
+        assert_eq!(c.detection(85.0),D::Approximate);assert!(c.resolved,"learned class remains known");
+        assert_eq!(c.detection(130.0),D::None);
+        assert!(c.estimate(130.0,&sys).is_none());
+    }
+
+    #[test] fn successive_receding_echoes_keep_a_solid_track_but_loss_still_expires() {
+        use crate::sensors::DetectionLevel as D;
+        let mut p=Perception::new(FactionId(0));let sys=System::default();
+        for receipt in [10.0,74.0,138.0] {
+            if receipt>10.0 {assert_eq!(p.contacts[&ContactId(1)].detection(receipt-0.01),D::Resolved);}
+            p.ingest(Observation {detection:D::Identity,contact:ContactId(1),sensor:BodyId(0),origin:Vec2::ZERO,
+                emitted_at:receipt-5.0,sensor_received_at:receipt,decider_received_at:receipt,source:Source::Echo,snr:100.0,
+                measurement:Measurement::BearingRange {bearing:0.0,range:1000.0,sigma_range:0.1,sigma_bearing:1e-7}},&sys);
+            assert_eq!(p.contacts[&ContactId(1)].detection(receipt),D::Identity);
+        }
+        assert_eq!(p.contacts[&ContactId(1)].detection(214.0),D::Approximate);
+        assert_eq!(p.contacts[&ContactId(1)].detection(259.0),D::None);
+    }
 
     #[test]
     fn bearing_triangulation_and_ping_do_not_identify_a_platform() {
         let mut p=Perception::new(FactionId(0));
         let sys=System::default();
         let target=Vec2::new(1000.0,1000.0);
-        let report=Observation {contact:ContactId(1),sensor:BodyId(0),origin:Vec2::ZERO,
+        let report=Observation {detection:crate::sensors::DetectionLevel::Resolved,contact:ContactId(1),sensor:BodyId(0),origin:Vec2::ZERO,
             emitted_at:0.0,sensor_received_at:1.0,decider_received_at:1.0,
             measurement:Measurement::Bearing {bearing:bearing_of(target),sigma:0.001},snr:9.0,source:Source::Emission};
         p.ingest(report,&sys);
         let origin=Vec2::new(2000.0,0.0);
-        p.ingest(Observation {sensor:BodyId(1),origin,
+        p.ingest(Observation {detection:crate::sensors::DetectionLevel::Resolved,sensor:BodyId(1),origin,
             measurement:Measurement::Bearing {bearing:bearing_of(target-origin),sigma:0.001},..report},&sys);
         assert!(p.contacts[&ContactId(1)].track.is_some());
         assert!(!p.contacts[&ContactId(1)].resolved);
-        let ranged=Observation {source:Source::Ping,measurement:Measurement::BearingRange {
+        let ranged=Observation {detection:crate::sensors::DetectionLevel::Resolved,source:Source::Ping,measurement:Measurement::BearingRange {
             bearing:bearing_of(target),sigma_bearing:0.001,range:target.length(),sigma_range:10.0},..report};
         p.ingest(ranged,&sys);
         assert!(!p.contacts[&ContactId(1)].resolved);
-        p.ingest(Observation {source:Source::Echo,..ranged},&sys);
+        p.ingest(Observation {detection:crate::sensors::DetectionLevel::Resolved,source:Source::Echo,..ranged},&sys);
         assert!(p.contacts[&ContactId(1)].resolved);
     }
 

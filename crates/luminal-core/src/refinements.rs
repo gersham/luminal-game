@@ -16,6 +16,8 @@ impl CombatKind {
 }
 #[derive(Clone, Debug)]
 pub struct CombatEvent {
+    /// Coarse visible impact intensity, not enemy subsystem telemetry (0..1).
+    pub impact_strength:f32,
     /// Exact damage telemetry is shared with allies only.
     pub damage: Option<String>,
     /// Observer-local association; never a foreign truth body ID.
@@ -25,7 +27,33 @@ pub struct CombatEvent {
     /// Own identity only; foreign events never reveal body IDs.
     pub own_body: Option<BodyId>,
 }
-struct Flash { front: Front, kind: CombatKind, body: Option<BodyId>, owner: Option<FactionId>, pending: Vec<FactionId>, aim: Option<Vec2>, damage:Option<String> }
+struct Flash { front: Front, kind: CombatKind, body: Option<BodyId>, owner: Option<FactionId>, pending: Vec<FactionId>, aim: Option<Vec2>, damage:Option<String>, impact_strength:f32 }
+
+pub(super) fn impact_strength(before:&crate::damage::Damage,after:&crate::damage::Damage)->f32 {
+    use crate::damage::{Condition,System};
+    let hull=(before.hull-after.hull).max(0.0)/before.hull_max.max(1.0);
+    if hull>=0.1 || System::ALL.into_iter().any(|s|before.state(s)!=after.state(s) && after.state(s)==Condition::Destroyed) {1.0}
+    else if hull>0.0 || before.systems!=after.systems {0.65}
+    else if after.armour<before.armour {0.35}
+    else {0.0}
+}
+
+#[test]
+fn impact_intensity_distinguishes_absorption_damage_and_severe_hits() {
+    use crate::damage::{Damage,Condition,System};
+    let before=Damage::default();
+    assert_eq!(impact_strength(&before,&before),0.0);
+    let mut after=before;after.armour-=1.0;
+    assert_eq!(impact_strength(&before,&after),0.35);
+    after.hull-=1.0;
+    assert_eq!(impact_strength(&before,&after),0.65);
+    after=before;after.systems[System::Propulsion as usize]=Condition::Damaged;
+    assert_eq!(impact_strength(&before,&after),0.65);
+    after.systems[System::Propulsion as usize]=Condition::Destroyed;
+    assert_eq!(impact_strength(&before,&after),1.0);
+    after=before;after.hull-=before.hull_max*0.2;
+    assert_eq!(impact_strength(&before,&after),1.0);
+}
 struct OrderPacket { front: Front, body: BodyId, cmd: Command }
 struct AlertPacket { front: Front, faction: FactionId, kind: AlertKind }
 
@@ -149,6 +177,16 @@ impl World {
             let mut rng=Rng::stream(seed,71); (rng.gaussian(),rng.gaussian())
         });
         match &mut obs.measurement {
+            Measurement::BearingRange {bearing,range,sigma_range,sigma_bearing} if obs.detection==sensors::DetectionLevel::Approximate => {
+                // Persistent bounded offsets keep the source inside, but not at
+                // the centre of, the reported ellipse. Never randomise per frame.
+                *range=(*range+radial.tanh()*0.8**sigma_range).max(0.0);
+                *bearing=sensors::wrap_angle(*bearing+angular.tanh()*0.8**sigma_bearing);
+            }
+            Measurement::BearingRange {bearing,range,..} if obs.detection>=sensors::DetectionLevel::Resolved => {
+                *range=(*range+radial.tanh()*0.1).max(0.0);
+                *bearing=sensors::wrap_angle(*bearing+angular.tanh()*1e-7);
+            }
             Measurement::BearingRange {bearing,range,..} => {
                 let sigma=sensors::systematic_range(*range,obs.snr,obs.source);
                 *range=(*range+radial*sigma).max(0.0);
@@ -200,6 +238,7 @@ impl World {
             Command::EngageBeam { body, target } => self.engage_beam(body, target),
             Command::ArmBeams { body } => self.arm_beams(body),
             Command::SetScreen { body, up } => self.set_screen(body, up),
+            Command::SetSystemMode {body,system,mode}=>self.set_system_mode(body,system,mode),
             Command::Ping { body } => if self.ping(body) { Ok(()) } else { Err(OrderError::Destroyed) },
             Command::KeepRange {body,target,range}=>self.set_tactical_range(body,target,Some(range)),
             Command::Evade {body,target}=>self.set_tactical_range(body,target,None),
@@ -214,7 +253,9 @@ impl World {
     pub(super) fn record_combat(&mut self, t: f64, pos: Vec2, kind: CombatKind, body: Option<BodyId>, owner: Option<FactionId>) {
         self.record_combat_damage(t,pos,kind,body,owner,None);
     }
-    pub(super) fn record_combat_damage(&mut self, t:f64,pos:Vec2,kind:CombatKind,body:Option<BodyId>,owner:Option<FactionId>,damage:Option<String>) {
+    pub(super) fn record_combat_damage(&mut self, t:f64,pos:Vec2,kind:CombatKind,body:Option<BodyId>,owner:Option<FactionId>,damage:Option<(String,f32)>) {
+        let (damage,impact_strength)=damage.map_or((None,0.0),|(text,strength)|(Some(text),strength));
+        if let Some(id)=body {self.snapshot_platform(id,t);}
         self.debug_note("COMBAT",format!("event_time={t:.6} kind={kind:?} body={body:?} position={pos:?}"));
         let owner = owner.or_else(|| body.map(|id| self.bodies[id.0 as usize].faction));
         let pending = self.perceptions.keys().copied().filter(|f| !matches!(kind,CombatKind::Expended|CombatKind::MissileHit|CombatKind::MissileMiss) || owner == Some(*f)).collect();
@@ -226,8 +267,8 @@ impl World {
                 _=>None,
             }.filter(|(fired,_,_)|(*fired-t).abs()<1e-6).map(|(_,_,aim)|aim)
         });
-        self.refinement.truth_events.push(CombatEvent { damage:damage.clone(),contact:None, emitted_at: t, received_at: t, pos:Some(pos), kind, own_body: body, aim });
-        self.refinement.flashes.push(Flash { damage,front: Front { origin: pos, t_emit: t }, kind, body, owner, pending, aim });
+        self.refinement.truth_events.push(CombatEvent { impact_strength,damage:damage.clone(),contact:None, emitted_at: t, received_at: t, pos:Some(pos), kind, own_body: body, aim });
+        self.refinement.flashes.push(Flash { impact_strength,damage,front: Front { origin: pos, t_emit: t }, kind, body, owner, pending, aim });
     }
     pub(super) fn delay_alert(&mut self, id: BodyId, t: f64, kind: AlertKind) {
         let b = &self.bodies[id.0 as usize];
@@ -246,7 +287,15 @@ impl World {
             let power=match flash.kind {CombatKind::NuclearBurst=>NUCLEAR_ENERGY_J.value,
                 CombatKind::PointDefence=>PD_FLASH_W.value,_=>SHIP_BEAM_ENERGY_J.value};
             let (measurement,snr)=sensors::receive_measurement(self.bodies[observer.0 as usize].sensors,power,relative.length(),bearing_of(relative),&mut self.rng)?;
-            let observation=Observation {contact:flash.body.map_or(ContactId(u32::MAX),|body|self.contact_id(faction,body)),
+            let (measurement,detection)=if let Some(body)=flash.body.filter(|id|matches!(self.bodies[id.0 as usize].kind,BodyKind::Ship|BodyKind::Station)) {
+                let ef=self.historical_ef(body,flash.front.t_emit);
+                let level=self.detect_ship(observer,body,flash.front.t_emit,relative.length(),false);
+                if level==sensors::DetectionLevel::None {return None;}
+                (sensors::ship_measurement(level,relative.length(),bearing_of(relative),ef),level)
+            } else {(measurement,sensors::DetectionLevel::Resolved)};
+            if matches!(measurement,Measurement::Bearing {..})
+                && flash.body.is_some_and(|id|self.bodies[id.0 as usize].interceptor.is_some()) {return None;}
+            let observation=Observation {detection,contact:flash.body.map_or(ContactId(u32::MAX),|body|self.contact_id(faction,body)),
                 sensor:observer,origin:rx,emitted_at:flash.front.t_emit,sensor_received_at:arrival,decider_received_at:arrival,
                 measurement,snr,source:Source::Emission};
             let observation=self.bias_observation(observation);
@@ -267,7 +316,7 @@ impl World {
             self.refinement.retired_contacts.insert((faction, contact));
         }
         let contact=if !own && pos.is_some() {flash.body.map(|body|self.contact_id(faction,body))} else {None};
-        Some(CombatEvent {damage:if own {flash.damage.clone()} else {None},contact,emitted_at:flash.front.t_emit,received_at:arrival,pos,kind:flash.kind,
+        Some(CombatEvent {impact_strength:flash.impact_strength,damage:if own {flash.damage.clone()} else {None},contact,emitted_at:flash.front.t_emit,received_at:arrival,pos,kind:flash.kind,
             // A visible beam discharge carries its beam direction, not the
             // target's identity or true position. Anchor it at the observed flash.
             aim:if own {flash.aim} else if matches!(flash.kind,CombatKind::BeamPulse|CombatKind::PointDefence) {
@@ -317,7 +366,7 @@ impl World {
     }
     pub fn track_fresh(&self, id: BodyId, target: ContactId) -> bool {
         self.received_picture(id).and_then(|p| p.contacts.get(&target)).is_some_and(|c|
-            c.track.is_some() && self.time - c.last.decider_received_at <= TRACK_STALE_S.value
+            c.usable_track(self.time).is_some() && self.time - c.last.decider_received_at <= TRACK_STALE_S.value
                 + self.body(id).and_then(|b| self.decider(b.faction, self.time)).and_then(|d| self.state(d, self.time))
                     .zip(self.state(id, self.time)).map_or(0.0, |(a,b)| (a.pos-b.pos).length()/crate::units::C))
     }
@@ -328,7 +377,27 @@ impl World {
         let b=&self.bodies[id.0 as usize];
         if !matches!(b.kind,BodyKind::Ship|BodyKind::Station) {return 0.0;}
         self.refinement.telemetry.get(&id).and_then(|h|h.iter().rev().find(|(at,_)|*at<=t))
-            .map_or(1.0,|(_,b)|b.operating_effectiveness(crate::damage::System::Ecm))
+            .map_or(0.0,|(_,b)|b.ecm_strength()/100.0)
+    }
+    pub(super) fn historical_ef(&self,id:BodyId,t:f64)->f64 {
+        self.historical_signature(id,t).map_or(0.0,|f|f.value())
+    }
+    pub(super) fn snapshot_platform(&mut self,id:BodyId,t:f64) {
+        let b=&self.bodies[id.0 as usize];
+        if !matches!(b.kind,BodyKind::Ship|BodyKind::Station) {return;}
+        let Some(state)=b.trajectory.state_at(t) else {return;};
+        let mut snapshot=b.clone();
+        snapshot.trajectory=Trajectory::new(t,state);
+        snapshot.trajectory.set_thrust(t,b.trajectory.thrust_at(t).unwrap_or(Vec2::ZERO)).unwrap();
+        let h=self.refinement.telemetry.entry(id).or_default();
+        if h.back().is_some_and(|(at,_)|*at>t) {return;}
+        if h.back().is_some_and(|(at,_)|*at==t) {h.pop_back();}
+        h.push_back((t,snapshot));
+    }
+    pub(super) fn historical_signature(&self,id:BodyId,t:f64)->Option<sensors::EmissivityFactors> {
+        let history=self.refinement.telemetry.get(&id)?;
+        history.iter().rev().find(|(at,_)|*at<=t).or_else(||history.front().filter(|(at,_)|*at==0.0))
+            .map(|(_,b)|b.emissivity_factors(t))
     }
     pub fn known_damage(&self,f:FactionId,c:ContactId)->Option<crate::damage::Report> {
         self.refinement.damage_reports.get(&(f,c)).copied()
@@ -337,7 +406,7 @@ impl World {
         // Explicit game abstraction: a resolved active echo can inspect damage.
         // The report uses only the target snapshot at reflection time, and is
         // published after both the echo and any allied relay have arrived.
-        if obs.source!=Source::Echo || !obs.decider_received_at.is_finite() || obs.decider_received_at>self.time || !matches!(obs.measurement,Measurement::BearingRange {..}) {return;}
+        if obs.detection!=sensors::DetectionLevel::Identity || !obs.decider_received_at.is_finite() || obs.decider_received_at>self.time || !matches!(obs.measurement,Measurement::BearingRange {..}) {return;}
         let f=self.bodies[obs.sensor.0 as usize].faction;
         let Some(id)=self.body_for_contact(f,obs.contact) else {return};
         let Some((at,b))=self.refinement.telemetry.get(&id).and_then(|h|h.iter().rev().find(|(at,_)|*at<=obs.emitted_at)) else {return};
@@ -348,6 +417,7 @@ impl World {
     }
     pub(super) fn tactical_frame(&mut self) {
         let t = self.time;
+        for i in 0..self.bodies.len() {self.update_system_controls(BodyId(i as u32));}
         let lo = self.refinement.last_t;
         self.refinement.last_t = t;
         self.refinement.hostile_pings.retain(|_,p| t-p.received_at < HOSTILE_PING_LIFETIME_S.value);
@@ -455,7 +525,7 @@ mod tests {
         w.bodies[1].faction=FactionId(1);
         let c=w.contact_id(FactionId(0),BodyId(1));
         w.tactical_frame();
-        let mut obs=Observation {contact:c,sensor:BodyId(0),origin:w.state(BodyId(0),0.0).unwrap().pos,
+        let mut obs=Observation {detection:crate::sensors::DetectionLevel::Identity,contact:c,sensor:BodyId(0),origin:w.state(BodyId(0),0.0).unwrap().pos,
             emitted_at:0.0,sensor_received_at:10.0,decider_received_at:10.0,
             measurement:Measurement::BearingRange {bearing:0.0,range:10.0*LIGHT_SECOND,sigma_range:1.0,sigma_bearing:1e-5},snr:1e6,source:Source::Echo};
         w.bodies[1].damage.systems[crate::damage::System::Passive as usize]=crate::damage::Condition::Destroyed;
@@ -587,9 +657,9 @@ mod tests {
     #[test]
     fn fixed_sensor_bias_is_not_drawn_at_truth_or_averaged_away() {
         let mut w=fleet();
-        let obs=Observation {contact:ContactId(77),sensor:BodyId(0),origin:Vec2::new(AU,0.0),
+        let obs=Observation {detection:crate::sensors::DetectionLevel::Approximate,contact:ContactId(77),sensor:BodyId(0),origin:Vec2::new(AU,0.0),
             emitted_at:0.0,sensor_received_at:0.0,decider_received_at:0.0,
-            measurement:Measurement::BearingRange {bearing:0.0,range:0.1*AU,sigma_bearing:1e-8,sigma_range:0.01},
+            measurement:Measurement::BearingRange {bearing:0.0,range:0.1*AU,sigma_bearing:0.005,sigma_range:100_000.0},
             snr:9.0,source:Source::Emission};
         let biased=w.bias_observation(obs);
         assert_ne!(biased.measurement,obs.measurement);

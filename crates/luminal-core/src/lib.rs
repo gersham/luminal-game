@@ -9,6 +9,7 @@ pub mod missile;
 pub mod params;
 pub mod rng;
 pub mod scenario;
+pub mod sol;
 pub mod scheduler;
 pub mod sensors;
 pub mod session;

@@ -11,6 +11,22 @@ use std::time::Instant;
 fn main() {
     let mut args = std::env::args().skip(1);
     let first = args.next();
+    if first.as_deref()==Some("--sensor-sweep") {
+        use luminal_core::sensors::{EmissivityFactors,SensorSuite,ship_detection_ew,detection_ranges,ping_range,resolution_factor};
+        let cold=EmissivityFactors {visibility_multiplier:1.0,thrust_percent:0.0,screen_percent:0.0,screen_on:false,size:7.0,stealth:50.0,ecm_on:true,recent_missiles:false,recent_beams:false};
+        println!("state,ef,identity_au,resolved_au,approximate_au,bearing_au,ping_au,range_au,passive,damaged_df,ping");
+        for (name,f) in [("reference",EmissivityFactors {thrust_percent:100.0,screen_on:true,ecm_on:false,..cold}),("cold",cold),("thrust",EmissivityFactors {thrust_percent:100.0,..cold}),
+            ("screens_thrust",EmissivityFactors {thrust_percent:100.0,screen_on:true,..cold}),
+            ("hot_fighting",EmissivityFactors {thrust_percent:100.0,screen_percent:100.0,screen_on:true,recent_missiles:true,recent_beams:true,..cold})] {
+            let ef=f.value();let r=detection_ranges(ef).map(|v|v/luminal_core::units::AU);
+            let ew=resolution_factor(if f.ecm_on {100.0} else {0.0},50.0);
+            for range in [0.002,0.03,0.1,0.25,0.75,1.0,1.25,3.0,10.0] {
+                let detect=|df,ping|ship_detection_ew(SensorSuite::FULL,[1.0,df],ping,ef,range*luminal_core::units::AU,f.direction_active(),ew).label();
+                println!("{name},{ef},{},{},{},{},{},{range},{},{},{}",r[0]*ew,r[1]*ew,r[2],r[3],ping_range(ef)/luminal_core::units::AU*ew,detect(1.0,0.0),detect(0.5,0.0),detect(1.0,1.0));
+            }
+        }
+        return;
+    }
     if first.as_deref()==Some("--beam-survey") {
         println!("range_ls,evasion_g,mean_coupled_j");
         for range in [1.0,3.0,10.0,30.0,100.0] {for evasion in [0.0,10.0] {

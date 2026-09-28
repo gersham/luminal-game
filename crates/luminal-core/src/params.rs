@@ -111,10 +111,10 @@ pub const SCREEN_BUILD_TIME_S: Param = Param {
 
 pub const SCREEN_COOL_SHUTDOWN_S: Param = Param {
     key: "screen.cool_shutdown_time",
-    value: 120.0,
+    value: 60.0,
     unit: "s",
     commitment: Placeholder,
-    note: "Illustrative time to lower a cool screen; hot screens take longer (§10).",
+    note: "A discharged screen takes sixty seconds to lower. Stored absorption heat blocks shutdown.",
 };
 
 pub const SENSOR_FRAME_S: Param = Param {
