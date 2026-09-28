@@ -96,7 +96,10 @@ impl TacticalLog {
 
 fn main() -> eframe::Result {
     let options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default().with_inner_size([1400.0, 900.0]).with_title("Luminal"),
+        viewport: egui::ViewportBuilder::default().with_inner_size([1400.0, 900.0])
+            .with_title("Luminal").with_app_id("luminal").with_fullscreen(true)
+            .with_icon(eframe::icon_data::from_png_bytes(include_bytes!("../../../assets/icons/luminal.png"))
+                .expect("bundled Luminal icon is valid PNG")),
         ..Default::default()
     };
     eframe::run_native("Luminal", options, Box::new(|_cc| Ok(Box::new(LuminalApp::new()))))
@@ -530,13 +533,13 @@ mod tests {
         tr.cov=[[1.0,0.0],[0.0,1.0]];tr.velocity_sigma=0.1;
         let good=missile_hit_estimate(ship,Some(&contact),Payload::Kinetic);
         assert!(good>0.5);
-        for range in [0.14,0.2] {
+        for range in [0.07,0.14] {
             contact.track.as_mut().unwrap().pos=ship.pos+Vec2::new(range*AU,0.0);
             let chance=missile_hit_estimate(ship,Some(&contact),Payload::Kinetic);
             assert!(missile_solution_launchable(Some(&contact),Payload::Kinetic,chance),"SRM enabled at {range} AU");
             assert!(tactical_shortcut(egui::Key::S,ship,Some(&contact)).is_some());
         }
-        contact.track.as_mut().unwrap().pos=ship.pos+Vec2::new(0.201*AU,0.0);
+        contact.track.as_mut().unwrap().pos=ship.pos+Vec2::new(0.141*AU,0.0);
         assert_eq!(missile_hit_estimate(ship,Some(&contact),Payload::Kinetic),0.0);
         contact.track.as_mut().unwrap().cov=[[AU*AU,0.0],[0.0,AU*AU]];
         assert!(missile_hit_estimate(ship,Some(&contact),Payload::Kinetic)<0.01);
@@ -617,7 +620,7 @@ mod tests {
     }
 }
 /// How far ahead to forecast committed motion, seconds.
-const FORECAST_S: f64 = 2.0 * 3600.0;
+const FORECAST_S: f64 = 8.0 * 3600.0;
 /// Weight of each new bearing in the displayed running average.
 const BEARING_SMOOTHING: f64 = 0.15;
 
@@ -1287,7 +1290,7 @@ impl LuminalApp {
         }
         ui.horizontal(|ui| {
             if tac_button(ui,if self.audio.muted {"MUTED"} else {"SOUND"},EVec2::new(66.0,20.0),ACCENT,!self.audio.muted,true).clicked() {
-                self.audio.muted=!self.audio.muted;self.audio.settings_changed();
+                self.audio.muted = !self.audio.muted;self.audio.settings_changed();
             }
             ui.spacing_mut().slider_width=110.0;
             if ui.add(egui::Slider::new(&mut self.audio.volume,0.0..=1.0).show_value(false)).on_hover_text("Effects volume · default 35%").changed() {self.audio.settings_changed();}
@@ -2032,7 +2035,7 @@ impl LuminalApp {
                 // Only the player's command ship needs a route forecast. Allied
                 // autonomous platforms remain visible without map-spanning trails.
                 if self.own_faction()!=Some(b.faction) || b.controllable {
-                    let forecast = view.system.predict(State { pos: b.pos, vel: b.vel }, b.thrust, view.time, FORECAST_S, 120);
+                    let forecast = view.system.predict(State { pos: b.pos, vel: b.vel }, b.thrust, view.time, FORECAST_S, 480);
                     let pts: Vec<Pos2> = forecast.points.iter().map(|&p| to_screen(&cam, rect, p)).collect();
                     painter.extend(Shape::dotted_line(&pts, c.gamma_multiply(0.15), 6.0, 1.0));
                     if forecast.impact.is_some()
@@ -2274,22 +2277,31 @@ fn sigma_major(cov: [[f64; 2]; 2]) -> f64 {
 
 fn weapon_ranges(ship:&BodyView)->Vec<(&'static str,f64,Color32)> {
     let mut ranges=Vec::new();
-    for (payload,label,color) in [(Payload::Nuclear,"LRM",Color32::from_rgb(92,139,190)),(Payload::Kinetic,"SRM",Color32::from_rgb(84,174,183))] {
+    let color=Color32::from_rgb(235,80,80);
+    for (payload,label) in [(Payload::Nuclear,"LRM"),(Payload::Kinetic,"SRM")] {
         // Queued rounds still aboard count until actually launched.
         if ship.magazine[payload.index()]>0 {ranges.push((label,payload.engagement_range(),color));}
     }
-    ranges.push(("BEAM",params::SHIP_BEAM_AUTO_RANGE_LS.value*LIGHT_SECOND,Color32::from_rgb(180,173,122)));
+    ranges.push(("BEAM",params::SHIP_BEAM_AUTO_RANGE_LS.value*LIGHT_SECOND,color));
     ranges
 }
 fn draw_weapon_ranges(painter:&egui::Painter,cam:&Camera,rect:Rect,ship:&BodyView) {
     let center=to_screen(cam,rect,ship.pos);
-    for (label,range,color) in weapon_ranges(ship) {
+    for (_,range,color) in weapon_ranges(ship) {
         let radius=(range/cam.km_per_px) as f32;
         if !radius.is_finite() || radius<2.0 || radius>1e6 {continue;}
-        painter.circle_stroke(center,radius,Stroke::new(1.0,color.gamma_multiply(0.45)));
-        let at=center+EVec2::new(radius*0.707,-radius*0.707);
-        if radius>=28.0 && rect.shrink(30.0).contains(at) {
-            painter.text(at+EVec2::new(4.0,-4.0),egui::Align2::LEFT_BOTTOM,format!("{label} · {}",fmt_distance(range)),mono(9.0),color.gamma_multiply(0.75));
+        let dots=(std::f32::consts::TAU*radius/6.0).ceil() as usize;
+        let clip=painter.clip_rect().expand(1.0);
+        let nearest=clip.clamp(center).distance(center);
+        let farthest=[clip.left_top(),clip.right_top(),clip.left_bottom(),clip.right_bottom()]
+            .into_iter().map(|p|p.distance(center)).fold(0.0_f32,f32::max);
+        if radius<nearest || radius>farthest {continue;}
+        for i in 0..dots {
+            let angle=std::f32::consts::TAU*i as f32/dots as f32;
+            let at=center+EVec2::new(angle.cos(),angle.sin())*radius;
+            if clip.contains(at) {
+                painter.circle_filled(at,0.5,color.gamma_multiply(0.5));
+            }
         }
     }
 }
@@ -2327,7 +2339,7 @@ fn draw_contact(
                 return;
             }
             if contact_has_course(c) {
-                let forecast = view.system.predict(State { pos: t.pos, vel: t.vel }, t.accel, view.time, FORECAST_S, 60);
+                let forecast = view.system.predict(State { pos: t.pos, vel: t.vel }, t.accel, view.time, FORECAST_S, 240);
                 let fp: Vec<Pos2> = forecast.points.iter().map(|&p| to_screen(cam, rect, p)).collect();
                 painter.extend(Shape::dotted_line(&fp, color.gamma_multiply(0.12), 8.0, 1.0));
             }
@@ -2353,12 +2365,13 @@ fn draw_contact(
             }
         }
         None => {
-            // One best bearing until fusion can establish position. Raw per-sensor
-            // rays belong in diagnostics, not as duplicate tracks on the map.
+            // Show only bearings measured by the player's command ship.
+            // Allied measurements still contribute to contact fusion.
             let reach = (rect.width() + rect.height()) * 2.0;
             let score=|b:&luminal_core::session::BearingView| b.sigma /
                 (1.0-((view.time-b.received_at)/BEARING_FADE_S).clamp(0.0,1.0)).max(0.001);
-            for b in c.bearings.iter().filter(|b|view.time-b.received_at<BEARING_FADE_S)
+            for b in c.bearings.iter().filter(|b|view.time-b.received_at<BEARING_FADE_S
+                && view.bodies.iter().any(|ship|ship.controllable && ship.id==b.sensor))
                 .min_by(|a,b|score(a).total_cmp(&score(b))).into_iter() {
                 let fade = bearing_opacity(b,view.time);
                 if fade <= 0.0 {

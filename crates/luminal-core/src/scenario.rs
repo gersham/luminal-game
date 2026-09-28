@@ -95,6 +95,7 @@ pub fn transport_intercept_seeded(seed: u64) -> World {
         center: transport_start + Vec2::new(0.0,departure_distance),
         radius: 0.02 * AU,
         protect: BodyId(0),
+        defeat: Some(BodyId(2)),
         defender: ESCORT,
         attacker: RAIDER,
     });

@@ -151,7 +151,7 @@ mod tests {
         w
     }
     #[test]
-    fn interceptors_make_no_bearing_contacts_but_still_allow_resolved_points() {
+    fn missiles_make_no_bearing_contacts_but_still_allow_resolved_points() {
         let mut w=fixture(123);
         let target=w.state(BodyId(1),0.0).unwrap();
         let fix=sensors::SeekerFix::update(None,0.0,target.pos,target.vel);
@@ -161,7 +161,7 @@ mod tests {
         w.bodies[0].sensors=sensors::SensorSuite {passive:false,active:false,direction_finding:true};
         w.sensor_frame();
         assert!(!w.contact_truth(FactionId(0)).values().any(|body|*body==id),"DF must not allocate an interceptor track");
-        assert!(w.contact_truth(FactionId(0)).values().any(|body|*body==BodyId(1)),"ordinary missiles retain bearings");
+        assert!(!w.contact_truth(FactionId(0)).values().any(|body|*body==BodyId(1)),"DF must not allocate an offensive missile track");
         w.bodies[0].sensors=sensors::SensorSuite::FULL;
         w.sensor_frame();
         let contact=w.contact_truth(FactionId(0)).into_iter().find_map(|(c,b)|(b==id).then_some(c)).expect("resolved interceptor remains visible");

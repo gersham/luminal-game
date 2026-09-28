@@ -82,9 +82,7 @@ impl Audio {
         for b in &view.bodies {if b.kind==BodyKind::Missile && !self.bodies.contains(&b.id) {cues.insert(Cue::Launch);}}
         self.bodies=view.bodies.iter().map(|b|b.id).collect();
         for c in &view.contacts {
-            if !c.resolved_missile {
-                if self.contact_cue(c.id,c.detection) {cues.insert(Cue::Contact);}
-            }
+            if !c.resolved_missile && self.contact_cue(c.id,c.detection) {cues.insert(Cue::Contact);}
             if c.resolved_missile && !self.contacts.contains_key(&c.id) {cues.insert(Cue::Alert);}
         }
         self.contacts=view.contacts.iter().map(|c|(c.id,c.detection)).collect();

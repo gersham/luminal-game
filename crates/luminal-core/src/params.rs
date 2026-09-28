@@ -535,7 +535,7 @@ pub const BOT_PING_S: Param = Param { key: "doctrine.ping_interval", value: 300.
 pub const BOT_SALVO_S: Param = Param { key: "doctrine.salvo_interval", value: 120.0, unit: "s", commitment: Placeholder, note: "Opponent interval between mixed-payload salvos." };
 
 pub const SHIP_BEAM_AUTO_RANGE_LS: Param = Param {
-    key: "ship_beam.auto_range", value: 3.0, unit: "ls", commitment: Placeholder,
+    key: "ship_beam.auto_range", value: 6.0, unit: "ls", commitment: Placeholder,
     note: "Close-combat automatic engagement band. Beyond it, automatic fire requires useful predicted energy; directed fire has no range cutoff.",
 };
 pub const SHIP_BEAM_MIN_EXPECTED_J:Param=Param {key:"ship_beam.min_expected_energy",value:1e9,unit:"J",commitment:Proposal,note:"Minimum expected coupled energy for automatic shots outside knife-fight range, estimated from received track covariance and beam spreading."};
@@ -549,11 +549,11 @@ pub const SHIP_BEAM_RECHARGE_S: Param = Param {
     note: "Minimum interval between ship beam pulses. Independent of the missile magazine.",
 };
 pub const SHIP_BEAM_DIVERGENCE: Param = Param {
-    key: "ship_beam.divergence", value: 3e-7, unit: "rad", commitment: Placeholder,
+    key: "ship_beam.divergence", value: 1.5e-7, unit: "rad", commitment: Placeholder,
     note: "Gaussian beam radius per distance. Coupling falls with spot area; useful combat envelope is several light-seconds, without a hard range cutoff.",
 };
 pub const SHIP_BEAM_POINTING_RAD: Param = Param {
-    key: "ship_beam.pointing_sigma", value: 1e-7, unit: "rad", commitment: Placeholder,
+    key: "ship_beam.pointing_sigma", value: 5e-8, unit: "rad", commitment: Placeholder,
     note: "Ship emitter pointing jitter, added to aim from the faction's delayed track.",
 };
 

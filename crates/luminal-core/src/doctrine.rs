@@ -52,7 +52,7 @@ impl Doctrine {
             // received solution; do not force wasteful directed fire at 1 AU.
             if !b.beam_auto {out.push(Command::ArmBeams {body:b.id});}
             // Screen policy belongs to the platform's On/Off/Auto controller.
-            if range <= 2.0*AU && view.time >= *self.salvo_at.get(&b.id).unwrap_or(&0.0) {
+            if range <= Payload::Nuclear.engagement_range() && view.time >= *self.salvo_at.get(&b.id).unwrap_or(&0.0) {
                 let close=range<0.1*AU;
                 let conserve=escort_known && view.objective.as_ref().is_some_and(|o|o.attacker==b.faction)
                     && !close;

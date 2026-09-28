@@ -291,6 +291,8 @@ pub struct Objective {
     pub center: Vec2,
     pub radius: f64,
     pub protect: BodyId,
+    /// Destroying this body also wins for the defender.
+    pub defeat: Option<BodyId>,
     /// The side trying to get `protect` there.
     pub defender: FactionId,
     /// The side trying to stop it.
@@ -1282,11 +1284,12 @@ impl World {
         if cause != LossCause::Expended {
             self.delay_alert(id, t, AlertKind::ShipLost(id));
         }
-        if let Some(o) = &self.objective
-            && o.protect == id
-        {
-            let attacker = o.attacker;
-            self.decide(attacker, format!("{name} was destroyed"));
+        if let Some(o) = &self.objective {
+            let winner=if o.protect==id {Some(o.attacker)}
+                else if o.defeat==Some(id) {Some(o.defender)} else {None};
+            if let Some(winner)=winner {
+                self.decide(winner, format!("{name} was destroyed"));
+            }
         }
     }
 
@@ -1396,7 +1399,7 @@ impl World {
                         ping.signature_w / (1.0 + self.bodies[target.0 as usize].thermal.emission(self.bodies[target.0 as usize].screen_j) / SCREEN_GLARE_W.value), out_km, bearing_of(ping.front.origin - rx),self.bodies[target.0 as usize].sensor_effectiveness(), &mut self.rng,
                     ) {
                     let listener=&self.bodies[target.0 as usize];
-                    if self.bodies[ping.emitter.0 as usize].interceptor.is_some()
+                    if self.bodies[ping.emitter.0 as usize].kind==BodyKind::Missile
                         || !listener.sensors.direction_finding || listener.sensor_effectiveness()[1]<=0.0
                         || !self.historical_signature(ping.emitter,ping.front.t_emit).is_some_and(|s|s.direction_active()) {continue;}
                     reports.push(Observation {detection:crate::sensors::DetectionLevel::Bearing,
@@ -1523,12 +1526,13 @@ impl World {
                     let level=self.detect_ship(BodyId(si as u32),BodyId(ti as u32),t_e,range,false);
                     if level==sensors::DetectionLevel::None && !self.reverse_association.values().any(|id|*id==BodyId(ti as u32)) {continue;}
                     Some((sensors::ship_measurement(level,range,bearing_of(src.pos-me.pos),ef),100.0,level))
-                } else {sensors::receive_measurement_scaled(suite,
+                } else {sensors::receive_measurement_scaled(
+                    sensors::SensorSuite {direction_finding:suite.direction_finding && b.kind!=BodyKind::Missile,..suite},
                     (emission_w(b.kind,b.baseline_emission_factor,thrust) + self.thermal_emission(BodyId(ti as u32), t_e))
                         * sensitivity * countermeasures / glare, range, bearing_of(src.pos - me.pos),effectiveness, &mut self.rng,
                 ).map(|(m,snr)|(m,snr,if matches!(m,Measurement::BearingRange {..}) {sensors::DetectionLevel::Resolved} else {sensors::DetectionLevel::Bearing}))};
                 let Some((measurement,snr,detection))=measured else {continue;};
-                if b.interceptor.is_some() && matches!(measurement,Measurement::Bearing {..}) {continue;}
+                if b.kind==BodyKind::Missile && matches!(measurement,Measurement::Bearing {..}) {continue;}
                 reports.push(Observation {detection,
                     contact: self.contact_id(faction, BodyId(ti as u32)),
                     sensor,
@@ -1805,6 +1809,7 @@ mod tests {
                 center: base + Vec2::new(1e6, 0.0),
                 radius: 1e5,
                 protect: BodyId(0),
+                defeat: Some(BodyId(1)),
                 defender: FactionId(0),
                 attacker: FactionId(1),
             });
@@ -1826,6 +1831,15 @@ mod tests {
         let mut w = make(Vec2::ZERO);
         w.destroy(BodyId(0), 0.0, LossCause::Impact(0));
         assert_eq!(w.outcome.as_ref().unwrap().winner, FactionId(1));
+
+        let mut w = make(Vec2::ZERO);
+        w.destroy(BodyId(1), 0.0, LossCause::Impact(0));
+        let outcome=w.outcome.clone().expect("raider destruction ends the scenario");
+        assert_eq!(outcome.winner,FactionId(0));
+        assert_eq!(outcome.reason,"Hunter was destroyed");
+        assert!(w.alerts.iter().any(|a|a.kind==AlertKind::GameOver));
+        w.destroy(BodyId(0),0.0,LossCause::Impact(0));
+        assert_eq!(w.outcome,Some(outcome),"later losses cannot overwrite the result");
     }
 
     #[test]
@@ -2583,6 +2597,19 @@ mod tests {
         let m = w.launch(BodyId(0), c, Payload::Kinetic).unwrap();
         w.advance_to(120.0);
         assert!(w.contact_truth(FactionId(1)).values().any(|b| *b == m), "missile drive detected");
+    }
+
+    #[test]
+    fn direction_finding_cannot_detect_missile_burns_or_pings() {
+        let (mut w, c) = range(1.0);
+        w.bodies[1].sensors=sensors::SensorSuite {passive:false,active:false,direction_finding:true};
+        let m = w.launch(BodyId(0), c, Payload::Kinetic).unwrap();
+        assert!(w.ping(m));
+        w.advance_to(120.0);
+        let contacts=w.contact_truth(FactionId(1));
+        assert!(!w.perception(FactionId(1)).unwrap().log.iter().any(|o|
+            contacts.get(&o.contact)==Some(&m) && matches!(o.measurement,Measurement::Bearing {..})),
+            "missile burns and seeker pings must not produce direction-finding reports");
     }
 
     #[test]

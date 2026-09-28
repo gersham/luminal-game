@@ -25,8 +25,8 @@ The animation is intentionally an abstraction, not a fuel-accurate trajectory.
 Successful SRM direct hits deliver 2 PJ; LRM proximity hits deliver 1 PJ.
 Full salvos are dangerous to ships with exhausted interceptor magazines; see
 [salvo calibration](calibration/exhausted-defences.md) for controlled trials.
-Own-ship map rings show LRM (2 AU), SRM (0.2 AU), and the nominal beam envelope
-(3 light-seconds). Missile rings disappear when their magazines are empty.
+Own-ship map rings show LRM (1.4 AU), SRM (0.14 AU), and the nominal beam envelope
+(6 light-seconds). Missile rings disappear when their magazines are empty.
 Beam range is a useful engagement guide, not a hard cutoff against stationary
 targets. Emission footprints and point-defence rings are no longer drawn.
 
@@ -53,6 +53,10 @@ pings improve the picture but reveal your presence.
 Balance and interface details are experimental. No packaged releases yet.
 
 ## Install and run
+
+**Omarchy:** see [the Omarchy installation guide](docs/OMARCHY.md) for a native
+fullscreen game with an application launcher and icon. From an existing checkout,
+run `./scripts/install-omarchy.py` after installing the listed dependencies.
 
 ### Sol backdrop
 
@@ -123,6 +127,8 @@ The scenario gives you control of the escort frigate. A transport heads for its
 departure region, an enemy warship threatens it, and an allied lunar station is
 present. Other platforms are autonomous. Probes are currently disabled, and the
 station currently has direction finding only.
+The escort wins when the transport escapes or the raider is destroyed; the
+raider wins if the transport is destroyed first.
 The transport has half the nominal acceleration of a warship.
 
 The playtest starts on **AUTO speed**, tracking your selected frigate, with a bearing-only
@@ -185,9 +191,9 @@ Ping/EF/system-control stack, the target's last observed condition, and manoeuvr
 | --- | --- |
 | MATCH | Come alongside and match velocity |
 | FLYBY | Accelerate for a high-speed pass without matching velocity |
-| LONG · LRM | Hold 1 AU: half the LRM engagement envelope |
-| MEDIUM · SRM | Hold 0.1 AU: half the SRM's 0.2 AU engagement envelope |
-| SHORT · BEAM | Hold 1 LS: inside the beam knife-fight envelope |
+| LONG · LRM | Hold 0.7 AU: half the LRM engagement envelope |
+| MEDIUM · SRM | Hold 0.07 AU: half the SRM's 0.14 AU engagement envelope |
+| SHORT · BEAM | Hold 2 LS: inside the beam knife-fight envelope |
 | EVADE | Burn away from the contact |
 
 LONG, MEDIUM and SHORT approach a fresh bearing-only contact until a range fix is
@@ -226,7 +232,9 @@ thrust with raised, cold screens and ECM off. ECM and sensor damage still reduce
 effective ranges. Approximate contacts have a biased ellipse
 and estimated motion; resolved contacts gain class identity. Direction finding
 requires operational DF and screens, thrust, or recent weapons on the target.
-ECM alone does not qualify. Damaged sensors halve their range. Ping identity expires
+ECM alone does not qualify. Missiles are invisible to direction finding, including
+their seeker pings. Map bearing spikes show only the command ship's measurements.
+Damaged sensors halve their range. Ping identity expires
 60 seconds after original sensor receipt, not after an allied relay.
 Learned class identity remains; condition reports become historical.
 
