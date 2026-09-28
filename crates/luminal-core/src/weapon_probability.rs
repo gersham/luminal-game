@@ -143,6 +143,8 @@ impl World {
         if flight.interceptor {
             let kill=!blocked && self.rng.uniform()<flight.chance;
             self.debug_note("INTERCEPT",format!("missile={id:?} target={:?} model=probability chance={} kill={kill}",flight.target,flight.chance));
+            self.record_combat(t,if kill {target.pos} else {me.pos},
+                if kill {CombatKind::MissileHit} else {CombatKind::MissileMiss},Some(id),None);
             self.destroy(id,t,LossCause::Expended);
             if kill {self.destroy(flight.target,t,LossCause::Interceptor {missile:id});}
         } else {
@@ -167,6 +169,22 @@ impl World {
 
 #[cfg(test)] mod tests {
     use super::*;
+    #[test] fn interceptor_outcomes_report_hit_or_miss_before_disappearing() {
+        for (chance,kind) in [(1.0,CombatKind::MissileHit),(0.0,CombatKind::MissileMiss)] {
+            let specs=(0..2).map(|i|BodySpec {name:format!("Round {i}"),kind:BodyKind::Missile,
+                faction:FactionId(i),state:State {pos:Vec2::new(i as f64*100.0,0.0),vel:Vec2::ZERO},
+                thrust:Vec2::ZERO,magazine:0}).collect();
+            let mut world=World::new(crate::celestial::System {bodies:vec![]},specs,0.0,42);
+            let aim=world.state(BodyId(1),0.0).unwrap();
+            world.resolve_probability_weapon(BodyId(0),Flight {due:0.0,start:0.0,target:BodyId(1),
+                aim,quality:1.0,range:100.0,sigma:0.0,interceptor:true,chance});
+            let events=world.combat_events(None);
+            let result=events.iter().find(|e|e.own_body==Some(BodyId(0)) && e.kind==kind).unwrap();
+            assert_eq!(result.pos,Some(if chance==1.0 {aim.pos} else {Vec2::ZERO}));
+            assert!(world.bodies[0].trajectory.end().is_some());
+            assert_eq!(world.bodies[1].trajectory.end().is_some(),chance==1.0);
+        }
+    }
     #[test] fn lrm_proximity_damage_is_half_srm_direct_damage() {
         assert_eq!(NUCLEAR_ENERGY_J.value*2.0,SRM_HIT_ENERGY_J);
     }

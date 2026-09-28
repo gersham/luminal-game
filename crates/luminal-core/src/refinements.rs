@@ -260,7 +260,7 @@ impl World {
         if let Some(id)=body {self.snapshot_platform(id,t);}
         self.debug_note("COMBAT",format!("event_time={t:.6} kind={kind:?} body={body:?} position={pos:?}"));
         let owner = owner.or_else(|| body.map(|id| self.bodies[id.0 as usize].faction));
-        let pending = self.perceptions.keys().copied().filter(|f| !matches!(kind,CombatKind::Expended|CombatKind::MissileHit|CombatKind::MissileMiss) || owner == Some(*f)).collect();
+        let pending = self.perceptions.keys().copied().filter(|f| !matches!(kind,CombatKind::Expended|CombatKind::MissileMiss) || owner == Some(*f)).collect();
         let aim=body.and_then(|id| {
             let b=&self.bodies[id.0 as usize];
             match kind {
@@ -296,7 +296,7 @@ impl World {
                 (sensors::ship_measurement(level,relative.length(),bearing_of(relative),ef),level)
             } else {(measurement,sensors::DetectionLevel::Resolved)};
             if matches!(measurement,Measurement::Bearing {..})
-                && flash.body.is_some_and(|id|self.bodies[id.0 as usize].interceptor.is_some()) {return None;}
+                && flash.body.is_some_and(|id|self.bodies[id.0 as usize].kind==BodyKind::Missile) {return None;}
             let observation=Observation {detection,contact:flash.body.map_or(ContactId(u32::MAX),|body|self.contact_id(faction,body)),
                 sensor:observer,origin:rx,emitted_at:flash.front.t_emit,sensor_received_at:arrival,decider_received_at:arrival,
                 measurement,snr,source:Source::Emission};
@@ -312,7 +312,7 @@ impl World {
         // not put the spent missile back on the map.
         if !own && let Some(body) = flash.body
             && self.bodies[body.0 as usize].kind == BodyKind::Missile
-            && matches!(flash.kind, CombatKind::NuclearBurst | CombatKind::BeamPulse | CombatKind::Destroyed)
+            && matches!(flash.kind, CombatKind::NuclearBurst | CombatKind::BeamPulse | CombatKind::Destroyed | CombatKind::MissileHit)
         {
             let contact = self.contact_id(faction, body);
             self.refinement.retired_contacts.insert((faction, contact));

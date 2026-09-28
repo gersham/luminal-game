@@ -29,6 +29,9 @@ Own-ship map rings show LRM (1.4 AU), SRM (0.14 AU), and the nominal beam envelo
 (6 light-seconds). Missile rings disappear when their magazines are empty.
 Beam range is a useful engagement guide, not a hard cutoff against stationary
 targets. Emission footprints and point-defence rings are no longer drawn.
+Weapon circles use thin yellow dots. Ship forecasts fade toward their endpoints;
+red dashed target links show separation in LS or AU. Observed missile and
+interceptor hits bloom red, while misses fade out over one real-time second.
 
 **Free flight:** Left/Right turn; Up/Down adjust throttle (0–100%). Any arrow
 cancels the current automatic manoeuvre or move-to order, retaining the weapon

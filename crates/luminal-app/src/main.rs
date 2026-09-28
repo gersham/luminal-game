@@ -1,5 +1,6 @@
 //! Luminal desktop client. Talks to the simulation only through `session`.
 mod audio;
+mod weapon_effects;
 
 use eframe::egui::{self, Color32, Pos2, Rect, Sense, Shape, Stroke, StrokeKind, Vec2 as EVec2};
 use luminal_core::celestial::{CelestialKind, Orbit};
@@ -694,6 +695,7 @@ struct LuminalApp {
     bearing_display: BTreeMap<(ContactId, BodyId), (f64, f64)>,
     ship_headings: BTreeMap<BodyId, Vec2>,
     tactical_log:TacticalLog,
+    weapon_effects:weapon_effects::WeaponEffects,
 }
 
 /// Development hooks driven by environment variables, used for visual checks.
@@ -914,6 +916,7 @@ impl LuminalApp {
             bearing_display: BTreeMap::new(),
             ship_headings: BTreeMap::new(),
             tactical_log:TacticalLog::default(),
+            weapon_effects:weapon_effects::WeaponEffects::default(),
             audio:audio::Audio::default(),
             manual_flight:None,manual_send_elapsed:0.0,
         }
@@ -1224,6 +1227,7 @@ impl eframe::App for LuminalApp {
         };
 
         self.update_tactical_log(&view,ui.input(|i|i.time));
+        self.weapon_effects.observe(&view,self.own_faction(),ui.input(|i|i.time));
         self.audio.observe(&view,match self.selected {Some(Selection::Body(id))=>Some(id),_=>None});
         if ui.input(|i|i.pointer.button_clicked(egui::PointerButton::Primary)) {self.audio.play(audio::Cue::Click);}
         let deck_height=(ui.available_height()*0.24).clamp(212.0,240.0);
@@ -1918,7 +1922,7 @@ impl LuminalApp {
         // Observed combat flashes only: enemy effects arrive after light travel.
         for e in &view.combat {
             use luminal_core::world::CombatKind;
-            if matches!(e.kind,CombatKind::Destroyed|CombatKind::Expended|CombatKind::Impact|CombatKind::MissileHit|CombatKind::MissileMiss) {continue;}
+            if matches!(e.kind,CombatKind::Destroyed|CombatKind::Expended|CombatKind::Impact|CombatKind::MissileHit|CombatKind::MissileMiss|CombatKind::NuclearBurst) {continue;}
             let age=(view.time-e.received_at).max(0.0);
             let Some(pos)=e.pos else {continue};
             let p=to_screen(&cam,rect,pos);
@@ -1937,6 +1941,8 @@ impl LuminalApp {
                 painter.circle_stroke(p,6.0+40.0*progress,Stroke::new(2.0,color.gamma_multiply(1.0-progress)));
             }
         }
+
+        self.weapon_effects.draw(&painter,&cam,rect,ui.input(|i|i.time));
 
         // Round-trip range, not the outbound light front. Anchor at emission.
         for front in &view.pings {
@@ -2009,7 +2015,16 @@ impl LuminalApp {
                     };
                     if let Some(to) = to {
                         let pts = [to_screen(&cam, rect, b.pos), to_screen(&cam, rect, to)];
-                        painter.extend(Shape::dashed_line(&pts, Stroke::new(1.0, c), 6.0, 4.0));
+                        let color=Color32::from_rgb(235,80,80);
+                        painter.extend(Shape::dashed_line(&pts, Stroke::new(1.0, color.gamma_multiply(0.7)), 6.0, 4.0));
+                        let distance=(to-b.pos).length();
+                        let text=if distance>=0.1*AU {format!("{:.2} AU",distance/AU)}
+                            else {format!("{:.2} LS",distance/LIGHT_SECOND)};
+                        let at=pts[0].lerp(pts[1],0.5);
+                        let galley=painter.layout_no_wrap(text,mono(10.0),color);
+                        let label_rect=Rect::from_center_size(at,galley.size());
+                        painter.rect_filled(label_rect.expand(4.0),2.0,BACKGROUND);
+                        painter.galley(label_rect.min,galley,color);
                     }
                 }
             }
@@ -2037,7 +2052,7 @@ impl LuminalApp {
                 if self.own_faction()!=Some(b.faction) || b.controllable {
                     let forecast = view.system.predict(State { pos: b.pos, vel: b.vel }, b.thrust, view.time, FORECAST_S, 480);
                     let pts: Vec<Pos2> = forecast.points.iter().map(|&p| to_screen(&cam, rect, p)).collect();
-                    painter.extend(Shape::dotted_line(&pts, c.gamma_multiply(0.15), 6.0, 1.0));
+                    painter.extend(fading_path(&pts,c.gamma_multiply(0.3),6.0));
                     if forecast.impact.is_some()
                         && let Some(&end) = pts.last()
                     {
@@ -2277,7 +2292,7 @@ fn sigma_major(cov: [[f64; 2]; 2]) -> f64 {
 
 fn weapon_ranges(ship:&BodyView)->Vec<(&'static str,f64,Color32)> {
     let mut ranges=Vec::new();
-    let color=Color32::from_rgb(235,80,80);
+    let color=Color32::from_rgb(255,220,70);
     for (payload,label) in [(Payload::Nuclear,"LRM"),(Payload::Kinetic,"SRM")] {
         // Queued rounds still aboard count until actually launched.
         if ship.magazine[payload.index()]>0 {ranges.push((label,payload.engagement_range(),color));}
@@ -2341,7 +2356,7 @@ fn draw_contact(
             if contact_has_course(c) {
                 let forecast = view.system.predict(State { pos: t.pos, vel: t.vel }, t.accel, view.time, FORECAST_S, 240);
                 let fp: Vec<Pos2> = forecast.points.iter().map(|&p| to_screen(cam, rect, p)).collect();
-                painter.extend(Shape::dotted_line(&fp, color.gamma_multiply(0.12), 8.0, 1.0));
+                painter.extend(fading_path(&fp,color.gamma_multiply(0.24),8.0));
             }
             let p = to_screen(cam, rect, t.pos);
             if c.resolved_interceptor {
@@ -2620,6 +2635,15 @@ fn draw_velocity_tail(painter: &egui::Painter, p: Pos2, vel: Vec2, color: Color3
         let tail_px = (speed * TAIL_PX_PER_KMS).min(TAIL_MAX_PX) as f32;
         painter.line_segment([p, p - screen_dir(vel) * tail_px], Stroke::new(1.5, color.gamma_multiply(0.6)));
     }
+}
+
+fn fading_path(points:&[Pos2],color:Color32,spacing:f32)->Vec<Shape> {
+    let mut dots=Shape::dotted_line(points,color,spacing,1.0);
+    let last=dots.len().saturating_sub(1).max(1) as f32;
+    for (i,dot) in dots.iter_mut().enumerate() {
+        if let Shape::Circle(circle)=dot {circle.fill=color.gamma_multiply(1.0-i as f32/last);}
+    }
+    dots
 }
 
 fn draw_hit_bloom(painter:&egui::Painter,p:Pos2,color:Color32,view:&View,body:Option<BodyId>,contact:Option<ContactId>) {
