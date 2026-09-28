@@ -8,6 +8,7 @@ pub mod mind;
 pub mod missile;
 pub mod params;
 pub mod rng;
+pub mod route;
 pub mod scenario;
 pub mod sol;
 pub mod scheduler;

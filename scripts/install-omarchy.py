@@ -63,7 +63,14 @@ def main() -> None:
             '#!/bin/sh\nset -eu\n'
             'state_dir="${XDG_STATE_HOME:-$HOME/.local/state}/luminal"\n'
             'mkdir -p "$state_dir"\ncd "$state_dir"\n'
-            f'exec {shlex.quote(str(binary))} "$@"\n')
+            f'set -- {shlex.quote(str(binary))} "$@"\n'
+            'for name in DISPLAY WAYLAND_DISPLAY XDG_RUNTIME_DIR LUMINAL_SEED; do\n'
+            '  if printenv "$name" >/dev/null; then set -- "--setenv=$name" "$@"; fi\n'
+            'done\n'
+            'exec systemd-run --user --collect --quiet --property=Type=exec \\\n'
+            '  --description=Luminal --working-directory="$state_dir" \\\n'
+            '  --property="StandardOutput=append:$state_dir/launcher.log" \\\n'
+            '  --property="StandardError=append:$state_dir/launcher.log" "$@"\n')
         atomic_install(wrapper, launcher, 0o755)
         entry = staging / "luminal.desktop"
         entry.write_text(
@@ -71,7 +78,7 @@ def main() -> None:
             "Comment=Command a frigate in light-delayed space combat\n"
             f"Exec={desktop_exec(launcher)}\nIcon={desktop_string(str(icon))}\n"
             "Terminal=false\nCategories=Game;StrategyGame;\n"
-            "Keywords=space;combat;strategy;frigate;\nStartupWMClass=Luminal\n")
+            "Keywords=space;combat;strategy;frigate;\nStartupWMClass=luminal\n")
         if shutil.which("desktop-file-validate"):
             subprocess.run(["desktop-file-validate", str(entry)], check=True)
         atomic_install(entry, desktop, 0o644)

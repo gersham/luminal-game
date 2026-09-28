@@ -60,6 +60,10 @@ pub enum InterceptTarget {
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Order {
+    /// Best-effort continuous curve through the body's flight-route points.
+    Route,
+    /// Join a friendly at a fixed formation offset, then mirror its acceleration.
+    Follow { target: BodyId, offset: Vec2 },
     /// Circular orbit of `radius` km about celestial body `celestial`, in `sense`
     /// (+1 counter-clockwise, −1 clockwise).
     Orbit { celestial: usize, radius: f64, sense: f64 },
@@ -116,6 +120,7 @@ pub struct Body {
     /// Manual thrust order, used when no autopilot order is active.
     pub commanded: Vec2,
     pub autopilot: Option<Autopilot>,
+    pub route:Option<crate::route::FlightRoute>,
     /// Result of the last collision check.
     pub avoidance: Avoidance,
     /// Cap on autopilot thrust, km/s². Lower is quieter: drive emission scales with it.
@@ -176,7 +181,7 @@ impl Body {
     pub fn emissivity_factors(&self,t:f64)->sensors::EmissivityFactors {
         let recent=|at:Option<f64>|at.is_some_and(|at|t>=at && t-at<60.0);
         let size=if self.kind==BodyKind::Station {20.0} else {match self.ship_class {Some(ShipClass::Frigate)=>7.0,Some(ShipClass::Battleship)=>20.0,_=>10.0}};
-        let nominal=SHIP_MAX_ACCEL_G.value*crate::units::G0*if self.ship_class==Some(ShipClass::Transport) {0.5} else {1.0};
+        let nominal=SHIP_MAX_ACCEL_G.value*crate::units::G0*if self.ship_class==Some(ShipClass::Transport) {0.25} else {1.0};
         sensors::EmissivityFactors {
             visibility_multiplier:self.visibility_multiplier,
             thrust_percent:100.0*self.trajectory.thrust_at(t).unwrap_or(Vec2::ZERO).length()/nominal,
@@ -229,7 +234,7 @@ impl Body {
         self.operating_effectiveness(crate::damage::System::Propulsion)*crate::units::G0
             * match self.kind {
                 BodyKind::Ship => SHIP_MAX_ACCEL_G.value*self.damage.hull_thrust_factor()*if self.controls.boost_active {1.2} else {1.0}
-                    * if self.ship_class==Some(ShipClass::Transport) {0.5} else {1.0},
+                    * if self.ship_class==Some(ShipClass::Transport) {0.25} else {1.0},
                 BodyKind::Station => 0.0,
                 BodyKind::Probe => PROBE_MAX_ACCEL_G.value,
                 BodyKind::Missile => if self.interceptor.is_some() {INTERCEPTOR_ACCEL_G.value} else {self.missile.map_or(MISSILE_MAX_ACCEL_G.value,|m|m.payload.acceleration_g())},
@@ -471,6 +476,7 @@ impl World {
                     trajectory,
                     commanded: spec.thrust,
                     autopilot: None,
+            route:None,
                     avoidance: Avoidance { thrust: spec.thrust, active: false, impossible: false },
                     drive_limit: f64::INFINITY,
                     armed: spec.magazine > 0,
@@ -593,6 +599,27 @@ impl World {
         self.set_ship_approach(id, target, true)
     }
 
+    pub fn set_follow(&mut self,id:BodyId,target:BodyId)->Result<(),OrderError> {
+        let faction=self.live_body_mut(id)?.faction;
+        if id==target || !self.body(target).is_some_and(|b|b.faction==faction && b.alive_at(self.time) && b.kind!=BodyKind::Missile) {
+            return Err(OrderError::InvalidTarget);
+        }
+        let own=self.state(id,self.time).ok_or(OrderError::Destroyed)?;
+        let known=self.known_body(faction,target).ok_or(OrderError::NoTrack)?;
+        let other=known.trajectory.state_at(self.time).ok_or(OrderError::NoTrack)?;
+        let heading=if other.vel.length()>0.01 {other.vel.normalized()} else {
+            let burn=known.trajectory.thrust_at(self.time).unwrap_or(Vec2::ZERO);
+            if burn.length()>1e-9 {burn.normalized()} else {Vec2::new(0.0,1.0)}
+        };
+        let mut side=Vec2::new(-heading.y,heading.x);
+        if (own.pos-other.pos).dot(side)<0.0 {side = -side;}
+        let body=self.live_body_mut(id)?;
+        body.drive_limit=f64::INFINITY;
+        body.autopilot=Some(Autopilot {order:Order::Follow {target,offset:side*crate::units::LIGHT_SECOND},status:AutopilotStatus::Manoeuvring});
+        self.guide(id);
+        Ok(())
+    }
+
     pub fn set_flyby(&mut self, id: BodyId, target: InterceptTarget) -> Result<(), OrderError> {
         self.set_ship_approach(id, target, false)
     }
@@ -631,6 +658,27 @@ impl World {
         }
         let order = if match_velocity { Order::Intercept(target) } else { Order::Flyby(target) };
         self.live_body_mut(id)?.autopilot = Some(Autopilot { order, status: AutopilotStatus::Manoeuvring });
+        self.guide(id);
+        Ok(())
+    }
+
+    pub fn append_waypoint(&mut self,id:BodyId,point:Vec2)->Result<(),OrderError> {
+        let t=self.time;
+        if !point.x.is_finite() || !point.y.is_finite() || self.system.inside(point,t,1.05).is_some() {
+            return Err(OrderError::InvalidTarget);
+        }
+        let b=self.live_body_mut(id)?;
+        if b.kind!=BodyKind::Ship {return Err(OrderError::InvalidTarget);}
+        let active=b.autopilot.is_some_and(|a|a.order==Order::Route && a.status!=AutopilotStatus::Passed);
+        if active && let Some(route)=&mut b.route {
+            if route.points.len()>=256 || (point-*route.points.last().unwrap()).length()<1.0 {return Err(OrderError::InvalidTarget);}
+            route.points.push(point);
+        } else {
+            let start=b.trajectory.state_at(t).unwrap().pos;
+            if (point-start).length()<1.0 {return Err(OrderError::InvalidTarget);}
+            b.route=Some(crate::route::FlightRoute::new(start,point));
+        }
+        b.autopilot=Some(Autopilot {order:Order::Route,status:AutopilotStatus::Manoeuvring});
         self.guide(id);
         Ok(())
     }
@@ -752,6 +800,7 @@ impl World {
             trajectory: Trajectory::new(t, start),
             commanded: Vec2::ZERO,
             autopilot: None,
+            route:None,
             avoidance: Avoidance { thrust: Vec2::ZERO, active: false, impossible: false },
             drive_limit: f64::INFINITY,
             magazine: [0; 2],
@@ -972,7 +1021,28 @@ impl World {
             if b.trajectory.last().thrust!=Vec2::ZERO {b.trajectory.set_thrust(t,Vec2::ZERO).unwrap();}
             return;
         }
+        let mut route_progress=None;
         let (desired, status) = match b.autopilot.map(|a| a.order) {
+            Some(Order::Follow {target,offset})=>{
+                match self.known_body(b.faction,target).and_then(|known|known.trajectory.state_at(t)
+                    .map(|state|(state,known.trajectory.thrust_at(t).unwrap_or(Vec2::ZERO)))) {
+                    Some((target,burn))=>{
+                        let ff=burn+self.system.gravity(target.pos,t)-self.system.gravity(s.pos,t);
+                        let approach=autopilot::move_to(s,State {pos:target.pos+offset,vel:target.vel},ff,limit);
+                        let holding=approach.gap.abs()<0.01*crate::units::LIGHT_SECOND && approach.rel_speed<1.0;
+                        (approach.thrust,Some(if holding {AutopilotStatus::Holding} else {AutopilotStatus::Closing {eta:approach.eta,range:approach.gap}}))
+                    },
+                    None=>(Vec2::ZERO,Some(AutopilotStatus::NoTrack)),
+                }
+            },
+            Some(Order::Route) if b.autopilot.is_some_and(|a|a.status==AutopilotStatus::Passed)=>
+                (Vec2::ZERO,Some(AutopilotStatus::Passed)),
+            Some(Order::Route)=>{
+                let (thrust,progress,done)=b.route.as_ref().map_or((Vec2::ZERO,0.0,true),|route|
+                    route.guide(s,limit,self.system.gravity(s.pos,t)));
+                route_progress=Some(progress);
+                (thrust,Some(if done {AutopilotStatus::Passed} else {AutopilotStatus::Manoeuvring}))
+            },
             None => {
                 let nominal=max_accel/if b.controls.boost_active {1.2} else {1.0};
                 let commanded=if b.controls.boost_active && b.commanded.length()>=nominal*(1.0-1e-9) {b.commanded*1.2} else {b.commanded};
@@ -1059,6 +1129,7 @@ impl World {
             autopilot::avoid(&self.system, s, t, desired, max_accel)
         };
         let b = &mut self.bodies[i];
+        if let Some(progress)=route_progress && let Some(route)=&mut b.route {route.progress=progress;}
         if arrived {b.commanded = Vec2::ZERO;}
         let faction = b.faction;
         let mut raised = vec![];
@@ -1726,6 +1797,34 @@ mod tests {
         assert!((r / 60_000.0 - 1.0).abs() < 0.03, "radius {r}");
         assert!(((st.vel - pl.vel).length() / vc - 1.0).abs() < 0.03, "circular speed");
         assert_eq!(w.bodies[0].autopilot.unwrap().status, AutopilotStatus::Holding);
+    }
+
+    #[test]
+    fn follow_joins_one_lightsecond_alongside_and_mirrors_changed_burn() {
+        let base=Vec2::new(2.0*AU,0.0);
+        let mut w=World::new(sun(),vec![
+            ship("Follower",0,base,Vec2::ZERO,Vec2::ZERO),
+            ship("Leader",0,base+Vec2::new(5.0*LIGHT_SECOND,0.0),Vec2::new(0.0,30.0),Vec2::new(0.0,10.0*G0)),
+            ship("Enemy",1,base+Vec2::new(10.0*LIGHT_SECOND,0.0),Vec2::ZERO,Vec2::ZERO),
+        ],0.0,1);
+        assert_eq!(w.set_follow(BodyId(0),BodyId(0)),Err(OrderError::InvalidTarget));
+        assert_eq!(w.set_follow(BodyId(0),BodyId(2)),Err(OrderError::InvalidTarget));
+        w.set_drive_limit(BodyId(0),G0).unwrap();
+        w.set_follow(BodyId(0),BodyId(1)).unwrap();
+        let Order::Follow {offset,..}=w.bodies[0].autopilot.unwrap().order else {panic!("follow order")};
+        assert!((offset.length()-LIGHT_SECOND).abs()<1e-8);
+        assert!(offset.x<0.0 && offset.y.abs()<1e-8);
+        assert!((w.bodies[0].trajectory.last().thrust.length()-w.bodies[0].max_accel()).abs()<1e-8);
+        for burn in [Vec2::new(0.0,10.0*G0),Vec2::new(5.0*G0,0.0),Vec2::ZERO] {
+            w.set_thrust(BodyId(1),burn).unwrap();
+            w.advance_to(w.time()+4.0*3600.0);
+            let a=w.state(BodyId(0),w.time()).unwrap();
+            let b=w.state(BodyId(1),w.time()).unwrap();
+            assert!((a.pos-b.pos-offset).length()<0.02*LIGHT_SECOND,"formation error {}",(a.pos-b.pos-offset).length());
+            assert!((a.vel-b.vel).length()<1.0,"velocity mismatch");
+            assert!((w.bodies[0].trajectory.last().thrust-burn).length()<G0,"burn mismatch");
+            assert_eq!(w.bodies[0].autopilot.unwrap().status,AutopilotStatus::Holding);
+        }
     }
 
     #[test]

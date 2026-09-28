@@ -139,7 +139,7 @@ pings every 60 seconds and light-delayed reports to the escort.
 
 The raider starts at a seeded random orbital location 5–10 AU from Sol, with
 circular orbital velocity and an inward burn. The transport's exit point is
-independently randomized in the same band. The raider reassesses its route from
+independently randomized 10–20 AU from Sol. The raider reassesses its route from
 received tracks: it engages an escort that can meet it before the transport,
 and pursues the transport when that route is clear. Known lunar-station sensor
 coverage influences its approach; it reduces emissions and skirts or waits
@@ -148,7 +148,7 @@ The exit location is known to the raider from the start; without a usable target
 track, it heads to that exit to intercept the escaping transport.
 The escort wins when the transport escapes or the raider is destroyed; the
 raider wins if the transport is destroyed first.
-The transport has half the nominal acceleration of a warship.
+The transport has 25 g nominal acceleration, one quarter of a warship's 100 g.
 
 The playtest starts on **AUTO speed**, tracking your selected frigate, with a bearing-only
 enemy contact designated. Use the top-left controls to pause, change speed, fit
@@ -174,11 +174,28 @@ never override manual speed. Restart restores AUTO.
 | 0 | EVADE |
 | Drag with left or middle mouse button | Pan; cancels ship tracking |
 | Mouse wheel | Zoom |
+| Right-click a friendly | Join 1 LS alongside at maximum burn, then match its motion and burn |
+| Shift+right-click map | Append a point to your ship's fly-through curve |
 | Click a contact | Designate it; defaults to MATCH manoeuvre |
 | Hover an object | Inspect details |
 
 The bottom deck contains weapon controls, your ship's condition, a central
 Ping/EF/system-control stack, the target's last observed condition, and manoeuvre orders.
+
+Right-click a friendly to join a formation 1 LS to the nearer side of its current
+course. This restores full drive authority for the approach, then matches its
+reported burn while correcting formation drift. The orders panel shows the
+friendly, separation, relative speed and follow status. Routes and destinations
+also display their navigation progress there, with cancel/coast and stop controls.
+
+Yellow rear vectors show burn strength: 120g is four ship-icon lengths, fading
+out toward the tip. Automatic zoom waits ten seconds after manual zoom and eases
+changes over roughly ten seconds of real time.
+
+Shift+right-click a series of map positions to draw a flight curve. You can pause
+while plotting. The ship follows it as closely as acceleration and collision
+avoidance allow, then coasts beyond the last point. A new manoeuvre or manual
+thrust replaces the route; adding points preserves your weapon target.
 
 - **PING:** send one active sensor pulse. Returns arrive after the round-trip
   light delay. Successful returns grant Identity, including condition, for 60 seconds.

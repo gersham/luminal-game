@@ -37,7 +37,7 @@ const PARKING_ORBIT_KM: f64 = 60_000.0;
 ///
 /// The frigate starts in a planetary parking orbit; the transport departs from
 /// beside the lunar station. Raider and departure region are independently
-/// randomized within a 5–10 AU heliocentric band. The raider starts with circular
+/// randomized in heliocentric bands: raider 5–10 AU, departure 10–20 AU. The raider starts with circular
 /// orbital velocity and an inward approach burn. Geometry remains experimental.
 pub fn transport_intercept() -> World {
     transport_intercept_seeded(42)
@@ -70,15 +70,15 @@ pub fn transport_intercept_seeded(seed: u64) -> World {
     let transport_pos=station_pos+Vec2::new(1_000.0,0.0)-planet.pos;
     let transport_vel=station_vel-planet.vel;
     let mut layout=crate::rng::Rng::stream(seed,0x4c41594f5554);
-    let mut outer_position=||loop {
-        let radius=(5.0+5.0*layout.uniform())*AU;
+    let mut outer_position=|min:f64,max:f64|loop {
+        let radius=(min+(max-min)*layout.uniform())*AU;
         let angle=std::f64::consts::TAU*layout.uniform();
         let pos=Vec2::new(angle.cos(),angle.sin())*radius;
         if system.bodies.iter().enumerate().all(|(i,b)|
             (pos-system.state(i,0.0).pos).length()>b.radius+0.03*AU) {break pos;}
     };
-    let cruiser_pos=outer_position();
-    let departure=outer_position();
+    let cruiser_pos=outer_position(5.0,10.0);
+    let departure=outer_position(10.0,20.0);
     let radial=cruiser_pos.normalized();
     let cruiser_vel=Vec2::new(-radial.y,radial.x)*(system.bodies[0].gm/cruiser_pos.length()).sqrt();
     let cruiser_heading=(station_pos-cruiser_pos).normalized();
@@ -90,7 +90,7 @@ pub fn transport_intercept_seeded(seed: u64) -> World {
             state: State { pos: station_pos, vel: station_vel },
             thrust: Vec2::ZERO, magazine: 0 },
     ];
-    let mut world = World::new(system, specs, 3600.0, seed);
+    let mut world = World::new(system, specs, 7200.0, seed);
     world.bodies[0].baseline_emission_factor=crate::params::TRANSPORT_EMISSION_FACTOR.value;
     world.bodies[0].visibility_multiplier=2.0;
     world.bodies[1].baseline_emission_factor=crate::params::FRIGATE_EMISSION_FACTOR.value;
@@ -138,11 +138,26 @@ pub fn transport_intercept_seeded(seed: u64) -> World {
 mod tests {
     use super::*;
     #[test]
-    fn transport_has_half_warship_acceleration_from_its_first_order() {
+    fn random_desktop_starts_have_enough_light_history() {
+        for seed in 0..64 {
+            let world=transport_intercept_debug_seeded(seed);
+            assert!(world.bodies[1].autopilot.is_some());
+        }
+    }
+
+    #[test]
+    fn transport_boost_is_limited_to_thirty_g() {
+        let mut world=transport_intercept();
+        world.bodies[0].controls.boost_active=true;
+        assert!((world.bodies[0].max_accel()/G0-30.0).abs()<1e-9);
+    }
+
+    #[test]
+    fn transport_has_quarter_warship_acceleration_from_its_first_order() {
         let world=transport_intercept();
         let transport=&world.bodies[0];
         let frigate=&world.bodies[1];
-        assert_eq!(transport.max_accel(),frigate.max_accel()*0.5);
+        assert_eq!(transport.max_accel(),frigate.max_accel()*0.25);
         assert!(transport.trajectory.last().thrust.length()<=transport.max_accel()+1e-9);
         assert_eq!(world.bodies[2].max_accel(),frigate.max_accel());
     }
@@ -173,8 +188,8 @@ mod tests {
             let w=transport_intercept_seeded(seed);
             let raider=w.bodies[2].trajectory.state_at(0.0).unwrap().pos;
             let departure=w.objective.as_ref().unwrap().center;
-            for pos in [raider,departure] {
-                assert!((5.0..=10.0).contains(&(pos.length()/AU)));
+            for (pos,band) in [(raider,5.0..=10.0),(departure,10.0..=20.0)] {
+                assert!(band.contains(&(pos.length()/AU)));
                 for (i,b) in w.system.bodies.iter().enumerate() {
                     assert!((pos-w.system.state(i,0.0).pos).length()>b.radius+0.02*AU);
                 }
@@ -245,7 +260,7 @@ mod tests {
         assert_eq!(world.bodies[1].baseline_emission_factor,0.5);
         assert_eq!(world.bodies[3].baseline_emission_factor,2.0);
         assert!(world.bodies[0].autopilot.is_some());
-        world.advance_to(3.0*DAY);
+        world.advance_to(7.0*DAY);
         assert_eq!(world.outcome.as_ref().map(|o| o.winner), Some(ESCORT));
         assert!(!world.losses.iter().any(|l| l.body == BodyId(0)));
     }

@@ -774,6 +774,7 @@ impl LuminalApp {
             compact_status(ui,target.and_then(|c|c.damage.as_ref()),thrust,true);
             compact_systems(ui,"target_deck",systems);
             let ui=&mut columns[4];
+            if let Some(ship)=own && self.navigation_orders(ui,view,ship) {return;}
             sub_header(ui,"TARGET / ORDERS",None);
             let mut selected=target.map(|c|c.id);
             egui::ComboBox::from_id_salt("deck_target").width(ui.available_width()-10.0)
@@ -812,6 +813,62 @@ impl LuminalApp {
                 }
             } else {ui.weak("Select a contact on the map");}
         });
+    }
+
+    fn navigation_orders(&mut self,ui:&mut egui::Ui,view:&View,ship:&BodyView)->bool {
+        let Some(ap)=ship.autopilot else {return false;};
+        if !matches!(ap.order,Order::Follow {..}|Order::Route|Order::MoveTo {..}) {return false;}
+        sub_header(ui,"NAVIGATION / ORDERS",None);
+        match ap.order {
+            Order::Follow {target,offset}=>{
+                ui.label(egui::RichText::new("FOLLOW · ALONGSIDE").color(ACCENT).strong());
+                let mut selected=target;
+                egui::ComboBox::from_id_salt("follow_target").width(ui.available_width()-10.0)
+                    .selected_text(view.bodies.iter().find(|b|b.id==target).map_or("Friendly unavailable",|b|b.name.as_str()))
+                    .show_ui(ui,|ui| {for b in view.bodies.iter().filter(|b|b.faction==ship.faction && b.id!=ship.id && b.kind!=BodyKind::Missile) {
+                        ui.selectable_value(&mut selected,b.id,&b.name);
+                    }});
+                if selected!=target {self.command(Command::Follow {body:ship.id,target:selected});}
+                if let Some(other)=view.bodies.iter().find(|b|b.id==target) {
+                    ui.label(format!("Separation {} / 1 LS",fmt_distance((other.pos-ship.pos).length())));
+                    ui.small(format!("Alongside error {}",fmt_distance((other.pos+offset-ship.pos).length())));
+                    ui.small(format!("Relative speed {:.1} km/s",(other.vel-ship.vel).length()));
+                    ui.small(format!("Friendly burn {:.1}g",other.thrust.length()/G0));
+                }
+            },
+            Order::Route=>{
+                ui.label(egui::RichText::new("WAYPOINT ROUTE").color(ACCENT).strong());
+                if let Some(route)=&ship.route {
+                    let next=(route.progress.floor() as usize+1).min(route.points.len()-1);
+                    let remaining=if ap.status==AutopilotStatus::Passed {0} else {route.points.len()-next};
+                    ui.label(format!("{remaining} points remaining"));
+                    if remaining>0 {ui.small(format!("Next point: {}",fmt_distance((route.points[next]-ship.pos).length())));}
+                }
+                ui.small("Shift+right-click to append points");
+                ui.small("Fly through; coast past the last point");
+            },
+            Order::MoveTo {frame,offset}=>{
+                ui.label(egui::RichText::new("FLY TO DESTINATION").color(ACCENT).strong());
+                let destination=view.celestials[frame].pos+offset;
+                ui.label(format!("{} remaining",fmt_distance((destination-ship.pos).length())));
+                ui.small(format!("Reference: {}",view.celestials[frame].name));
+                ui.small("Brake to rest at destination");
+            },
+            _=>unreachable!(),
+        }
+        let status=match ap.status {
+            luminal_core::world::AutopilotStatus::Holding=>if matches!(ap.order,Order::Follow {..}) {"Alongside · matching burn".into()} else {"At destination · holding".into()},
+            luminal_core::world::AutopilotStatus::Closing {eta,..}=>format!("Closing · ETA {}",fmt_time(eta)),
+            luminal_core::world::AutopilotStatus::Passed=>"Route complete · coasting".into(),
+            AutopilotStatus::Manoeuvring=>"Manoeuvring".into(),
+            AutopilotStatus::NoTrack=>"Friendly unavailable · coasting".into(),
+        };
+        ui.label(egui::RichText::new(status).monospace().color(ACCENT));
+        ui.horizontal(|ui| {
+            if ui.button("Cancel / coast").clicked() {self.command(Command::SetThrust {body:ship.id,thrust:Vec2::ZERO});}
+            if ui.button("All stop").clicked() {self.command(Command::AllStop {body:ship.id});}
+        });
+        true
     }
 
     fn central_controls(&mut self,ui:&mut egui::Ui,ship:Option<&BodyView>,view:&View) {
@@ -1040,7 +1097,9 @@ impl LuminalApp {
     fn command(&mut self, cmd: Command) {
         if matches!(cmd,Command::SetWarp(_)) {self.auto_speed=false;}
         let note=match &cmd {
+            Command::AppendWaypoint {..}=>Some(("helm","ROUTE POINT ADDED".into())),
             Command::Launch {payload,..}=>Some(("launch",format!("MISSILE QUEUED · {}",payload_label(*payload)))),
+            Command::Follow {..}=>Some(("helm","FOLLOW · 1 LS ALONGSIDE".into())),
             Command::Intercept {..}=>Some(("helm","MATCH ORDERED".into())),
             Command::Flyby {..}=>Some(("helm","FLYBY ORDERED".into())),
             Command::KeepRange {range,..}=>Some(("helm",format!("HOLD {}",fmt_distance(*range)))),
@@ -1750,6 +1809,8 @@ impl LuminalApp {
         }
         if let Some(ap) = b.autopilot {
             let what = match ap.order {
+                Order::Follow {target,..}=>format!("follow {} · 1 LS alongside",view.bodies.iter().find(|b|b.id==target).map_or("?",|b|b.name.as_str())),
+                Order::Route=>format!("fly-through route · {} points remaining",b.route.as_ref().map_or(0,|r|r.points.len().saturating_sub(r.progress.floor() as usize+1))),
                 Order::Orbit { celestial, radius, .. } => {
                     format!("orbit {} at {} altitude", view.celestials[celestial].name, fmt_distance(radius - view.celestials[celestial].radius))
                 }
@@ -1871,7 +1932,8 @@ impl LuminalApp {
         let current=self.camera.km_per_px;
         // Hysteresis prevents sensor noise from making the camera breathe.
         if desired<=current && desired>=current*0.8 {return;}
-        let tau=if desired>current {0.25} else {1.2};
+        // Settle about 95% of a zoom change over ten wall-clock seconds.
+        let tau=10.0/3.0;
         let alpha=1.0-(-dt.min(0.1)/tau).exp();
         self.camera.km_per_px=(current.ln()+(desired.ln()-current.ln())*alpha).exp().clamp(1e-3,1e8);
     }
@@ -1900,7 +1962,7 @@ impl LuminalApp {
         if let Some(hover) = resp.hover_pos() {
             let scroll = ui.input(|i| i.smooth_scroll_delta.y) as f64;
             if scroll != 0.0 {
-                self.tracking_zoom_hold=2.0;
+                self.tracking_zoom_hold=10.0;
                 let before = to_world(&self.camera, rect, hover);
                 self.camera.km_per_px = (self.camera.km_per_px * (-scroll * 0.002).exp()).clamp(1e-3, 1e8);
                 let after = to_world(&self.camera, rect, hover);
@@ -1982,6 +2044,14 @@ impl LuminalApp {
             }
         }
 
+        if let Some((_, pos)) = resp.hover_pos().and_then(|pointer| selectable_at(view, &cam, rect, pointer)) {
+            let p = to_screen(&cam, rect, pos);
+            let yellow = Color32::from_rgb(255, 220, 60);
+            painter.circle_filled(p, 14.0, yellow.gamma_multiply(0.24));
+            painter.circle_stroke(p, 14.0, Stroke::new(1.0, yellow));
+            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+        }
+
         for (i, c) in view.celestials.iter().enumerate() {
             // Reveal satellite labels when zoomed into their parent system,
             // rather than stacking every moon on the planet's edge marker.
@@ -2018,6 +2088,20 @@ impl LuminalApp {
             let Some(ap) = b.autopilot else { continue };
             let c = body_color(b, self.own_faction()).gamma_multiply(0.5);
             match ap.order {
+                Order::Route=>{
+                    if let Some(route)=&b.route {
+                        let end=(route.points.len()-1) as f64;
+                        let samples=((end-route.progress)*32.0).ceil().max(1.0) as usize;
+                        let points=(0..=samples).map(|i|to_screen(&cam,rect,
+                            route.sample(route.progress+(end-route.progress)*i as f64/samples as f64))).collect();
+                        painter.add(Shape::line(points,Stroke::new(1.0,ACCENT.gamma_multiply(0.55))));
+                        for (i,point) in route.points.iter().enumerate().skip(route.progress.floor() as usize+1) {
+                            let at=to_screen(&cam,rect,*point);
+                            painter.circle_stroke(at,4.0,Stroke::new(1.0,ACCENT));
+                            painter.text(at+EVec2::new(6.0,-6.0),egui::Align2::LEFT_BOTTOM,i.to_string(),mono(9.0),ACCENT);
+                        }
+                    }
+                }
                 Order::Orbit { celestial, radius, .. } => {
                     let center = view.celestials[celestial].pos;
                     let pts: Vec<Pos2> = (0..=96)
@@ -2035,6 +2119,13 @@ impl LuminalApp {
                     painter.circle_stroke(pt, 5.0, Stroke::new(1.0, c));
                     painter.line_segment([pt - EVec2::new(8.0, 0.0), pt + EVec2::new(8.0, 0.0)], Stroke::new(1.0, c));
                     painter.line_segment([pt - EVec2::new(0.0, 8.0), pt + EVec2::new(0.0, 8.0)], Stroke::new(1.0, c));
+                }
+                Order::Follow {target:target_id,..} => {
+                    if let Some(target)=view.bodies.iter().find(|b|b.id==target_id) {
+                        painter.extend(Shape::dashed_line(&[to_screen(&cam,rect,b.pos),to_screen(&cam,rect,target.pos)],Stroke::new(1.0,Color32::from_rgb(235,80,80)),6.0,4.0));
+                        let at=to_screen(&cam,rect,(b.pos+target.pos)*0.5);
+                        painter.text(at,egui::Align2::CENTER_BOTTOM,fmt_distance((b.pos-target.pos).length()),mono(10.0),Color32::from_rgb(235,80,80));
+                    }
                 }
                 Order::Intercept(target) | Order::Flyby(target) | Order::KeepRange(target,_) | Order::Evade(target) => {
                     let to = match target {
@@ -2092,6 +2183,7 @@ impl LuminalApp {
                 });
                 *heading = if let Some(manual)=self.manual_flight.filter(|m|m.body==b.id && b.autopilot.is_none()) {manual.direction()}
                     else {coast_heading(*heading, b.thrust)};
+                if b.kind==BodyKind::Ship {draw_burn_vector(&painter,p,*heading,b.thrust.length()/G0,1.0);}
                 draw_ship(&painter, p, b.vel, *heading, c, selected);
             }
             if b.avoidance.active {
@@ -2161,7 +2253,7 @@ impl LuminalApp {
             && b.controllable && b.kind != BodyKind::Missile
         {
             let near = |p: Vec2, r: f32| to_screen(&cam, rect, p).distance(click) < r;
-            let own = view.bodies.iter().find(|o| o.id != id && near(o.pos, 14.0)).map(|o| InterceptTarget::Own(o.id));
+            let own = view.bodies.iter().find(|o| o.id != id && o.faction==b.faction && o.kind!=BodyKind::Missile && near(o.pos, 14.0)).map(|o| InterceptTarget::Own(o.id));
             let contact = view
                 .contacts
                 .iter()
@@ -2171,9 +2263,11 @@ impl LuminalApp {
                 let r_px = (c.radius / cam.km_per_px) as f32;
                 near(c.pos, r_px.max(8.0) + 4.0)
             });
-            if let Some(target) = own.or(contact) {
+            if ui.input(|i|i.modifiers.shift) {
+                self.command(Command::AppendWaypoint {body:id,point:to_world(&cam,rect,click)});
+            } else if let Some(target) = own.or(contact) {
                 if let InterceptTarget::Contact(c)=target {self.select_object(Selection::Contact(c),view);}
-                else {self.command(Command::Intercept {body:id,target});}
+                else if let InterceptTarget::Own(target)=target {self.command(Command::Follow {body:id,target});}
             } else if let Some(celestial) = celestial {
                 self.command(Command::Orbit { body: id, celestial });
             } else {
@@ -2182,18 +2276,9 @@ impl LuminalApp {
         }
         if resp.clicked()
             && let Some(click) = resp.interact_pointer_pos()
+            && let Some((s, _)) = selectable_at(view, &cam, rect, click)
         {
-            let bodies = view.bodies.iter().filter(|b| b.kind != BodyKind::Missile).map(|b| (Selection::Body(b.id), b.pos));
-            let contacts = view.contacts.iter().filter_map(|c| c.track.as_ref().map(|t| (Selection::Contact(c.id), t.pos)));
-            if let Some(s) = bodies
-                .chain(contacts)
-                .map(|(s, p)| (s, to_screen(&cam, rect, p).distance(click)))
-                .filter(|(_, d)| *d < 14.0)
-                .min_by(|a, b| a.1.total_cmp(&b.1))
-                .map(|(s, _)| s)
-            {
-                self.select_object(s, view);
-            }
+            self.select_object(s, view);
         }
         self.combat_overlay(ui,view,rect);
     }
@@ -2397,6 +2482,9 @@ fn draw_contact(
             } else if c.resolved_kind==Some(BodyKind::Station) {
                 painter.rect_filled(Rect::from_center_size(p,EVec2::splat(7.0)),0.0,color);
             } else if resolved_course {
+                let heading=if t.vel.length()>0.0 {t.vel.normalized()} else {Vec2::new(0.0,1.0)};
+                let burn=(t.accel-view.system.gravity(t.pos,view.time)).length()/G0;
+                draw_burn_vector(painter,p,heading,burn,if c.stale {0.4} else {1.0});
                 draw_contact_marker(painter, p, t.vel, color, selected);
             } else if let Some(ping)=ping {
                 painter.circle_filled(p,if selected {7.0} else {5.0},Color32::from_rgb(255,155,45).gamma_multiply(ping.opacity(view.time)));
@@ -2410,7 +2498,6 @@ fn draw_contact(
         None => {
             // Show only bearings measured by the player's command ship.
             // Allied measurements still contribute to contact fusion.
-            let reach = (rect.width() + rect.height()) * 2.0;
             let score=|b:&luminal_core::session::BearingView| b.sigma /
                 (1.0-((view.time-b.received_at)/BEARING_FADE_S).clamp(0.0,1.0)).max(0.001);
             for b in c.bearings.iter().filter(|b|view.time-b.received_at<BEARING_FADE_S
@@ -2421,19 +2508,23 @@ fn draw_contact(
                     continue;
                 }
                 let o = to_screen(cam, rect, b.origin);
-                let ray = |a: f64| o + EVec2::new(a.cos() as f32, -a.sin() as f32) * reach;
+                let reach = (b.max_range / cam.km_per_px) as f32;
+                let ray = |a: f64, f: f32| o + EVec2::new(a.cos() as f32, -a.sin() as f32) * reach * f;
                 let spread = (2.0 * b.sigma).min(0.5);
-                painter.add(Shape::convex_polygon(
-                    vec![o, ray(b.bearing - spread), ray(b.bearing + spread)],
-                    color.gamma_multiply(0.06 * fade),
-                    Stroke::NONE,
-                ));
-                painter.line_segment([o, ray(b.bearing)], Stroke::new(if selected { 1.5 } else { 1.0 }, color.gamma_multiply(0.45 * fade)));
-                {
-                    let dir = EVec2::new(b.bearing.cos() as f32, -b.bearing.sin() as f32);
-                    let tip = clip_to_rect(rect, o, dir).unwrap_or(o + dir * 60.0);
-                    labels.add(tip - dir * 30.0, contact_label(c), color.gamma_multiply(fade.max(0.3)));
+                for i in 0..64 {
+                    let start = i as f32 / 64.0;
+                    let end = (i + 1) as f32 / 64.0;
+                    let opacity = fade * (1.0 - (start + end) * 0.5).powi(2);
+                    painter.add(Shape::convex_polygon(
+                        vec![ray(b.bearing-spread,start),ray(b.bearing-spread,end),
+                            ray(b.bearing+spread,end),ray(b.bearing+spread,start)],
+                        color.gamma_multiply(0.06 * opacity), Stroke::NONE));
+                    painter.line_segment([ray(b.bearing,start),ray(b.bearing,end)],
+                        Stroke::new(if selected {1.5} else {1.0},color.gamma_multiply(0.45 * opacity)));
                 }
+                let dir = EVec2::new(b.bearing.cos() as f32, -b.bearing.sin() as f32);
+                let tip = clip_to_rect(rect, o, dir).filter(|p|p.distance(o)<reach).unwrap_or(ray(b.bearing,1.0));
+                labels.add(tip-dir*30.0,contact_label(c),color.gamma_multiply(fade.max(0.3)));
             }
         }
     }
@@ -2488,6 +2579,18 @@ impl Labels {
 
 /// Hit-test only the received map picture, never simulation truth. Hovering does
 /// not alter the commanded ship or designated target.
+/// Shared hit area for the hover plate and left-click selection.
+fn selectable_at(view: &View, cam: &Camera, rect: Rect, pointer: Pos2) -> Option<(Selection, Vec2)> {
+    let bodies = view.bodies.iter().filter(|b| b.kind != BodyKind::Missile)
+        .map(|b| (Selection::Body(b.id), b.pos));
+    let contacts = view.contacts.iter().filter_map(|c| c.track.as_ref().map(|t| (Selection::Contact(c.id), t.pos)));
+    bodies.chain(contacts)
+        .map(|(s, p)| (s, p, to_screen(cam, rect, p).distance(pointer)))
+        .filter(|(_, _, d)| *d < 14.0)
+        .min_by(|a, b| a.2.total_cmp(&b.2))
+        .map(|(s, p, _)| (s, p))
+}
+
 #[cfg(test)]
 fn hover_details(view: &View, cam: &Camera, rect: Rect, pointer: Pos2) -> Option<Vec<String>> {
     hover_details_for_target(view,cam,rect,pointer,None,None)
@@ -2727,6 +2830,21 @@ fn coasting_keeps_the_last_heading_despite_zero_or_tiny_thrust() {
     assert_eq!(coast_heading(heading,Vec2::ZERO),heading);
     assert_eq!(coast_heading(heading,Vec2::new(0.0,1e-7)),heading);
     assert_eq!(coast_heading(heading,Vec2::new(0.0,1.0)),Vec2::new(0.0,1.0));
+}
+
+/// Ship icons are 15 px nose to stern; full 120g burn extends four icon lengths.
+fn draw_burn_vector(painter:&egui::Painter,p:Pos2,heading:Vec2,burn_g:f64,opacity:f32) {
+    if !burn_g.is_finite() || burn_g<=0.0 {return;}
+    let rear= -screen_dir(heading);
+    let start=p+rear*5.0;
+    let length=(60.0*burn_g/120.0) as f32;
+    let yellow=Color32::from_rgb(255,220,60);
+    for i in 0..24 {
+        let a=i as f32/24.0;
+        let b=(i+1) as f32/24.0;
+        painter.line_segment([start+rear*(length*a),start+rear*(length*b)],
+            Stroke::new(2.0,yellow.gamma_multiply(opacity*(1.0-(a+b)*0.5))));
+    }
 }
 
 fn draw_ship(painter: &egui::Painter, p: Pos2, vel: Vec2, facing: Vec2, color: Color32, selected: bool) {

@@ -33,12 +33,14 @@ pub enum Command {
     Orbit { body: BodyId, celestial: usize },
     /// Close on a target, match velocity and hold station.
     Intercept { body: BodyId, target: InterceptTarget },
+    Follow { body: BodyId, target: BodyId },
     /// Close at maximum thrust and fly through, retaining velocity.
     Flyby { body: BodyId, target: InterceptTarget },
     KeepRange {body:BodyId,target:InterceptTarget,range:f64},
     Evade {body:BodyId,target:InterceptTarget},
     /// Fly to a point in minimal time (burn, flip, brake) and stop there.
     MoveTo { body: BodyId, point: Vec2 },
+    AppendWaypoint {body:BodyId,point:Vec2},
     /// Come to rest in the local frame as fast as the drive allows.
     AllStop { body: BodyId },
     /// Cap autopilot thrust, in g. Lower thrust means a fainter drive signature.
@@ -80,8 +82,8 @@ pub enum Rejection {
 impl Command {
     pub fn body(&self) -> Option<BodyId> {
         match *self {
-            Self::SetThrust { body, .. } | Self::Orbit { body, .. } | Self::Intercept { body, .. }
-            | Self::Flyby { body, .. } | Self::KeepRange {body,..} | Self::Evade {body,..} | Self::MoveTo { body, .. } | Self::AllStop { body }
+            Self::Follow {body,..} | Self::SetThrust { body, .. } | Self::Orbit { body, .. } | Self::Intercept { body, .. }
+            | Self::AppendWaypoint {body,..} | Self::Flyby { body, .. } | Self::KeepRange {body,..} | Self::Evade {body,..} | Self::MoveTo { body, .. } | Self::AllStop { body }
             | Self::SetDriveLimit { body, .. } | Self::Launch { body, .. } | Self::FireBeam { body, .. }
             | Self::Ping { body } | Self::EngageBeam { body, .. } | Self::SetScreen { body, .. } | Self::SetSystemMode {body,..}
             | Self::CancelLaunches { body } | Self::DeployProbe {body,..} | Self::ArmBeams { body } => Some(body),
@@ -130,6 +132,7 @@ pub struct BodyView {
     /// Manual thrust order (used when no autopilot order is active).
     pub commanded: Vec2,
     pub autopilot: Option<Autopilot>,
+    pub route:Option<crate::route::FlightRoute>,
     pub avoidance: Avoidance,
     /// Cap on autopilot thrust, km/s² (infinite when unset).
     pub drive_limit: f64,
@@ -180,6 +183,8 @@ pub struct TrackView {
 
 #[derive(Clone, Debug)]
 pub struct BearingView {
+    /// Nominal effective DF reach; a bearing alone does not reveal source signature.
+    pub max_range:f64,
     pub received_at:f64,
     pub sensor: BodyId,
     pub origin: Vec2,
@@ -431,6 +436,7 @@ impl LocalSession {
                 self.owned(role, body)?;
                 self.world.set_orbit(body, celestial)?;
             }
+            Command::Follow {body,target}=>{self.owned(role,body)?;self.world.set_follow(body,target)?;}
             Command::Intercept { body, target } => {
                 self.owned(role, body)?;
                 self.world.set_intercept(body, target)?;
@@ -441,6 +447,7 @@ impl LocalSession {
             }
             Command::KeepRange {body,target,range}=>{self.owned(role,body)?;self.world.set_tactical_range(body,target,Some(range))?;}
             Command::Evade {body,target}=>{self.owned(role,body)?;self.world.set_tactical_range(body,target,None)?;}
+            Command::AppendWaypoint {body,point}=>{self.owned(role,body)?;self.world.append_waypoint(body,point)?;}
             Command::MoveTo { body, point } => {
                 self.owned(role, body)?;
                 self.world.set_move(body, point)?;
@@ -569,6 +576,7 @@ impl LocalSession {
                     thrust: b.trajectory.thrust_at(t).unwrap_or(Vec2::ZERO),
                     commanded: b.commanded,
                     autopilot: b.autopilot,
+                    route:if b.autopilot.is_some_and(|a|a.order==Order::Route) {b.route.clone()} else {None},
                     avoidance: b.avoidance,
                     drive_limit: b.drive_limit,
                     magazine: b.magazine,
@@ -613,6 +621,8 @@ impl LocalSession {
                             .values()
                             .filter_map(|o| match o.measurement {
                                 Measurement::Bearing { bearing, sigma } => Some(BearingView {
+                                    max_range:crate::sensors::detection_ranges(crate::sensors::REFERENCE_EF)[3]
+                                        * w.bodies[o.sensor.0 as usize].sensor_effectiveness()[1],
                                     received_at:o.decider_received_at,
                                     sensor: o.sensor,
                                     origin: o.origin,
@@ -1012,6 +1022,24 @@ mod tests {
         assert_eq!(v.celestials.len(), 22);
         assert!(s.contact_truth(Role::Faction(ESCORT), ESCORT).is_none());
         assert!(s.contact_truth(Role::Spectator, ESCORT).is_some());
+    }
+
+    #[test]
+    fn route_commands_append_preserve_target_and_restart_after_manual_thrust() {
+        let mut s = LocalSession::new(close_scenario());
+        let me = Role::Faction(ESCORT);
+        let body = BodyId(1);
+        let start = s.world.bodies[1].trajectory.state_at(s.world.time()).unwrap().pos;
+        let point = start + Vec2::new(1_000_000.0, 1_000_000.0);
+        let target = s.world.bodies[1].beam_target;
+        s.command(me, Command::AppendWaypoint {body, point}).unwrap();
+        s.command(me, Command::AppendWaypoint {body, point:point+Vec2::new(1_000_000.0,0.0)}).unwrap();
+        assert_eq!(s.world.bodies[1].route.as_ref().unwrap().points.len(),3);
+        assert_eq!(s.world.bodies[1].beam_target,target);
+        assert_eq!(s.command(me,Command::AppendWaypoint {body:BodyId(2),point}),Err(Rejection::NotYourBody));
+        s.command(me,Command::SetThrust {body,thrust:Vec2::ZERO}).unwrap();
+        s.command(me,Command::AppendWaypoint {body,point}).unwrap();
+        assert_eq!(s.world.bodies[1].route.as_ref().unwrap().points.len(),2);
     }
 
     #[test]

@@ -31,6 +31,10 @@ search for **Luminal**, and launch it. You can also run `~/.local/bin/luminal`.
 Close the window with your normal window-close binding. The running game keeps
 its current build until you close and reopen it.
 
+The launcher starts the game in an independent systemd user service, so it stays
+running after the menu's launch command exits. Startup output is captured in
+`~/.local/state/luminal/launcher.log` (or under `XDG_STATE_HOME` when set).
+
 To update an existing installation:
 
 ```sh
