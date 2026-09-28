@@ -249,7 +249,7 @@ mod tests {
         contact.damage=Some(report);contact.last_emitted_at=0.0;contact.last_received_at=600.0;
         view.time=600.0;
         assert!(target_system_report(&contact,&view).is_some(),"light travel does not expire a newly received snapshot");
-        view.time=720.0;
+        view.time=600.0+luminal_core::damage::SYSTEM_REPAIR_SECONDS;
         assert!(target_system_report(&contact,&view).is_none());
         assert!(Chip::Unknown.color()!=Chip::Inoperative.color());
     }
@@ -3167,7 +3167,7 @@ fn paint_repair_progress(p:&egui::Painter,cell:Rect,report:Option<Report>,system
     let width=(cell.width()-4.0).max(0.0);
     p.line_segment([start,start+EVec2::new(width,0.0)],Stroke::new(2.0,EDGE));
     p.line_segment([start,start+EVec2::new(width*fraction as f32,0.0)],Stroke::new(2.0,ACCENT));
-    let rate=r.damage.effectiveness(System::Repair)*r.damage.effectiveness(System::Crew);
+    let rate=r.damage.system_repair_rate();
     if rate<=0.0 {format!("\nRepair stalled · {:.0}%",fraction*100.0)}
     else {format!("\nRepair {:.0}% · {} remaining (at report time)",fraction*100.0,fmt_age((duration-r.damage.repair_progress).max(0.0)/rate))}
 }

@@ -27,8 +27,10 @@ pub fn hit_chance(payload:Payload,range:f64,quality:f64,sigma:f64,evasion:f64,ec
     let preferred=autopilot::weapon_standoff(payload).max(1.0);
     let range_factor=1.0/(1.0+0.3*(range/preferred).powi(2));
     let uncertainty=1.0/(1.0+(sigma/(5.0*LIGHT_SECOND)).powi(2));
-    (0.9*range_factor*quality.clamp(0.0,1.0)*uncertainty
-        *(1.0-0.25*evasion.clamp(0.0,1.0))*ecm_factor.clamp(0.5,1.0)).clamp(0.0,0.9)
+    // The SRM shotgun gets a modest accuracy edge, not extra damage or range.
+    let (accuracy,ceiling)=if payload==Payload::Kinetic {(1.1,0.95)} else {(1.0,0.9)};
+    (0.9*accuracy*range_factor*quality.clamp(0.0,1.0)*uncertainty
+        *(1.0-0.25*evasion.clamp(0.0,1.0))*ecm_factor.clamp(0.5,1.0)).clamp(0.0,ceiling)
 }
 
 impl World {
@@ -162,6 +164,13 @@ impl World {
 
 #[cfg(test)] mod tests {
     use super::*;
+    #[test] fn srm_accuracy_bonus_is_modest_and_does_not_extend_range() {
+        let p=Payload::Kinetic;let r=autopilot::weapon_standoff(p);
+        assert!((hit_chance(p,r,1.0,0.0,0.0,1.0)-(0.9/1.3)*1.1).abs()<1e-10);
+        assert_eq!(hit_chance(p,0.0,1.0,0.0,0.0,1.0),0.95);
+        assert_eq!(hit_chance(p,p.engagement_range()*1.01,1.0,0.0,0.0,1.0),0.0);
+        assert_eq!(hit_chance(Payload::Nuclear,0.0,1.0,0.0,0.0,1.0),0.9);
+    }
     #[test] fn chances_degrade_with_range_uncertainty_evasion_and_ecm() {
         let p=Payload::Nuclear;let r=autopilot::weapon_standoff(p);
         let good=hit_chance(p,r,1.0,0.0,0.0,1.0);

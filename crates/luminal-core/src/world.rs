@@ -2063,7 +2063,7 @@ mod tests {
         for s in [S::Active,S::Ecm,S::Eccm,S::Propulsion,S::Screens,S::PdMissiles,S::PdLaser,S::Beam,S::Launcher] {
             assert_eq!(w.bodies[0].operating_effectiveness(s),0.0,"{s:?}");
         }
-        w.advance_to(121.0);
+        w.advance_to(crate::damage::SYSTEM_REPAIR_SECONDS+1.0);
         assert_eq!(w.bodies[0].damage.state(S::Power),D::Intact);
         assert!(w.bodies[0].trajectory.last().thrust.length()>0.0);
     }
