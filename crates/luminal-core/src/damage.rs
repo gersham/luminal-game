@@ -5,7 +5,8 @@ pub const JOULES_PER_HP:f64=HULL_INTEGRITY_J.value/100.0;
 pub const SCREEN_LEAK_CHANCE:f64=0.05;
 pub const SCREEN_LEAK_FRACTION:f64=0.01;
 pub const SYSTEM_HIT_CHANCE:f64=0.20;
-pub const MISSILE_SCREEN_COUPLING:f64=0.4;
+pub const MISSILE_SCREEN_LEAK_FRACTION:f64=0.25;
+pub const CRITICAL_MIN_HULL_FRACTION:f64=0.01;
 pub const MISSILE_SCREEN_LEAK_CHANCE:f64=0.35;
 pub const FRIGATE_HULL_HP:f64=1000.0;
 pub const SYSTEM_REPAIR_SECONDS:f64=1200.0;
@@ -18,27 +19,27 @@ impl Condition {
 }
 #[derive(Clone,Copy,Debug,PartialEq,Eq)]
 #[repr(usize)]
-pub enum System {Passive,Active,Direction,Ecm,Eccm,Propulsion,Power,Screens,Crew,Mind,PdMissiles,PdLaser,Beam,Launcher,Repair}
+pub enum System {Passive,Active,Direction,Ecm,Eccm,Propulsion,Power,Screens,Crew,Mind,PdMissiles,PdLaser,Beam,Launcher,Repair,SrmLauncher}
 impl System {
     pub fn independent_power(self)->bool {
         matches!(self,Self::Crew|Self::Repair|Self::Passive|Self::Direction|Self::Mind)
     }
-    pub const ALL:[Self;15]=[Self::Passive,Self::Active,Self::Direction,Self::Ecm,Self::Eccm,Self::Propulsion,Self::Power,Self::Screens,Self::Crew,Self::Mind,Self::PdMissiles,Self::PdLaser,Self::Beam,Self::Launcher,Self::Repair];
-    pub fn code(self)->&'static str {match self {Self::Passive=>"PASS",Self::Active=>"ACTV",Self::Direction=>"DIRF",Self::Ecm=>"ECMS",Self::Eccm=>"ECCM",Self::Propulsion=>"PROP",Self::Power=>"POWR",Self::Screens=>"SCRN",Self::Crew=>"CREW",Self::Mind=>"MIND",Self::PdMissiles=>"PDMS",Self::PdLaser=>"PDLS",Self::Beam=>"BEAM",Self::Launcher=>"LNCH",Self::Repair=>"DCTL"}}
-    pub fn name(self)->&'static str {match self {Self::Passive=>"Passive sensors",Self::Active=>"Active sensors",Self::Direction=>"Direction finding",Self::Ecm=>"Electronic countermeasures",Self::Eccm=>"Electronic counter-countermeasures",Self::Propulsion=>"Propulsion",Self::Power=>"Power generation",Self::Screens=>"Screens",Self::Crew=>"Crew",Self::Mind=>"Ship mind",Self::PdMissiles=>"Point-defence missile launcher",Self::PdLaser=>"Point-defence laser",Self::Beam=>"Main beam",Self::Launcher=>"Offensive missile launcher",Self::Repair=>"Damage control"}}
+    pub const ALL:[Self;16]=[Self::Passive,Self::Active,Self::Direction,Self::Ecm,Self::Eccm,Self::Propulsion,Self::Power,Self::Screens,Self::Crew,Self::Mind,Self::PdMissiles,Self::PdLaser,Self::Beam,Self::Launcher,Self::Repair,Self::SrmLauncher];
+    pub fn code(self)->&'static str {match self {Self::Passive=>"PASS",Self::Active=>"ACTV",Self::Direction=>"DIRF",Self::Ecm=>"ECMS",Self::Eccm=>"ECCM",Self::Propulsion=>"PROP",Self::Power=>"POWR",Self::Screens=>"SCRN",Self::Crew=>"CREW",Self::Mind=>"MIND",Self::PdMissiles=>"PDMS",Self::PdLaser=>"PDLS",Self::Beam=>"BEAM",Self::Launcher=>"LRM",Self::SrmLauncher=>"SRM",Self::Repair=>"DCTL"}}
+    pub fn name(self)->&'static str {match self {Self::Passive=>"Passive sensors",Self::Active=>"Active sensors",Self::Direction=>"Direction finding",Self::Ecm=>"Electronic countermeasures",Self::Eccm=>"Electronic counter-countermeasures",Self::Propulsion=>"Propulsion",Self::Power=>"Power generation",Self::Screens=>"Screens",Self::Crew=>"Crew",Self::Mind=>"Ship mind",Self::PdMissiles=>"Point-defence missile launcher",Self::PdLaser=>"Point-defence laser",Self::Beam=>"Main beam",Self::Launcher=>"LRM launchers",Self::SrmLauncher=>"SRM launchers",Self::Repair=>"Damage control"}}
 }
 #[derive(Clone,Copy,Debug,PartialEq)]
 pub struct Damage {
     pub hull:f64,pub hull_max:f64,pub armour:f64,pub armour_max:f64,
-    pub systems:[Condition;15],
+    pub systems:[Condition;16],
     pub repair_progress:f64,
     pub repair_target:Option<System>,
 }
-impl Default for Damage {fn default()->Self {Self {hull:100.0,hull_max:100.0,armour:100.0,armour_max:100.0,systems:[Condition::Intact;15],repair_progress:0.0,repair_target:None}}}
+impl Default for Damage {fn default()->Self {Self {hull:100.0,hull_max:100.0,armour:100.0,armour_max:100.0,systems:[Condition::Intact;16],repair_progress:0.0,repair_target:None}}}
 impl Damage {
     /// Catastrophic field feedback bypasses armour. Each secondary casualty is
     /// distinct, installed, and not already destroyed.
-    pub fn screen_overload(&mut self,installed:&[bool;15],rng:&mut Rng)->Vec<System> {
+    pub fn screen_overload(&mut self,installed:&[bool;16],rng:&mut Rng)->Vec<System> {
         self.systems[System::Screens as usize]=Condition::Destroyed;
         self.hull=(self.hull-0.2*self.hull_max).max(0.0);
         let mut eligible=*installed;
@@ -67,15 +68,15 @@ impl Damage {
     }
     /// Every nonzero penetration damages hull. Armour absorbs half until exhausted;
     /// unused absorption flows through, so energy cannot disappear at depletion.
-    pub fn penetrate(&mut self,energy_j:f64,installed:&[bool;15],rng:&mut Rng)->Option<System> {
+    pub fn penetrate(&mut self,energy_j:f64,installed:&[bool;16],rng:&mut Rng)->Option<System> {
         let points=energy_j.max(0.0)/JOULES_PER_HP;
         let soaked=(points*0.5).min(self.armour);
         self.armour-=soaked;
         self.hull=(self.hull-(points-soaked)).max(0.0);
-        if energy_j<1e6 || rng.uniform()>=self.system_hit_chance() {return None;}
+        if points<self.hull_max*CRITICAL_MIN_HULL_FRACTION || rng.uniform()>=self.system_hit_chance() {return None;}
         self.hit_system(installed,rng)
     }
-    pub fn hit_system(&mut self,installed:&[bool;15],rng:&mut Rng)->Option<System> {
+    pub fn hit_system(&mut self,installed:&[bool;16],rng:&mut Rng)->Option<System> {
         let eligible:Vec<_>=System::ALL.into_iter().filter(|s|installed[*s as usize] && self.state(*s)!=Condition::Destroyed).collect();
         if eligible.is_empty() {return None;}
         let weight=|s:System|if s==System::Propulsion {2.0} else {1.0};
@@ -112,7 +113,7 @@ impl Damage {
     }
 }
 #[derive(Clone,Copy,Debug)]
-pub struct Report {pub damage:Damage,pub installed:[bool;15],pub observed_at:f64,pub screen_heat:f64}
+pub struct Report {pub damage:Damage,pub installed:[bool;16],pub observed_at:f64,pub screen_available:f64}
 impl Report {
     pub fn operating_effectiveness(&self,system:System)->f64 {
         if !self.installed[system as usize] {return 0.0;}
@@ -127,14 +128,14 @@ mod tests {
     #[test] fn screen_overload_destroys_generator_hits_distinct_systems_and_bypasses_armour() {
         for seed in 0..100 {
             let mut d=Damage {hull:1000.0,hull_max:1000.0,..Default::default()};
-            let hit=d.screen_overload(&[true;15],&mut Rng::new(seed));
+            let hit=d.screen_overload(&[true;16],&mut Rng::new(seed));
             assert!((2..=4).contains(&hit.len()));
             assert_eq!(d.hull,800.0);assert_eq!(d.armour,100.0);
             assert_eq!(d.state(System::Screens),Condition::Destroyed);
             for (i,s) in hit.iter().enumerate() {assert!(!hit[..i].contains(s));}
         }
         let mut d=Damage {hull:100.0,hull_max:1000.0,..Default::default()};
-        let mut installed=[false;15];installed[System::Beam as usize]=true;
+        let mut installed=[false;16];installed[System::Beam as usize]=true;
         d.systems[System::Beam as usize]=Condition::Damaged;
         let hit=d.screen_overload(&installed,&mut Rng::new(1));
         assert_eq!(hit,vec![System::Screens,System::Beam]);
@@ -147,15 +148,15 @@ mod tests {
             let mut rng=Rng::new(31);
             let hits=(0..20_000).filter(|_| {
                 let mut d=damage;
-                // Restore the tiny penetration's hull loss so the tested post-hit
+                // Restore the qualifying penetration's hull loss so the tested post-hit
                 // condition lies exactly on each boundary.
-                d.hull+=1e9/JOULES_PER_HP*0.5;
-                d.penetrate(1e9,&[true;15],&mut rng).is_some()
+                d.hull+=5.0;
+                d.penetrate(10.0*JOULES_PER_HP,&[true;16],&mut rng).is_some()
             }).count();
             assert!((hits as f64/20_000.0-chance).abs()<0.02,"{hull}: {hits}");
         }
         let mut d=Damage {hull:501.0,hull_max:1000.0,armour:0.0,..Default::default()};
-        d.penetrate(3.0*JOULES_PER_HP,&[false;15],&mut Rng::new(1));
+        d.penetrate(3.0*JOULES_PER_HP,&[false;16],&mut Rng::new(1));
         assert_eq!(d.system_hit_chance(),0.4,"the hit crossing the threshold uses the higher chance");
     }
     #[test] fn repair_target_is_stable_and_completes_after_twenty_minutes() {
@@ -176,7 +177,7 @@ mod tests {
         let mut d=Damage {hull:50.0,..Default::default()};
         d.systems[System::Power as usize]=Condition::Damaged;
         d.systems[System::Repair as usize]=Condition::Damaged;
-        let report=Report {damage:d,installed:[true;15],observed_at:0.0,screen_heat:0.0};
+        let report=Report {damage:d,installed:[true;16],observed_at:0.0,screen_available:1.0};
         for s in System::ALL {
             let expected=if s==System::Repair {0.5} else if s.independent_power() {1.0} else {0.0};
             assert_eq!(report.operating_effectiveness(s),expected,"{s:?}");
@@ -198,15 +199,21 @@ mod tests {
     }
     #[test] fn penetrating_hits_damage_systems_twenty_percent_of_the_time() {
         let mut rng=Rng::new(314);
-        let hits=(0..20_000).filter(|_|Damage::default().penetrate(1e9,&[true;15],&mut rng).is_some()).count();
+        let hits=(0..20_000).filter(|_|Damage::default().penetrate(JOULES_PER_HP,&[true;16],&mut rng).is_some()).count();
         assert!((3800..4200).contains(&hits),"{hits}/20000");
         assert_eq!(MISSILE_SCREEN_LEAK_CHANCE,0.35);
     }
+    #[test] fn grazing_hits_cannot_destroy_subsystems() {
+        let mut d=Damage {hull:8000.0,hull_max:8000.0,armour:6000.0,..Default::default()};
+        let mut rng=Rng::new(91);
+        for _ in 0..10_000 {assert!(d.penetrate(1.05e11,&[true;16],&mut rng).is_none());}
+        assert!(d.systems.iter().all(|s|*s==Condition::Intact));
+    }
     #[test] fn propulsion_has_double_weight_and_power_has_normal_weight() {
         let mut rng=Rng::new(42);
-        let mut installed=[false;15];
+        let mut installed=[false;16];
         for s in [System::Propulsion,System::Power,System::Active] {installed[s as usize]=true;}
-        let mut counts=[0;15];
+        let mut counts=[0;16];
         for _ in 0..20_000 {
             let mut damage=Damage::default();
             let system=damage.hit_system(&installed,&mut rng).unwrap();
@@ -222,11 +229,11 @@ mod tests {
     }
     #[test] fn armour_ablates_and_all_penetrations_damage_hull() {
         let mut d=Damage::default();let mut rng=Rng::new(1);
-        d.penetrate(20.0*JOULES_PER_HP,&[false;15],&mut rng);
+        d.penetrate(20.0*JOULES_PER_HP,&[false;16],&mut rng);
         assert_eq!((d.hull,d.armour),(90.0,90.0));
-        d.armour=3.0;d.penetrate(20.0*JOULES_PER_HP,&[false;15],&mut rng);
+        d.armour=3.0;d.penetrate(20.0*JOULES_PER_HP,&[false;16],&mut rng);
         assert_eq!((d.hull,d.armour),(73.0,0.0));
-        d.penetrate(100.0*JOULES_PER_HP,&[false;15],&mut rng);
+        d.penetrate(100.0*JOULES_PER_HP,&[false;16],&mut rng);
         assert_eq!(d.hull,0.0);
     }
     #[test] fn two_system_hits_destroy_without_system_hitpoints() {

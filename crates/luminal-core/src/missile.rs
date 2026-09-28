@@ -32,6 +32,12 @@ impl Payload {
         }
     }
 
+    pub fn launcher_system(self)->crate::damage::System {if self==Self::Kinetic {crate::damage::System::SrmLauncher} else {crate::damage::System::Launcher}}
+    pub fn kill_radius(self)->f64 {if self==Self::Kinetic {crate::params::KINETIC_PATTERN_KM.value} else {crate::params::NUCLEAR_AOE_KM.value}}
+    pub fn seeker_range(self)->f64 {if self==Self::Kinetic {10_000.0} else {2.0*self.kill_radius()}}
+    /// Only a fifth of main-engine acceleration is available for course correction.
+    pub fn lateral_accel(self)->f64 {0.2*self.acceleration_g()*crate::units::G0}
+
     pub fn delta_v(self)->f64 {
         crate::params::MISSILE_DELTA_V_KMS.value * if self==Self::Kinetic {0.5} else {1.0}
     }
@@ -54,9 +60,9 @@ pub fn launch_confidence(range:f64,sigma:f64,velocity_sigma:f64,payload:Payload)
     let eta=range/speed+speed/(2.0*accel);
     let uncertainty=(sigma*sigma+(velocity_sigma*eta).powi(2)
         +(0.5*crate::params::TRACK_MANEUVER_G.value*crate::units::G0*ACCEL_PERSIST_S*eta).powi(2)).sqrt();
-    let acquisition=crate::params::MISSILE_ACTIVE_RANGE_LS*crate::units::LIGHT_SECOND;
+    let acquisition=payload.seeker_range();
     let time=(acquisition/speed).min(crate::params::MISSILE_TERMINAL_S.value);
-    let reach=lateral_reach(accel,
+    let reach=lateral_reach(payload.lateral_accel(),
         payload.delta_v()*crate::params::MISSILE_RESERVE_FRACTION.value,time);
     let footprint=acquisition*crate::params::MISSILE_SEARCH_HALF_ANGLE.tan();
     (reach.min(footprint)/uncertainty.max(1.0)).min(1.0)

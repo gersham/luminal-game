@@ -307,6 +307,15 @@ pub struct Contact {
 }
 
 impl Contact {
+    pub(crate) fn retain_missile_fix(&mut self,obs:Observation,state:crate::kinematics::State,thrust:Vec2) {
+        self.resolved=true;self.last=obs;
+        self.evidence.insert((obs.sensor,obs.source as u8),obs);
+        let mut track=Track::new(obs.emitted_at,state.pos,[[0.01,0.0],[0.0,0.01]]);
+        track.x=[state.pos.x,state.pos.y,state.vel.x,state.vel.y,thrust.x,thrust.y];
+        for i in 2..6 {track.p[i][i]=0.0001;}
+        self.track=Some(track);
+    }
+
     pub fn best_evidence(&self,t:f64)->Option<&Observation> {
         self.evidence.values().filter(|o|o.detection!=crate::sensors::DetectionLevel::None &&
             t-o.decider_received_at<=crate::params::TRACK_STALE_S.value &&

@@ -22,7 +22,7 @@ quality/uncertainty, target evasion, and ECM/ECCM; point defence remains a
 separate layer. LRM proximity bursts and SRM direct hits retain distinct damage.
 The animation is intentionally an abstraction, not a fuel-accurate trajectory.
 
-Successful SRM direct hits deliver 2 PJ; LRM proximity hits deliver 1 PJ.
+Successful SRM shotgun hits deliver 0.5 PJ every 5 seconds; LRM nuclear-pumped laser strikes deliver 1 PJ every 10 seconds. Both launchers have 0.1 PJ/s nominal output before misses and defence. Frigates carry 20 SRMs and 10 LRMs (10 PJ per magazine), plus 40 interceptors. Interceptor base kill chances are 75% against SRMs and 45% against LRMs, reduced by encounter speed.
 Full salvos are dangerous to ships with exhausted interceptor magazines; see
 [salvo calibration](calibration/exhausted-defences.md) for controlled trials.
 Own-ship map rings show LRM (1.4 AU), SRM (0.14 AU), and the nominal beam envelope
@@ -171,7 +171,7 @@ never override manual speed. Restart restores AUTO.
 | L / S | Queue an LRM / SRM at the designated contact (same launch gates as buttons) |
 | Shift+L / Shift+S | Queue all remaining LRMs / SRMs at that target; normal launch intervals still apply |
 | P | Active sensor ping |
-| E / R / B | Cycle ECM / Screens / Boost: Auto → On → Off |
+| E / R | Cycle ECM / Screens: Auto → On → Off |
 | A | Toggle automatic active pinging: Off / Auto |
 | 1 / 2 / 3 | SHORT / MEDIUM / LONG separation |
 | 0 | EVADE |
@@ -213,15 +213,11 @@ thrust replaces the route; adding points preserves your weapon target.
   for positive net advantage; otherwise zero. Bearing/Approximate reach is unaffected,
   and ECM still increases EF by 50%.
 - **SCREENS On/Off/Auto:** defaults Auto and latches on after resolving an enemy ship.
-  The scenario retains its initially raised warship screens. Raising and lowering
-  each take 60 seconds at full effectiveness. Stored absorption heat blocks lowering;
-  an Off request waits without discarding stored energy.
-- **BOOST On/Off/Auto:** defaults Auto. Boost adds 20% to full thrust and pauses main
-  and point-defence laser recharge; existing charged shots remain available. Auto
-  stops boosting when a received ship/missile position is within 10 light-seconds.
+  Screens recharge at 2% per minute; Off immediately removes absorption.
+  Absorbed damage and a small idle load heat the shared reservoir.
 - **LRM / SRM:** click to queue a launch. Long-range nuclear proximity missiles
   allow speculative bearing-only shots; short-range kinetic missiles need a
-  minimally useful firing solution. Launch intervals are 60 s and 5 s respectively.
+  resolved target. Launch intervals are 10 s and 5 s respectively.
   The line below each button estimates hit chance before enemy defences.
 - **Main beam AUTO / DIRECT / HOLD:** automatic engagement, directed engagement
   of the selected contact, or cease fire. Point defence operates automatically.
@@ -233,7 +229,7 @@ thrust replaces the route; adding points preserves your weapon target.
 | MATCH | Come alongside and match velocity |
 | FLYBY | Accelerate for a high-speed pass without matching velocity |
 | LONG · LRM | Hold 0.7 AU: half the LRM engagement envelope |
-| MEDIUM · SRM | Hold 0.07 AU: half the SRM's 0.14 AU engagement envelope |
+| MEDIUM · SRM | Hold 0.01 AU (about 5 LS): close-range shotgun combat |
 | SHORT · BEAM | Hold 2 LS: inside the beam knife-fight envelope |
 | EVADE | Maximum lateral burn against incoming missiles; coast when clear |
 
@@ -258,18 +254,18 @@ destroys it. Generator destruction vents the field and cannot trigger overload a
 
 ### Emissivity and sensing
 
-EF is `(1 + thrust%/100) × (1 + screen heat%/10) × (2 if screens active) ×
+EF is `(1 + thrust%/100) × (1 + 10 × heat/thermal-limit × dump-signature) ×
 (size/10) × (1 - stealth/100) × (1.5 if ECM emitting) ×
 (1.2 if missiles fired in the last minute) × (1.5 if beams fired in the last minute)`.
 An additional platform visibility multiplier scales the entire EF: normally ×1,
 but ×2 for the transport. Frigates use size 7; battleships 20; stations 20;
 other classes provisionally 10. Point-defence
-fire contributes. Boosted thrust can reach 120%.
+fire contributes. Heat and damage limit class-rated thrust.
 
 Multiply base sensing ranges by **target EF**: passive Identity 0.1 AU,
 Resolved 1 AU, Approximate 5 AU, Bearing 20 AU; active ping detection has a
-separate 5 AU baseline, multiplied by the greater of 1 and target EF. EF 1.4 is a size-7, 50%-stealth frigate at full nominal
-thrust with raised, cold screens and ECM off. ECM and sensor damage still reduce
+separate 5 AU baseline, multiplied by the greater of 1 and target EF. A cold size-7, 50%-stealth frigate at full nominal thrust has EF 0.7
+with ECM off. Screens no longer multiply EF. ECM and sensor damage still reduce
 effective ranges. Approximate contacts have a biased ellipse
 and estimated motion; resolved contacts gain class identity. Approximate passive
 and active positions share a fixed random x/y offset per contact. Their ellipse
@@ -279,7 +275,7 @@ average away that offset. Resolved positions remove the ellipse and its offset.
 Missiles launched at an ellipse aim at its center; their own resolved seeker
 fix can correct the course only within acceleration and remaining correction
 budget. A missile that cannot reach the target misses. Direction finding
-requires operational DF and screens, thrust, or recent weapons on the target.
+requires operational DF and excess heat, thrust, or recent weapons on the target.
 ECM alone does not qualify. Missiles are invisible to direction finding, including
 their seeker pings. Map bearing spikes show only the command ship's measurements.
 Damaged sensors halve their range. Ping identity expires
@@ -289,11 +285,18 @@ Learned class identity remains; condition reports become historical.
 Damaged power disables propulsion, active sensors, screens and weapons. Passive
 sensors, direction finding and the ship mind have backup power; crew and damage
 control remain operational. Destroyed power or an exhausted hull destroys a ship.
+Subsystem criticals require penetrating energy worth at least 1% of maximum hull
+HP before armour shares the damage. A grazing hit still ablates armour/hull but
+cannot roll a reactor casualty. Missile screen punctures pass 25% of their energy
+on a 35% roll; only a sufficiently damaging puncture guarantees a component shock.
 
-Damage control repairs one damaged system per **two effective minutes**, with
+Damage control repairs one damaged system per **twenty effective minutes**, with
 power first, then damage control itself. A progress line and hover text show the
 current repair. Crew and damage-control damage slow repairs. Destroyed systems
 cannot be repaired. Hull repair is separate: 1% per ten effective minutes.
+
+The current matched-class balance results, commands, failure investigations, and
+remaining limits are in [the September combat report](calibration/2026-09-28/report.md).
 
 ## Development and simulations
 
@@ -350,3 +353,118 @@ range and its probability curve are doubled (2 LS maximum, 0.012 LS half-chance)
 The escort scenario ends in defeat if the player's frigate is destroyed, and in
 victory if the raider is destroyed. Transport arrival or destruction alone does
 not end this scenario.
+
+### Shared heat and radiators
+
+Ships store heat in joules. The center command panel shows whole-number SI units
+(J, kJ, MJ, GJ, TJ, PJ, EJ and larger) beside the current emissivity factor.
+Internal energy accounting retains fractional joules.
+
+Drive heat is quadratic in actual thrust: a 100% burn generates 100 times the heat
+of a 10% burn. From cold, the rated maximum (120g for a frigate, 50g for a
+transport) reaches the 100 PJ throttling threshold in about 3.1 hours, including passive
+cooling. Baseline cooling offsets 50% rated thrust plus enabled screens for every class. A one-hour
+full burn from cold stores 50 PJ. Above this threshold available thrust progressively falls, reaching zero
+at 150 PJ. Coasting preserves velocity while cooling; the 0.99c ceiling remains.
+Normal cooling combines that class-scaled baseline capacity with a two-hour reservoir time constant. At or below 50% thrust with screens on, a cold ship stays cold and a hot ship cools without dumping. The central gauge shows only net
+heat flow: green cooling or red heating, beginning at the shared top of the gauge.
+Fill uses a logarithmic 1 MW–1 PW scale, so small but real net rates remain visible.
+
+Main beams and point-defense lasers share the heat budget and hold fire at its
+150 PJ ceiling. Absorbed shield damage enters the ship heat reservoir immediately. Screens are
+rechargeable hit-point capacity, not a separate thermal reservoir. Heat remains visible after engines stop; screens have no direct
+signature multiplier. Enabled screens add 1% of rated full-drive heat, including
+at full charge. They regenerate 2 percentage points of capacity per minute and
+show 0% immediately when off or disabled. Routine navigation reserves heat headroom during
+acceleration for braking and defence; Flyby and Evade use all thermally available
+thrust. Manual commands also obey thermal limits.
+
+**DUMP HEAT** toggles radiators for five times the normal cooling and 10 times normal thermal signature, cuts thrust and inhibits both main and point-defense lasers. The large exposed-radiator signature is a gameplay multiplier and falls as the ship
+cools. Click **STOP DUMP** to close them and resume the retained movement and weapon orders.
+The toggle remains on even after the ship has cooled.
+Dumping is a visible tactical choice, not an automatic autopilot action. Sensor
+reports of the increased signature still arrive at light speed.
+
+The transport cruises toward departure at up to 25g. Once its delivered sensor
+picture resolves an enemy ship, it stays in escape mode with a 50g ceiling toward
+the destination. It still brakes for arrival and obeys thermal throttling; losing
+the contact does not cancel escape mode. Its 50g thermal rating makes a 25g cruise
+generate one-quarter of maximum drive heat.
+
+**EVADE AUTO/OFF** (V) watches received tracks for closing, potentially damaging
+missiles. AUTO is enabled by default. It temporarily substitutes a full lateral
+burn, leaving the existing manual burn, destination, follow or route order intact;
+when the threats clear it resumes that order. A new order issued during evasion
+becomes the order to resume. Interceptor tracks do not trigger this response.
+Heat dumping overrides evasion and keeps the drive off.
+
+Missile accuracy now penalizes crossing velocity and lateral acceleration during
+the final 30 seconds, rather than penalizing every thrust direction equally. Base
+accuracy is raised from 0.9 to 1.0, with ceilings of 95% for LRM and 97% for SRM.
+The paired missile regression runs 64 seeded engagements per weapon with AUTO on
+and off, without ECM or point defense, and verifies materially fewer actual hits
+against the evading ship. These are isolated close-range tests, not scenario-wide
+survival odds.
+
+Missile terminal guidance consumes a finite correction budget, with course-change
+acceleration capped at 20% of the main drive. All offensive hits require a swept
+close pass inside the strike envelope; accuracy rolls cannot rescue a geometric miss.
+SRMs require a resolved target at queue and launch time, and resolve locally only
+within 10,000 km, with a 5,000 km shotgun burst envelope. LRMs can target approximate ellipses or bearings and acquire only
+within twice their 29,979 km strike radius. Approximate launches aim at the fixed
+ellipse center until local acquisition; they never steer using hidden target truth.
+Seeker reports travel back at light speed. Active ship pings now distinguish identity
+(0.1 AU × EF), resolved (1 AU × EF), and approximate (5 AU × max(EF, 1)) returns.
+
+
+### Ship selection and volleys
+
+The deployment dialog chooses your ship and an equal raider before simulation starts.
+Max G is the normal class-rated ceiling, limited by heat and damage. Rotation is
+measured in simulation time for a 180-degree turn; attitude is independent of the
+navigation thruster vector. Hull-mounted spinal fire must wait for alignment.
+
+| Class | Hull | Armor | SRM / LRM magazine | SRM / LRM launchers | Interceptors | Max G | Turn |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| Picket | 500 | 250 | 20 / 0 | 1 / 0 | 2 | 150 | 5s |
+| Frigate | 1000 | 500 | 20 / 10 | 1 / 1 | 40 | 120 | 10s |
+| Destroyer | 2000 | 1000 | 40 / 20 | 2 / 2 | 80 | 100 | 20s |
+| Cruiser | 4000 | 2000 | 40 / 80 | 2 / 4 | 200 | 70 | 35s |
+| Battleship | 8000 | 6000 | 160 / 60 | 4 / 4 | 240 | 50 | 60s |
+
+Pickets have no offensive beam. Battleships add a 120-second spinal mount with
+10 times its main beam energy (3 PJ), a 60 LS envelope (10 times the nominal beam band),
+a broad Gaussian footprint, and a forward 2-degree firing gate. It shares beam
+AUTO/DIRECT/HOLD controls and obeys power, heat dump and beam-system damage.
+Main beam pulses are 75 TJ on frigates, 150 TJ on destroyers and cruisers, and
+300 TJ on battleships. Battleships carry the capacitor capacity and recharge power
+needed to fire their 3 PJ spinal pulse. Large ships scale their thermal and screen capacity; battleships have 12 times
+frigate screen capacity and eight times the heat reservoir.
+
+Each missile button queues a volley. Available launchers fire together, centered
+on the firing bearing with 1 LS separation. Reload is 5s for SRM / 10s for LRM.
+Damaged launcher banks halve volley size, rounded up; reload cadence is unchanged.
+SRM and LRM banks have independent damage states. Queued volleys reserve rounds;
+if damage reduces a queued volley, its unused reservation returns to the magazine.
+
+While an escort is under Follow orders, the transport caps its departure burn at
+75% of that escort's available thrust (50% while more than 2 LS from formation),
+using received friendly telemetry. It retains the normal 25 G cruise / 50 G alerted
+limits, and resumes independent escape when the escort leaves Follow. Follow
+catch-up burns are exempt from the routine navigation heat-reserve throttle;
+actual overheat and damage limits still apply.
+
+Size signature scales with the cube root of class size: battleships are 2×
+frigates at otherwise equal signature factors. Normal heat amplification is
+`1 + heat_fraction` (1.65× at 65% heat), with a further 10× multiplier while dumping.
+Sensor ratings are Picket 80, Frigate 100, Destroyer 125, Cruiser 160, Battleship 200.
+Active/passive ranges scale by rating/100; ECM equals rating, ECCM half rating.
+
+Resolved launchers reveal missile launches immediately. Once a missile is resolved,
+it remains tracked for its live flight; this gameplay exception does not expose its seeker reports.
+
+Point-defence laser batteries scale by class: Picket 1, Frigate 2, Destroyer 4,
+Cruiser 6, Battleship 8. Each laser fires at 2 shots/s with an independent recharge
+clock. Ready lasers distribute shots across locally detected missiles, prioritizing
+the closest threats; surplus lasers concentrate on those targets. Every shot adds
+heat, and heat dumping, thermal limits, and subsystem damage still constrain fire.

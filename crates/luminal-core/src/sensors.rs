@@ -14,7 +14,7 @@ use std::f64::consts::PI;
 #[derive(Clone,Copy,Debug)]
 pub struct EmissivityFactors {
     pub visibility_multiplier:f64,
-    pub thrust_percent:f64, pub screen_percent:f64, pub screen_on:bool,
+    pub thrust_percent:f64, pub heat_multiplier:f64,
     pub size:f64, pub stealth:f64, pub ecm_on:bool,
     pub recent_missiles:bool, pub recent_beams:bool,
 }
@@ -52,19 +52,19 @@ pub fn ship_detection_ew(suite:SensorSuite,effectiveness:[f64;2],active:f64,ef:f
     use DetectionLevel::*;
     let [identity,resolved,approximate,bearing]=detection_ranges(ef);
     if !range.is_finite() || range<0.0 || ef<=0.0 {return None;}
-    let passive=if suite.passive {effectiveness[0].clamp(0.0,1.0)} else {0.0};
-    let ping=if suite.active {active.clamp(0.0,1.0)} else {0.0};
+    let passive=if suite.passive {effectiveness[0].max(0.0)} else {0.0};
+    let ping=if suite.active {active.max(0.0)} else {0.0};
     let locating=passive.max(ping);
     let resolution_factor=resolution_factor.clamp(0.5,1.0);
-    if (locating>0.0 && range<=identity*locating*resolution_factor) || (ping>0.0 && range<=resolved*ping*resolution_factor) {Identity}
-    else if passive>0.0 && range<=resolved*passive*resolution_factor {Resolved}
+    if locating>0.0 && range<=identity*locating*resolution_factor {Identity}
+    else if locating>0.0 && range<=resolved*locating*resolution_factor {Resolved}
     else if (passive>0.0 && range<=approximate*passive) || (ping>0.0 && range<=ping_range(ef)*ping*resolution_factor) {Approximate}
     else if direction_active && suite.direction_finding && effectiveness[1]>0.0 && range<=bearing*effectiveness[1] {Bearing}
     else {None}
 }
-/// Possible unobserved manoeuvre since light left the target. Include boosted drive authority.
+/// Possible unobserved manoeuvre since light left the target. Allow the fastest ship class.
 pub fn movement_radius(age:f64)->f64 {
-    0.5*crate::params::SHIP_MAX_ACCEL_G.value*1.2*G0*age.max(0.0).powi(2)
+    0.5*crate::world::ShipClass::Picket.max_g()*G0*age.max(0.0).powi(2)
 }
 
 /// Approximate ellipse semi-axes, 1–10 light-seconds, growing with range.
@@ -85,11 +85,10 @@ pub fn ship_measurement(level:DetectionLevel,range:f64,bearing:f64,ef:f64)->Meas
     }
 }
 impl EmissivityFactors {
-    pub fn direction_active(self)->bool {self.screen_on || self.thrust_percent>1e-9 || self.recent_missiles || self.recent_beams}
+    pub fn direction_active(self)->bool {self.heat_multiplier>1.1 || self.thrust_percent>1e-9 || self.recent_missiles || self.recent_beams}
     pub fn value(self)->f64 {
         self.visibility_multiplier.max(0.0)*(1.0+self.thrust_percent.clamp(0.0,120.0)/100.0)
-            *(1.0+self.screen_percent.clamp(0.0,100.0)/10.0)
-            *if self.screen_on {2.0} else {1.0}
+            *self.heat_multiplier.max(1.0)
             *(self.size.max(0.0)/10.0)*(1.0-self.stealth.clamp(0.0,100.0)/100.0)
             *if self.ecm_on {1.5} else {1.0}
             *if self.recent_missiles {1.2} else {1.0}
@@ -283,29 +282,29 @@ mod tests {
                 assert_eq!(ship_detection(SensorSuite::FULL,[1.0,1.0],0.0,ef,range*ef*au,true),expected);
             }
         }
-        for (range,expected) in [(0.999,Identity),(1.001,Approximate),(4.999,Approximate),(5.001,Bearing)] {
+        for (range,expected) in [(0.099,Identity),(0.999,Resolved),(1.001,Approximate),(4.999,Approximate),(5.001,Bearing)] {
             assert_eq!(ship_detection(SensorSuite::FULL,[1.0,1.0],1.0,1.0,range*au,true),expected);
         }
         // Typical ECM adds 50% signature but cuts resolution distance by half.
         let ef=REFERENCE_EF*1.5;
-        for (range,expected) in [(0.749,Identity),(0.751,Approximate),(3.749,Approximate),(3.751,Approximate)] {
+        for (range,expected) in [(0.074,Identity),(0.749,Resolved),(0.751,Approximate),(3.749,Approximate),(3.751,Approximate)] {
             assert_eq!(ship_detection_ew(SensorSuite::FULL,[1.0,1.0],1.0,ef,range*au,true,resolution_factor(100.0,50.0)),expected);
         }
     }
     #[test] fn ef_ranges_activity_damage_and_ping_identity() {
         use DetectionLevel::*;
-        let cold=EmissivityFactors {visibility_multiplier:1.0,thrust_percent:0.0,screen_percent:0.0,screen_on:false,size:7.0,stealth:50.0,ecm_on:false,recent_missiles:false,recent_beams:false};
+        let cold=EmissivityFactors {visibility_multiplier:1.0,thrust_percent:0.0,heat_multiplier:1.0,size:7.0,stealth:50.0,ecm_on:false,recent_missiles:false,recent_beams:false};
         assert!((cold.value()-0.35).abs()<1e-12);assert!(!cold.direction_active());
         assert!(!EmissivityFactors {ecm_on:true,..cold}.direction_active());
-        let hot=EmissivityFactors {thrust_percent:100.0,screen_percent:100.0,screen_on:true,ecm_on:true,recent_missiles:true,recent_beams:true,..cold};
-        assert!((hot.value()-41.58).abs()<1e-9);
+        let hot=EmissivityFactors {thrust_percent:100.0,heat_multiplier:11.0,ecm_on:true,recent_missiles:true,recent_beams:true,..cold};
+        assert!((hot.value()-20.79).abs()<1e-9);
         let au=crate::units::AU;
         for (range,expected) in [(0.05,Identity),(0.8,Resolved),(4.0,Approximate),(15.0,Bearing),(21.0,None)] {
             assert_eq!(ship_detection(SensorSuite::FULL,[1.0,1.0],0.0,REFERENCE_EF,range*au,true),expected);
         }
         assert_eq!(ship_detection(SensorSuite::FULL,[1.0,1.0],0.0,REFERENCE_EF,15.0*au,false),None);
         assert_eq!(ship_detection(SensorSuite::FULL,[1.0,0.5],0.0,REFERENCE_EF,11.0*au,true),None);
-        assert_eq!(ship_detection(SensorSuite::FULL,[1.0,1.0],1.0,REFERENCE_EF,0.9*au,false),Identity);
+        assert_eq!(ship_detection(SensorSuite::FULL,[1.0,1.0],1.0,REFERENCE_EF,0.9*au,false),Resolved);
         assert_eq!(ship_detection(SensorSuite::FULL,[0.0,0.0],0.5,REFERENCE_EF,2.6*au,true),None);
         assert_eq!(resolution_factor(100.0,50.0),0.5);
         assert_eq!(resolution_factor(50.0,100.0),1.0);
@@ -325,21 +324,20 @@ mod tests {
         assert!((fit.pos-Vec2::new(1e9+3.0*31.0+2.0*31.0*31.0,155.0)).length()<1e-6);
     }
     #[test]
-    fn platform_signature_adds_baseline_actual_thrust_and_screen_radiation() {
+    fn platform_signature_adds_baseline_actual_thrust_and_shared_heat_radiation() {
         let cold=platform_emission_w(false,1.0,Vec2::ZERO,0.0);
         assert_eq!(platform_emission_w(false,0.5,Vec2::ZERO,0.0),cold*0.5);
         assert_eq!(platform_emission_w(false,2.0,Vec2::ZERO,0.0),cold*2.0);
         let burn=Vec2::new(3.0*G0,4.0*G0);
         assert_eq!(platform_emission_w(false,0.5,burn,0.0),cold*0.5+5.0*SIGNATURE_DRIVE_W_PER_G.value);
         let mut thermal=crate::thermal::Thermal::default();
-        let mut screen=0.0;
-        thermal.advance(60.0,true,&mut screen);
-        assert_eq!(thermal.emission(screen),0.0,"raising an unhit screen adds no ambient heat");
-        screen=crate::params::SCREEN_CAPACITY_J.value*0.5;
-        thermal.captured_j+=screen;
-        assert!(thermal.emission(screen)>0.0,"absorbed hit energy radiates");
-        assert!(platform_emission_w(false,0.5,Vec2::ZERO,thermal.emission(screen))>cold*0.5);
-        assert!(platform_emission_w(false,0.5,burn,thermal.emission(screen))>platform_emission_w(false,0.5,Vec2::ZERO,thermal.emission(screen)));
+        thermal.advance(60.0,true);
+        assert!(thermal.emission()>0.0,"enabled screens add a modest heat load");
+        thermal.absorb(crate::params::SCREEN_CAPACITY_J.value*0.5);
+        thermal.advance(61.0,true);
+        assert!(thermal.emission()>0.0,"absorbed hit energy enters the shared reservoir and radiates");
+        assert!(platform_emission_w(false,0.5,Vec2::ZERO,thermal.emission())>cold*0.5);
+        assert!(platform_emission_w(false,0.5,burn,thermal.emission())>platform_emission_w(false,0.5,Vec2::ZERO,thermal.emission()));
     }
 
     #[test]

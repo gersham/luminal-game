@@ -14,6 +14,10 @@ pub fn hit_probability(relative_speed:f64)->f64 {
     if relative_speed>=INTERCEPTOR_MAX_SPEED_C.value*C {return 0.0;}
     0.60/(1.0+(relative_speed.max(0.0)/(INTERCEPTOR_HALF_SPEED_C.value*C)).powi(4))
 }
+/// Payload affects survivability at impact; unknown contacts use the neutral baseline.
+pub fn hit_probability_against(relative_speed:f64,payload:Option<Payload>)->f64 {
+    hit_probability(relative_speed)*match payload {Some(Payload::Nuclear)=>0.75,Some(Payload::Kinetic)=>1.25,_=>1.0}
+}
 /// Outer kinematic envelope against a zero-relative-velocity target.
 pub fn nominal_range()->f64 {reach(INTERCEPTOR_LIFETIME_S.value).min(INTERCEPTOR_RANGE_LS.value*LIGHT_SECOND)}
 fn reach(t:f64)->f64 {
@@ -114,7 +118,7 @@ impl World {
         body.name=format!("{} interceptor {number}",carrier.name);
         body.kind=BodyKind::Missile; body.controllable=false; body.armed=false;
         body.ship_class=None;
-        body.has_screen=false; body.screen_up=false; body.screen_j=0.0; body.hull_j=0.0;
+        body.has_screen=false; body.screen_up=false; body.hull_j=0.0;
         body.point_defence=None; body.interceptor_battery=None; body.missile=None;
         body.probes=0; body.probe_burn_until=None; body.probe_ping_at=t;
         body.magazine=[0; 2]; body.missile_queued=[0; 2]; body.beam_target=None; body.last_beam=None;
@@ -282,6 +286,13 @@ mod tests {
         assert!(engagement(own,State {pos:Vec2::new(0.27*AU,0.0),vel:Vec2::new(-0.12*C,0.0)}).is_some());
         assert!(engagement(own,State {pos:Vec2::new(LIGHT_SECOND,0.0),vel:Vec2::new(-0.5*C,0.0)}).is_none());
         assert_eq!(hit_probability(0.0),0.60);
+        let mut random=crate::rng::Rng::stream(1701,42);
+        let mut hits=[0,0];
+        for _ in 0..10_000 {for (i,payload) in [Payload::Nuclear,Payload::Kinetic].into_iter().enumerate() {
+            hits[i]+=usize::from(random.uniform()<hit_probability_against(0.0,Some(payload)));
+        }}
+        assert!((4200..4800).contains(&hits[0]) && (7200..7800).contains(&hits[1]));
+        println!("Interceptor kills per 10000: LRM {}, SRM {}",hits[0],hits[1]);
         assert!((hit_probability(0.25*C)-0.30).abs()<1e-12);
         assert!(hit_probability(0.12*C)>0.55);
         assert_eq!(hit_probability(0.5*C),0.0);

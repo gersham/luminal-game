@@ -25,6 +25,28 @@ pub fn transport_intercept_debug()->World {
 
 pub fn transport_intercept_debug_seeded(seed: u64)->World {
     let mut world=transport_intercept_seeded(seed);
+    for id in [BodyId(1),BodyId(2)] {world.reset_platform_history(id);}
+    world.seed_debug_contact(BodyId(1),BodyId(2));
+    world.set_follow(BodyId(1),BodyId(0)).unwrap();
+    world
+}
+
+/// Symmetric combat platforms, configured before either side receives observations.
+pub fn transport_intercept_class(seed:u64,class:crate::world::ShipClass)->World {
+    let mut world=transport_intercept_seeded(seed);
+    for id in [BodyId(1),BodyId(2)] {
+        let b=&mut world.bodies[id.0 as usize];
+        b.controls.ecm_rating=class.sensor_rating();b.controls.eccm_rating=class.sensor_rating()*0.5;b.baseline_emission_factor=0.5;
+        b.ship_class=Some(class);b.name=if id==BodyId(1) {class.name().into()} else {format!("Raider {}",class.name())};
+        b.damage.hull_max=crate::damage::FRIGATE_HULL_HP*class.scale();b.damage.hull=b.damage.hull_max;
+        b.damage.armour_max=500.0*class.protection();b.damage.armour=b.damage.armour_max;
+        b.point_defence.as_mut().unwrap().lasers=class.pd_lasers();
+        b.magazine=class.magazine();b.interceptor_battery.as_mut().unwrap().rounds=class.interceptors();
+        b.thermal.capacity_scale=class.scale();b.thermal.capacitor_multiplier=if class==crate::world::ShipClass::Battleship {2.0} else {1.0};b.thermal.capacitor_j=b.thermal.capacitor_capacity();
+        b.drive_limit=class.max_g()*crate::units::G0;
+        b.beam_auto=class!=crate::world::ShipClass::Picket;
+    }
+    for id in [BodyId(1),BodyId(2)] {world.reset_platform_history(id);}
     world.seed_debug_contact(BodyId(1),BodyId(2));
     world.set_follow(BodyId(1),BodyId(0)).unwrap();
     world
@@ -143,6 +165,7 @@ pub fn transport_intercept_seeded(seed: u64) -> World {
     });
     let destination = world.objective.as_ref().unwrap().center;
     world.bodies[0].ship_class=Some(crate::world::ShipClass::Transport);
+    world.bodies[0].drive_limit=25.0*crate::units::G0;
     world.set_move(BodyId(0), destination).expect("escape destination is navigable");
     world.bodies[0].has_screen=false;
     world.bodies[3].sensors=crate::sensors::SensorSuite::FULL;
@@ -162,11 +185,12 @@ pub fn transport_intercept_seeded(seed: u64) -> World {
     for id in [BodyId(1), BodyId(2)] {
         world.bodies[id.0 as usize].damage.hull=crate::damage::FRIGATE_HULL_HP;
         world.bodies[id.0 as usize].damage.hull_max=crate::damage::FRIGATE_HULL_HP;
+        world.bodies[id.0 as usize].magazine=[20,10];
         world.arm_beams(id).unwrap();
     }
     for b in &mut world.bodies {
         b.interceptor_battery=Some(crate::world::interceptor::Battery {
-            rounds:if b.kind==BodyKind::Station {20} else {30},launched:0,ready_at:0.0,status:"Ready"});
+            rounds:if b.kind==BodyKind::Station {20} else if b.magazine.iter().any(|n|*n>0) {40} else {30},launched:0,ready_at:0.0,status:"Ready"});
     }
     world
 }
@@ -183,18 +207,22 @@ mod tests {
     }
 
     #[test]
-    fn transport_boost_is_limited_to_thirty_g() {
+    fn transport_thrust_is_limited_to_fifty_g() {
         let mut world=transport_intercept();
-        world.bodies[0].controls.boost_active=true;
-        assert!((world.bodies[0].max_accel()/G0-30.0).abs()<1e-9);
+        assert!((world.bodies[0].max_accel()/G0-25.0).abs()<1e-9);
+        world.bodies[0].controls.transport_alerted=true;
+        assert!((world.bodies[0].max_accel()/G0-50.0).abs()<1e-9);
     }
 
     #[test]
-    fn transport_has_quarter_warship_acceleration_from_its_first_order() {
+    fn transport_starts_at_25g_with_a_50g_ceiling() {
         let world=transport_intercept();
         let transport=&world.bodies[0];
         let frigate=&world.bodies[1];
-        assert_eq!(transport.max_accel(),frigate.max_accel()*0.25);
+        assert!((transport.max_accel()/G0-25.0).abs()<1e-9);
+        assert!((transport.heat_rated_accel()/G0-50.0).abs()<1e-9);
+        assert!(frigate.max_accel()>transport.max_accel());
+        assert!((transport.drive_limit/G0-25.0).abs()<1e-9);
         assert!(transport.trajectory.last().thrust.length()<=transport.max_accel()+1e-9);
         assert_eq!(world.bodies[2].max_accel(),frigate.max_accel());
     }
@@ -270,7 +298,7 @@ mod tests {
         let mut world=transport_intercept();
         for (i,b) in world.bodies.iter().enumerate() {
             assert_eq!(b.point_defence.unwrap().rate_hz,match i {0=>0.5,1|2=>2.0,_=>1.0},"frigates fire twice per second; transport and station retain their rates");
-            assert_eq!(b.interceptor_battery.unwrap().rounds,if b.kind==BodyKind::Station {20} else {30});
+            assert_eq!(b.interceptor_battery.unwrap().rounds,if b.kind==BodyKind::Station {20} else if b.magazine.iter().any(|n|*n>0) {40} else {30});
         }
         for id in [BodyId(0),BodyId(3)] {
             assert!(!world.bodies[id.0 as usize].has_screen);
@@ -284,7 +312,7 @@ mod tests {
             assert_eq!(b.damage.hull_max,crate::damage::FRIGATE_HULL_HP);
             assert_eq!(b.damage.armour,100.0,"hull tuning must not increase armour");
             assert_eq!(b.thermal.field,1.0);
-            assert_eq!(b.screen_j,0.0,"raised does not mean full of absorbed damage");
+            assert_eq!(b.screen_available(),1.0,"initial shields have full absorption capacity");
         }
     }
 

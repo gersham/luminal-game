@@ -3,12 +3,13 @@ use super::*;
 use crate::session::Command;
 use std::collections::{BTreeSet, VecDeque};
 use std::io::Write;
+use std::sync::Arc;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum CombatKind { NuclearBurst, BeamPulse, PointDefence, Impact, Destroyed, Expended, MissileHit, MissileMiss }
+pub enum CombatKind { NuclearBurst, BeamPulse, PointDefence, Impact, Destroyed, Expended, MissileHit, MissileMiss, SpinalPulse }
 impl CombatKind {
     pub fn label(self) -> &'static str { match self {
-        Self::NuclearBurst => "Nuclear burst", Self::BeamPulse => "Beam pulse",
+        Self::SpinalPulse => "Spinal pulse", Self::NuclearBurst => "Nuclear burst", Self::BeamPulse => "Beam pulse",
         Self::Impact => "Impact flash", Self::Destroyed => "Loss reported", Self::Expended => "Missile expended / pass complete",
         Self::PointDefence => "Point-defence laser",
         Self::MissileHit => "Missile hit", Self::MissileMiss => "Missile miss",
@@ -32,6 +33,7 @@ pub struct CombatEvent {
     /// Own identity only; foreign events never reveal body IDs.
     pub own_body: Option<BodyId>,
 }
+#[derive(Clone)]
 struct Flash { target:Option<BodyId>, velocity:Option<Vec2>, front: Front, kind: CombatKind, body: Option<BodyId>, owner: Option<FactionId>, pending: Vec<FactionId>, aim: Option<Vec2>, damage:Option<String>, impact_strength:f32 }
 
 pub(super) fn impact_strength(before:&crate::damage::Damage,after:&crate::damage::Damage)->f32 {
@@ -72,8 +74,8 @@ pub(super) struct Refinements {
     pub received: BTreeMap<FactionId, Vec<CombatEvent>>,
     pub truth_events: Vec<CombatEvent>,
     pub retired_contacts: BTreeSet<(FactionId, ContactId)>,
-    pictures: BTreeMap<FactionId, VecDeque<(f64, Perception)>>,
-    cached_pictures: BTreeMap<BodyId, Perception>,
+    pictures: BTreeMap<FactionId, VecDeque<(f64, Arc<Perception>)>>,
+    cached_pictures: BTreeMap<BodyId, Arc<Perception>>,
     telemetry: BTreeMap<BodyId, VecDeque<(f64, Body)>>,
     damage_reports:BTreeMap<(FactionId,ContactId),crate::damage::Report>,
     emission: BTreeMap<BodyId, VecDeque<(f64, f64)>>,
@@ -123,6 +125,67 @@ impl World {
         self.refinement.telemetry.entry(id).or_default().push_back((self.time,self.bodies[id.0 as usize].clone()));
         let b=&self.bodies[id.0 as usize];
         self.debug_note("LAUNCH",format!("id={id:?} name={:?} faction={:?} missile={:?} interceptor={:?}",b.name,b.faction,b.missile,b.interceptor));
+        // Gameplay exception: watching a resolved launcher reveals its launch now.
+        if let Some(launcher)=self.bodies[id.0 as usize].missile.map(|m|m.launcher) {
+            let viewers:Vec<_>=self.perceptions.keys().copied().filter(|f| {
+                *f!=self.bodies[id.0 as usize].faction && self.association.get(&(*f,launcher))
+                    .and_then(|c|self.perceptions.get(f)?.contacts.get(c))
+                    .is_some_and(|c|c.detection(self.time)>=sensors::DetectionLevel::Resolved)
+            }).collect();
+            for f in viewers {self.refresh_missile_contact(f,id);}
+        }
+    }
+
+    /// Once acquired, a missile stays tracked throughout its live flight.
+    /// This explicit gameplay exception does not reveal its target or seeker data.
+    pub(super) fn refresh_resolved_missiles(&mut self) {
+        let known:Vec<_>=self.association.iter().filter_map(|(&(f,id),&c)| {
+            (self.bodies[id.0 as usize].kind==BodyKind::Missile && self.bodies[id.0 as usize].alive_at(self.time)
+                && self.perceptions.get(&f)?.contacts.get(&c)?.resolved).then_some((f,id))
+        }).collect();
+        for (f,id) in known {self.refresh_missile_contact(f,id);}
+    }
+    fn refresh_missile_contact(&mut self,f:FactionId,id:BodyId) {
+        let Some(sensor)=self.decider(f,self.time) else {return;};
+        let Some(state)=self.state(id,self.time) else {return;};
+        let Some(observer)=self.state(sensor,self.time) else {return;};
+        let contact=self.contact_id(f,id);let rel=state.pos-observer.pos;
+        let obs=Observation {contact,sensor,origin:observer.pos,emitted_at:self.time,sensor_received_at:self.time,
+            decider_received_at:self.time,source:Source::Emission,detection:sensors::DetectionLevel::Resolved,snr:1e12,
+            measurement:Measurement::BearingRange {bearing:bearing_of(rel),range:rel.length(),sigma_range:0.1,sigma_bearing:1e-10}};
+        let thrust=self.bodies[id.0 as usize].trajectory.last().thrust;
+        if let Some(p)=self.perceptions.get_mut(&f) {
+            let new=!p.contacts.contains_key(&contact);
+            p.ingest(obs,&self.system);
+            p.contacts.get_mut(&contact).unwrap().retain_missile_fix(obs,state,thrust);
+            if new {self.alerts.push(Alert {t:self.time,faction:Some(f),kind:AlertKind::NewContact(contact)});}
+        }
+    }
+
+    /// Acquired missiles use continuous gameplay tracking, including their end.
+    pub(super) fn retire_tracked_missile(&mut self,id:BodyId,t:f64) {
+        if self.bodies[id.0 as usize].kind!=BodyKind::Missile {return;}
+        let viewers:Vec<_>=self.perceptions.keys().copied().filter(|f|
+            *f==self.bodies[id.0 as usize].faction || self.association.get(&(*f,id))
+                .and_then(|c|self.perceptions.get(f)?.contacts.get(c)).is_some_and(|c|c.resolved)).collect();
+        for f in viewers {
+            if let Some(c)=self.association.get(&(f,id)) {self.refinement.retired_contacts.insert((f,*c));}
+            let flashes:Vec<_>=self.refinement.flashes.iter().filter(|flash|flash.body==Some(id) && flash.front.t_emit==t
+                && matches!(flash.kind,CombatKind::Destroyed|CombatKind::Expended|CombatKind::MissileHit|CombatKind::MissileMiss|CombatKind::NuclearBurst))
+                .cloned().collect();
+            for flash in flashes {
+                let own=self.bodies[id.0 as usize].faction==f;
+                let target=flash.target.and_then(|id|if self.bodies[id.0 as usize].faction==f {Some(InterceptTarget::Own(id))}
+                    else {self.association.get(&(f,id)).map(|c|InterceptTarget::Contact(*c))});
+                self.refinement.received.entry(f).or_default().push(CombatEvent {target,velocity:flash.velocity,subject_kind:Some(BodyKind::Missile),
+                    impact_strength:0.0,damage:None,contact:if own {None} else {self.association.get(&(f,id)).copied()},
+                    own_body:own.then_some(id),pos:Some(flash.front.origin),aim:flash.aim,kind:flash.kind,emitted_at:t,received_at:self.time});
+            }
+            for flash in &mut self.refinement.flashes {if flash.body==Some(id) && flash.front.t_emit==t
+                && matches!(flash.kind,CombatKind::Destroyed|CombatKind::Expended|CombatKind::MissileHit|CombatKind::MissileMiss|CombatKind::NuclearBurst) {
+                flash.pending.retain(|viewer|*viewer!=f);
+            }}
+        }
     }
 
     pub fn contact_retired(&self, faction: FactionId, contact: ContactId) -> bool {
@@ -136,6 +199,7 @@ impl World {
         let b=&self.bodies[id.0 as usize];
         if b.kind!=BodyKind::Missile {return false;}
         let Some(end)=b.trajectory.end() else {return false;};
+        if end<=self.time && (b.faction==faction || self.association.get(&(faction,id)).is_some_and(|c|self.refinement.retired_contacts.contains(&(faction,*c)))) {return true;}
         let Some(receiver)=self.decider(faction,self.time) else {return false;};
         let Some(segment)=b.trajectory.segments().iter().rev().find(|s|s.t0<=end) else {return false;};
         Front {origin:segment.state_at(end).pos,t_emit:end}
@@ -161,7 +225,7 @@ impl World {
         probe.baseline_emission_factor=1.0;
         probe.probes=0; probe.magazine=[0; 2]; probe.missile_queued=[0; 2]; probe.missile=None;
         probe.autopilot=None; probe.beam_target=None; probe.last_beam=None;
-        probe.screen_up=false; probe.screen_j=0.0; probe.hull_j=0.0;
+        probe.screen_up=false; probe.hull_j=0.0;
         probe.thermal=crate::thermal::Thermal {capacitor_j:0.0,last_t:t,..Default::default()};
         probe.commanded=direction.normalized()*(PROBE_MAX_ACCEL_G.value*crate::units::G0);
         probe.trajectory=Trajectory::new(t,state);
@@ -241,6 +305,7 @@ impl World {
             Command::FireBeam { body, target } => self.fire_beam(body, target),
             Command::EngageBeam { body, target } => self.engage_beam(body, target),
             Command::ArmBeams { body } => self.arm_beams(body),
+            Command::SetHeatDump {body,enabled}=>self.set_heat_dump(body,enabled),
             Command::SetScreen { body, up } => self.set_screen(body, up),
             Command::SetSystemMode {body,system,mode}=>self.set_system_mode(body,system,mode),
             Command::Ping { body } => if self.ping(body) { Ok(()) } else { Err(OrderError::Destroyed) },
@@ -259,6 +324,12 @@ impl World {
         if let Some(flash)=self.refinement.flashes.last_mut() {flash.target=Some(target);}
         if let Some(event)=self.refinement.truth_events.last_mut() {event.target=Some(InterceptTarget::Own(target));}
     }
+    pub(super) fn record_interception(&mut self,id:BodyId,target:BodyId,t:f64,kind:CombatKind) {
+        let Some(state)=self.state(if kind==CombatKind::MissileHit {target} else {id},t) else {return;};
+        self.record_beam(t,state.pos,kind,id,target,self.bodies[id.0 as usize].faction);
+        if let Some(flash)=self.refinement.flashes.last_mut() {flash.velocity=Some(state.vel);}
+        if let Some(event)=self.refinement.truth_events.last_mut() {event.velocity=Some(state.vel);}
+    }
     pub(super) fn record_combat(&mut self, t: f64, pos: Vec2, kind: CombatKind, body: Option<BodyId>, owner: Option<FactionId>) {
         self.record_combat_damage(t,pos,kind,body,owner,None);
     }
@@ -272,7 +343,7 @@ impl World {
             let b=&self.bodies[id.0 as usize];
             match kind {
                 CombatKind::PointDefence=>b.point_defence.and_then(|pd|pd.last_shot),
-                CombatKind::BeamPulse=>b.last_beam,
+                CombatKind::BeamPulse|CombatKind::SpinalPulse=>b.last_beam,
                 _=>None,
             }.filter(|(fired,_,_)|(*fired-t).abs()<1e-6).map(|(_,_,aim)|aim)
         });
@@ -337,7 +408,7 @@ impl World {
         Some(CombatEvent {target,velocity:if own {flash.velocity} else {None},subject_kind,impact_strength:flash.impact_strength,damage:if own {flash.damage.clone()} else {None},contact,emitted_at:flash.front.t_emit,received_at:arrival,pos,kind:flash.kind,
             // A visible beam discharge carries its beam direction, not the
             // target's identity or true position. Anchor it at the observed flash.
-            aim:if own {flash.aim} else if matches!(flash.kind,CombatKind::BeamPulse|CombatKind::PointDefence) {
+            aim:if own {flash.aim} else if matches!(flash.kind,CombatKind::BeamPulse|CombatKind::SpinalPulse|CombatKind::PointDefence) {
                 pos.zip(flash.aim).map(|(observed,aim)|observed+(aim-flash.front.origin))
             } else {None},
             own_body:if own {flash.body} else {None}})
@@ -371,12 +442,25 @@ impl World {
     }
     /// Delivered fire-control picture; never the current remote flagship picture.
     pub fn received_picture(&self, id: BodyId) -> Option<&Perception> {
-        self.uplink_picture(id).or_else(|| self.refinement.cached_pictures.get(&id))
+        self.uplink_picture(id).or_else(|| self.refinement.cached_pictures.get(&id).map(AsRef::as_ref))
+    }
+    /// Timestamp of the sending decider's picture currently reaching a platform.
+    pub(super) fn received_picture_epoch(&self,id:BodyId)->Option<f64> {
+        let b=self.body(id)?;let source=self.decider(b.faction,self.time)?;
+        if source==id {return Some(self.time);}
+        let me=self.state(id,self.time)?;
+        retarded_state(&self.bodies[source.0 as usize].trajectory,me.pos,self.time).map(|(t,_)|t)
     }
     fn uplink_picture(&self, id: BodyId) -> Option<&Perception> {
         let b = self.body(id)?;
         let source = self.decider(b.faction, self.time)?;
         if source == id { return self.perceptions.get(&b.faction); }
+        self.uplink_snapshot(id).map(AsRef::as_ref)
+    }
+    fn uplink_snapshot(&self,id:BodyId)->Option<&Arc<Perception>> {
+        let b=self.body(id)?;
+        let source=self.decider(b.faction,self.time)?;
+        if source==id {return None;}
         let me = b.trajectory.state_at(self.time)?;
         let (emitted, src) = retarded_state(&self.bodies[source.0 as usize].trajectory, me.pos, self.time)?;
         if self.system.occluder(src.pos, emitted, me.pos, self.time).is_some() { return None; }
@@ -399,6 +483,11 @@ impl World {
     }
     pub(super) fn historical_ef(&self,id:BodyId,t:f64)->f64 {
         self.historical_signature(id,t).map_or(0.0,|f|f.value())
+    }
+    pub(crate) fn reset_platform_history(&mut self,id:BodyId) {
+        self.refinement.telemetry.remove(&id);
+        self.snapshot_platform(id,self.bodies[id.0 as usize].trajectory.start());
+        self.snapshot_platform(id,self.time);
     }
     pub(super) fn snapshot_platform(&mut self,id:BodyId,t:f64) {
         let b=&self.bodies[id.0 as usize];
@@ -429,11 +518,12 @@ impl World {
         let Some(id)=self.body_for_contact(f,obs.contact) else {return};
         let Some((at,b))=self.refinement.telemetry.get(&id).and_then(|h|h.iter().rev().find(|(at,_)|*at<=obs.emitted_at)) else {return};
         if !matches!(b.kind,BodyKind::Ship|BodyKind::Station) {return;}
-        let report=crate::damage::Report {damage:b.damage,installed:b.installed_systems(),observed_at:*at,screen_heat:b.screen_j};
+        let report=crate::damage::Report {damage:b.damage,installed:b.installed_systems(),observed_at:*at,screen_available:b.screen_available()};
         let key=(f,obs.contact);
         if self.refinement.damage_reports.get(&key).is_none_or(|old|old.observed_at<report.observed_at) {self.refinement.damage_reports.insert(key,report);}
     }
     pub(super) fn tactical_frame(&mut self) {
+        self.refresh_resolved_missiles();
         let t = self.time;
         for i in 0..self.bodies.len() {self.update_system_controls(BodyId(i as u32));}
         let lo = self.refinement.last_t;
@@ -446,6 +536,9 @@ impl World {
                 if let Some(system)=b.damage.repair(t-lo,&mut self.rng) {repairs.push((BodyId(i as u32),system));}
                 b.hull_j=(b.damage.hull_max-b.damage.hull)*crate::damage::JOULES_PER_HP;
             }
+        }
+        for i in 0..self.bodies.len() {
+            if self.bodies[i].kind==BodyKind::Ship && self.bodies[i].alive_at(t) && self.bodies[i].thermal.heat_fraction()>0.5 {self.guide(BodyId(i as u32));}
         }
         for (id,system) in repairs {self.debug_note("REPAIR",format!("platform={id:?} system={system:?}"));self.guide(id);}
         for i in 0..self.bodies.len() {
@@ -489,9 +582,10 @@ impl World {
             }
         }
         if (t / SENSOR_FRAME_S.value).fract().abs() < 1e-8 {
+            self.refinement.cached_pictures.retain(|id,_|self.bodies[id.0 as usize].alive_at(t));
             for i in 0..self.bodies.len() {
                 let id=BodyId(i as u32);
-                if let Some(p)=self.uplink_picture(id).cloned() { self.refinement.cached_pictures.insert(id,p); }
+                if self.bodies[i].alive_at(t) && let Some(p)=self.uplink_snapshot(id).cloned() { self.refinement.cached_pictures.insert(id,p); }
             }
             for (&f,p) in &self.perceptions {
                 for (&c,contact) in &p.contacts {
@@ -503,8 +597,12 @@ impl World {
             let cutoff = t - MAX_FRONT_RADIUS_KM/crate::units::C - SENSOR_FRAME_S.value;
             for (&f, p) in &self.perceptions {
                 let h = self.refinement.pictures.entry(f).or_default();
-                let mut snapshot = p.clone(); snapshot.log.clear();
-                h.push_back((t, snapshot));
+                // Historical pictures remain immutable and shared by recipients.
+                // A known retired round cannot become a firing solution again.
+                let snapshot=Perception {faction:f,contacts:p.contacts.iter()
+                    .filter(|(c,_)|!self.refinement.retired_contacts.contains(&(f,**c)))
+                    .map(|(&c,contact)|(c,contact.clone())).collect(),log:VecDeque::new()};
+                h.push_back((t, Arc::new(snapshot)));
                 while h.front().is_some_and(|(at,_)| *at < cutoff) { h.pop_front(); }
             }
             for (i,b) in self.bodies.iter().enumerate() {
@@ -516,7 +614,7 @@ impl World {
                     h.push_back((t,snapshot));
                     while h.front().is_some_and(|(at,_)| *at < cutoff) { h.pop_front(); }
                     let h = self.refinement.emission.entry(BodyId(i as u32)).or_default();
-                    h.push_back((t,b.thermal.emission(b.screen_j)));
+                    h.push_back((t,b.thermal.emission()));
                     while h.front().is_some_and(|(at,_)| *at < cutoff) { h.pop_front(); }
                 }
             }
@@ -529,6 +627,25 @@ mod tests {
     use super::*;
     use crate::celestial::{Celestial, CelestialKind, Orbit};
     use crate::units::{LIGHT_SECOND, G0};
+    #[test]
+    fn delivered_pictures_share_storage_and_new_snapshots_omit_retired_contacts() {
+        let mut w=fleet();
+        w.bodies.push(w.bodies[1].clone());
+        w.time=100.0;w.tactical_frame();
+        w.time=120.0;w.tactical_frame();
+        let a=&w.refinement.cached_pictures[&BodyId(1)];
+        let b=&w.refinement.cached_pictures[&BodyId(2)];
+        assert!(Arc::ptr_eq(a,b),"recipients of one picture must not copy it per missile");
+
+        let (mut w,c)=super::super::tests::beam_trial();
+        w.tactical_frame();
+        let old=w.refinement.pictures[&FactionId(0)].back().unwrap().1.clone();
+        assert!(old.contacts.contains_key(&c));
+        w.refinement.retired_contacts.insert((FactionId(0),c));
+        w.time=10.0;w.tactical_frame();
+        assert!(!w.refinement.pictures[&FactionId(0)].back().unwrap().1.contacts.contains_key(&c));
+        assert!(old.contacts.contains_key(&c),"retirement must not rewrite a picture already in flight");
+    }
     fn fleet() -> World {
         let system = System { bodies: vec![Celestial { name: "Star".into(),kind: CelestialKind::Star,
             gm: 1.0, radius: 1.0, orbit: Orbit::Fixed(Vec2::ZERO) }] };
@@ -547,19 +664,19 @@ mod tests {
             emitted_at:0.0,sensor_received_at:10.0,decider_received_at:10.0,
             measurement:Measurement::BearingRange {bearing:0.0,range:10.0*LIGHT_SECOND,sigma_range:1.0,sigma_bearing:1e-5},snr:1e6,source:Source::Echo};
         w.bodies[1].damage.systems[crate::damage::System::Passive as usize]=crate::damage::Condition::Destroyed;
-        w.bodies[1].screen_j=SCREEN_CAPACITY_J.value*0.5;
+        w.bodies[1].screen_up=true;w.bodies[1].controls.screens=controls::Mode::On;w.bodies[1].thermal.field=0.5;
         w.time=5.0;w.observe_damage(&obs);
         assert!(w.known_damage(FactionId(0),c).is_none());
         w.time=10.0;w.observe_damage(&obs);
         assert_eq!(w.known_damage(FactionId(0),c).unwrap().damage.state(crate::damage::System::Passive),crate::damage::Condition::Intact);
-        assert_eq!(w.known_damage(FactionId(0),c).unwrap().screen_heat,0.0,"no live heat leak into an old echo");
+        assert_eq!(w.known_damage(FactionId(0),c).unwrap().screen_available,0.0,"no live shield state leaks into an old echo");
         w.tactical_frame();
         obs.emitted_at=10.0;obs.sensor_received_at=20.0;obs.decider_received_at=30.0;
         w.time=20.0;w.observe_damage(&obs);
         assert_eq!(w.known_damage(FactionId(0),c).unwrap().observed_at,0.0);
         w.time=30.0;w.observe_damage(&obs);
         assert_eq!(w.known_damage(FactionId(0),c).unwrap().damage.state(crate::damage::System::Passive),crate::damage::Condition::Destroyed);
-        assert!(w.known_damage(FactionId(0),c).unwrap().screen_heat>0.0);
+        assert!(w.known_damage(FactionId(0),c).unwrap().screen_available>0.0);
     }
     #[test]
     fn fresh_ping_replaces_its_previous_indication_without_duplicates() {
@@ -613,7 +730,7 @@ mod tests {
     fn cancellation_invalidates_events_and_refunds_reservations_only() {
         let mut w = fleet();
         w.bodies[0].missile_queued = [2,3];
-        w.scheduler.schedule(2.0,Event::QueuedLaunch(BodyId(0),ContactId(999),Payload::Kinetic,0));
+        w.scheduler.schedule(2.0,Event::QueuedLaunch(BodyId(0),ContactId(999),Payload::Kinetic,0,1));
         w.cancel_launches(BodyId(0)).unwrap();
         w.advance_to(3.0);
         assert_eq!(w.bodies[0].missile_queued,[0; 2]);

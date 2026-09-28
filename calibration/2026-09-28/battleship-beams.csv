@@ -1,0 +1,4 @@
+class,seed,depth,time,winner,srm_launched,lrm_launched,srm_hits,lrm_hits,srm_hp,lrm_hp,srm_crit,lrm_crit,beam_hits,beam_hp,beam_finish,reached_beams,hull_a,hull_b,interceptors_used,interceptor_kills,pd_kills,loss_reason
+Battleship,2000,240,1480,0,0,0,0,0,-0,-0,0,0,434,22612.085620091544,true,true,0.4947363154109178,0,0,0,0,hull
+Battleship,2001,240,1480,0,0,0,0,0,-0,-0,0,0,469,23660.214575275273,true,true,0.4292367005297856,0,0,0,0,hull
+Battleship,2002,240,1360,1,0,0,0,0,-0,-0,0,0,500,28316.414647531095,true,true,0,0.0004317963926638299,0,0,0,hull

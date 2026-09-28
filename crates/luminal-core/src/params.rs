@@ -103,19 +103,12 @@ pub const MISSILE_MASS_KG: Param = Param {
 
 pub const SCREEN_BUILD_TIME_S: Param = Param {
     key: "screen.build_time",
-    value: 60.0,
+    value: 3000.0,
     unit: "s",
     commitment: Placeholder,
-    note: "Illustrative time to establish a screen (§10).",
+    note: "Fifty minutes from empty: 2 percentage points of field charge per minute.",
 };
 
-pub const SCREEN_COOL_SHUTDOWN_S: Param = Param {
-    key: "screen.cool_shutdown_time",
-    value: 60.0,
-    unit: "s",
-    commitment: Placeholder,
-    note: "A discharged screen takes sixty seconds to lower. Stored absorption heat blocks shutdown.",
-};
 
 pub const SENSOR_FRAME_S: Param = Param {
     key: "sensor.frame_period",
@@ -310,7 +303,7 @@ pub const MAGAZINE_CRUISER: Param = Param {
     value: 20.0,
     unit: "missiles/type",
     commitment: Established,
-    note: "Raider carries twenty SRMs and twenty LRMs.",
+    note: "Default scenario raider starts with twenty SRMs and ten LRMs; class presets override both.",
 };
 
 pub const MAGAZINE_FRIGATE: Param = Param {
@@ -318,12 +311,12 @@ pub const MAGAZINE_FRIGATE: Param = Param {
     value: 20.0,
     unit: "missiles/type",
     commitment: Established,
-    note: "Frigate carries twenty SRMs and twenty LRMs. Transport carries none.",
+    note: "Frigate carries twenty SRMs and ten LRMs. Transport carries none.",
 };
 
 pub const MISSILE_LAUNCH_INTERVAL_S: Param = Param {
-    key: "missile.launch_interval", value: 60.0, unit: "s", commitment: Established,
-    note: "LRM launcher fires once per simulation minute, independently of SRMs.",
+    key: "missile.launch_interval", value: 10.0, unit: "s", commitment: Established,
+    note: "LRM launcher fires every ten seconds: 1 PJ per round matches the SRM nominal damage rate.",
 };
 pub const SRM_LAUNCH_INTERVAL_S:Param=Param {key:"missile.srm_launch_interval",value:5.0,unit:"s",commitment:Established,note:"Independent SRM launcher fires once per five simulation seconds."};
 
@@ -361,10 +354,10 @@ pub const KINETIC_SHOT_MASS_KG: Param = Param {
 
 pub const KINETIC_PATTERN_KM: Param = Param {
     key: "payload.kinetic_pattern",
-    value: 1.0,
+    value: 5000.0,
     unit: "km",
     commitment: Placeholder,
-    note: "Radius of the shot pattern: passing the ship within this is a hit. The 50% at 0.01 AU balance target is not yet calibrated.",
+    note: "SRM shotgun proximity-burst envelope; local resolution begins at twice this distance, followed by the terminal accuracy roll.",
 };
 
 pub const MISSILE_NAV_DRIFT: Param = Param {
@@ -388,7 +381,7 @@ pub const NUCLEAR_ENERGY_J: Param = Param {
     value: 1.0e15,
     unit: "J",
     commitment: Placeholder,
-    note: "1 PJ on a successful probabilistic LRM proximity strike, half an SRM direct hit, before screen coupling.",
+    note: "1 PJ from an LRM nuclear-pumped laser strike, before screen absorption.",
 };
 
 
@@ -445,8 +438,8 @@ pub const ALL: &[Param] = &[
     INTERCEPTOR_HALF_SPEED_C, INTERCEPTOR_MAX_SPEED_C,
     TRANSPORT_EMISSION_FACTOR, FRIGATE_EMISSION_FACTOR, STATION_EMISSION_FACTOR,
     TRACK_STALE_S, TRACK_LOST_S, TRACK_VELOCITY_SIGMA, BEAM_CAPACITOR_J, REACTOR_W,
-    BEAM_EFFICIENCY, BEAM_HEAT_LIMIT_J, HULL_COOLING_S, SCREEN_HEAT_CAPACITY,
-    SCREEN_RADIATION_COEFF, SCREEN_MAX_EMISSIVITY_FACTOR, SCREEN_GLARE_W, TACTICAL_FRAME_S, BOT_PING_S, BOT_SALVO_S,
+    BEAM_EFFICIENCY, BEAM_HEAT_LIMIT_J, HULL_COOLING_S,
+      SCREEN_GLARE_W, TACTICAL_FRAME_S, BOT_PING_S, BOT_SALVO_S,
     SHIP_BEAM_ENERGY_J,
     SHIP_BEAM_AUTO_RANGE_LS,
     SHIP_BEAM_MIN_EXPECTED_J,
@@ -459,7 +452,7 @@ pub const ALL: &[Param] = &[
     MISSILE_MAX_ACCEL_G,
     MISSILE_MASS_KG,
     SCREEN_BUILD_TIME_S,
-    SCREEN_COOL_SHUTDOWN_S,
+
     SENSOR_FRAME_S,
     SIGNATURE_COLD_W,
     SIGNATURE_DRIVE_W_PER_G,
@@ -525,11 +518,8 @@ pub const TRACK_VELOCITY_SIGMA: Param = Param { key: "track.velocity_sigma", val
 pub const BEAM_CAPACITOR_J: Param = Param { key: "beam.capacitor", value: 4.5e14, unit: "J", commitment: Placeholder, note: "Stored reactor energy; beam input includes conversion losses." };
 pub const REACTOR_W: Param = Param { key: "beam.reactor", value: 1.5e13, unit: "W", commitment: Placeholder, note: "Power allocated to recharging the beam capacitor." };
 pub const BEAM_EFFICIENCY: Param = Param { key: "beam.efficiency", value: 0.5, unit: "fraction", commitment: Placeholder, note: "Remaining beam input becomes ship heat." };
-pub const BEAM_HEAT_LIMIT_J: Param = Param { key: "beam.heat_limit", value: 3e14, unit: "J", commitment: Placeholder, note: "Hold fire before exceeding thermal storage limit." };
-pub const HULL_COOLING_S: Param = Param { key: "thermal.cooling", value: 60.0, unit: "s", commitment: Placeholder, note: "Conventional thermal reservoir exponential cooling time; accelerated with beam cadence, independent of screen cooling." };
-pub const SCREEN_HEAT_CAPACITY: Param = Param { key: "screen.heat_capacity", value: 1e11, unit: "J/K", commitment: Placeholder, note: "Constant field heat capacity: rated capacity is 4,500 K. Stored energy is never discarded on shutdown." };
-pub const SCREEN_RADIATION_COEFF: Param = Param { key: "screen.radiation_coefficient", value: 0.000001, unit: "W/K^4", commitment: Placeholder, note: "Peak radiation about 41 GW: sustained close-range fire saturates screens, while cooling makes disengagement useful." };
-pub const SCREEN_MAX_EMISSIVITY_FACTOR: Param=Param {key:"screen.max_emissivity",value:100.0,unit:"x",commitment:Established,note:"Screen emissivity rises with stored heat from 1x cold to 100x at rated capacity; the same factor governs emission and energy loss."};
+pub const BEAM_HEAT_LIMIT_J: Param = Param { key: "beam.heat_limit", value: 1.5e17, unit: "J", commitment: Placeholder, note: "Hold fire before exceeding thermal storage limit." };
+pub const HULL_COOLING_S: Param = Param { key: "thermal.cooling", value: 7200.0, unit: "s", commitment: Placeholder, note: "Shared ship heat reservoir passive cooling time constant." };
 pub const TACTICAL_FRAME_S: Param = Param { key: "tactical.frame", value: 1.0, unit: "s", commitment: Placeholder, note: "Command delivery, telemetry and thermal update integration interval." };
 pub const BOT_PING_S: Param = Param { key: "doctrine.ping_interval", value: 300.0, unit: "s", commitment: Placeholder, note: "Opponent pulse interval while seeking a firing solution." };
 pub const BOT_SALVO_S: Param = Param { key: "doctrine.salvo_interval", value: 120.0, unit: "s", commitment: Placeholder, note: "Opponent interval between mixed-payload salvos." };
@@ -556,6 +546,15 @@ pub const SHIP_BEAM_POINTING_RAD: Param = Param {
     key: "ship_beam.pointing_sigma", value: 5e-8, unit: "rad", commitment: Placeholder,
     note: "Ship emitter pointing jitter, added to aim from the faction's delayed track.",
 };
+
+// Shared heat budget: a cold ship can sustain its rated maximum for one hour.
+pub const SHIP_HEAT_LIMIT_J: f64 = 1e17;
+pub const HEAT_BALANCED_THRUST: f64 = 0.5;
+pub const SCREEN_IDLE_HEAT_FRACTION: f64 = 0.01;
+pub const HEAT_FULL_BURN_S: f64 = 3600.0;
+pub const HEAT_DUMP_RATE: f64 = 5.0;
+pub const HEAT_DUMP_SIGNATURE: f64 = 10.0;
+pub const PD_WASTE_HEAT_J: f64 = 5e12;
 
 #[cfg(test)]
 mod tests {

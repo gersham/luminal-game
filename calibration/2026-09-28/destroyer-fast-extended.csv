@@ -1,0 +1,2 @@
+class,seed,depth,time,winner,srm_launched,lrm_launched,srm_hits,lrm_hits,srm_hp,lrm_hp,srm_crit,lrm_crit,beam_hits,beam_hp,beam_finish,reached_beams,hull_a,hull_b,interceptors_used,interceptor_kills,pd_kills,loss_reason
+Destroyer,4002,80,30415,0,80,40,16,1,3159.709401720993,125,5,1,1236,3055.785617444953,true,true,0.6492171222245048,0,160,71,1,hull

@@ -5,13 +5,14 @@ use rodio::{OutputStream,OutputStreamBuilder,Sink,Decoder,Source,buffer::Samples
 use std::{collections::{BTreeMap,BTreeSet},io::Cursor,time::Instant};
 
 #[derive(Clone,Copy,PartialEq,Eq,PartialOrd,Ord)]
-pub enum Cue {Click,Contact,Ping,Launch,Beam,Impact,Explosion,Alert}
-const ASSETS:[(Cue,&[u8]);8]=[
+pub enum Cue {Click,Contact,Ping,Launch,Beam,Spinal,Impact,Explosion,Alert}
+const ASSETS:[(Cue,&[u8]);9]=[
     (Cue::Click,include_bytes!("../../../assets/audio/click.wav")),
     (Cue::Contact,include_bytes!("../../../assets/audio/contact.wav")),
     (Cue::Ping,include_bytes!("../../../assets/audio/ping.wav")),
     (Cue::Launch,include_bytes!("../../../assets/audio/launch.wav")),
     (Cue::Beam,include_bytes!("../../../assets/audio/beam.wav")),
+    (Cue::Spinal,include_bytes!("../../../assets/audio/spinal.wav")),
     (Cue::Impact,include_bytes!("../../../assets/audio/impact.wav")),
     (Cue::Explosion,include_bytes!("../../../assets/audio/explosion.wav")),
     (Cue::Alert,include_bytes!("../../../assets/audio/alert.wav")),
@@ -74,6 +75,7 @@ impl Audio {
             match event.kind {
                 CombatKind::Impact=>{cues.insert(if event.own_body==own && own.is_some() && event.impact_strength>=0.65 {Cue::Alert} else {Cue::Impact});},
                 CombatKind::NuclearBurst|CombatKind::Destroyed=>{cues.insert(Cue::Explosion);},
+                CombatKind::SpinalPulse=>{cues.insert(Cue::Spinal);},
                 CombatKind::BeamPulse|CombatKind::PointDefence=>{cues.insert(Cue::Beam);},
                 _=>{}
             }

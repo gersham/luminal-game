@@ -1,0 +1,4 @@
+class,seed,depth,time,winner,srm_launched,lrm_launched,srm_hits,lrm_hits,srm_hp,lrm_hp,srm_crit,lrm_crit,beam_hits,beam_hp,beam_finish,reached_beams,hull_a,hull_b,interceptors_used,interceptor_kills,pd_kills,loss_reason
+Frigate,4000,40,9185,1,40,20,5,0,794.9582897797643,-0,2,0,631,1225.8400455700792,true,true,0.23385244715557765,0.655843828765383,80,40,1,reactor
+Frigate,4001,40,10025,1,40,20,4,0,548.1906883668812,-0,2,0,709,2151.918564632258,true,true,0,0.3579598421908457,80,40,1,hull
+Frigate,4002,40,9745,0,40,20,4,1,548.0072824144204,275,2,0,505,1081.0119871029865,true,true,0.872228862520672,0,80,39,5,hull

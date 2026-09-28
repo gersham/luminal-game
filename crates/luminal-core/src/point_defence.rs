@@ -8,15 +8,17 @@ pub(super) type Sighting=(f64,BodyId,Vec2,f64,Measurement,f64);
 pub struct PointDefence {
     pub rate_hz:f64,
     pub shots:u64,
-    pub next_shot_at:f64,
+    pub lasers:u8,
+    /// Independent recharge clocks for up to eight emplacements.
+    pub ready_at:[f64;8],
     pub last_shot:Option<(f64,Vec2,Vec2)>,
 }
 impl Default for PointDefence {
-    fn default()->Self { Self {rate_hz:PD_RATE_HZ.value,shots:0,next_shot_at:0.0,last_shot:None} }
+    fn default()->Self { Self {rate_hz:PD_RATE_HZ.value,shots:0,lasers:1,ready_at:[0.0;8],last_shot:None} }
 }
 
 pub fn hit_probability(range_km:f64)->f64 {
-    1.0/(1.0+(range_km.max(0.0)/(PD_HALF_RANGE_LS.value*LIGHT_SECOND)).powf(PD_FALLOFF_POWER.value))
+    (1.0/(1.0+(range_km.max(0.0)/(PD_HALF_RANGE_LS.value*LIGHT_SECOND)).powf(PD_FALLOFF_POWER.value))).min(0.85)
 }
 
 /// Nominal single engagement: one beam shot and, when reachable, one interceptor.
@@ -57,7 +59,8 @@ pub(super) struct Pulse {
 impl World {
     pub fn fit_point_defence(&mut self,id:BodyId) {
         if self.bodies[id.0 as usize].point_defence.is_some() {return;}
-        self.bodies[id.0 as usize].point_defence=Some(PointDefence::default());
+        let lasers=self.bodies[id.0 as usize].ship_class.map_or(1,ShipClass::pd_lasers);
+        self.bodies[id.0 as usize].point_defence=Some(PointDefence {lasers,..Default::default()});
         self.scheduler.schedule(self.time,Event::PointDefence(id));
     }
 
@@ -76,7 +79,7 @@ impl World {
         // Dedicated local fire control must detect a missile before engaging it.
         // Use light-delayed emission, never its current truth position/velocity.
         for (i,target) in self.bodies.iter().enumerate() {
-            if target.faction==faction || target.kind!=BodyKind::Missile {continue;}
+            if target.faction==faction || target.kind!=BodyKind::Missile || !target.alive_at(t) {continue;}
             let Some((emitted,seen))=retarded_state(&target.trajectory,origin,t) else {continue};
             let rel=seen.pos-origin;
             let range=rel.length();
@@ -91,19 +94,28 @@ impl World {
         }
         candidates.sort_by(|a,b|a.0.total_cmp(&b.0));
         self.consider_interceptors(id,&candidates);
-        if let Some((range,target,aim,emitted,measurement,snr))=candidates.first().copied()
-            && laser_effectiveness>0.0 && t>=pd.next_shot_at && range<=PD_LASER_MAX_RANGE_LS.value*LIGHT_SECOND {
+        let targets:Vec<_>=candidates.iter().copied().filter(|c|c.0<=PD_LASER_MAX_RANGE_LS.value*LIGHT_SECOND).collect();
+        let mut assigned=0;
+        for laser in 0..usize::from(pd.lasers.min(8)) {
+        if let Some((range,target,aim,emitted,measurement,snr))=targets.get(assigned % targets.len().max(1)).copied()
+            && !self.bodies[id.0 as usize].thermal.dumping
+            && self.bodies[id.0 as usize].thermal.heat_j+PD_WASTE_HEAT_J<=BEAM_HEAT_LIMIT_J.value*self.bodies[id.0 as usize].thermal.capacity_scale
+            && laser_effectiveness>0.0 && t>=pd.ready_at[laser] && range<=PD_LASER_MAX_RANGE_LS.value*LIGHT_SECOND {
             let contact=self.contact_id(faction,target);
             self.relays.push(Relay {faction,front:Front {origin,t_emit:t},obs:Observation {detection:crate::sensors::DetectionLevel::Resolved,
                 contact,sensor:id,origin,emitted_at:emitted,sensor_received_at:t,decider_received_at:f64::NAN,
                 measurement,snr,source:Source::Emission}});
+            self.bodies[id.0 as usize].advance_thermal(t);
+            self.bodies[id.0 as usize].thermal.add_waste_heat(PD_WASTE_HEAT_J);
             let pd=self.bodies[id.0 as usize].point_defence.as_mut().unwrap();
-            pd.shots+=1; pd.next_shot_at=t+1.0/(pd.rate_hz*laser_effectiveness);
+            pd.shots+=1; pd.ready_at[laser]=t+1.0/(pd.rate_hz*laser_effectiveness);
+            assigned+=1;
             pd.last_shot=Some((t,origin,aim));
             let pulse=Pulse {shooter:id,target,front:Front {origin,t_emit:t},hit:self.rng.uniform()<hit_probability(range)};
             self.debug_note("PD_SHOT",format!("shooter={id:?} target={target:?} range_km={range} chance={} hit_roll={}",hit_probability(range),pulse.hit));
             self.scheduler.schedule(t+(range/C).max(0.001),Event::PointDefencePulse(pulse));
             self.record_beam(t,origin,CombatKind::PointDefence,id,target,faction);
+        }
         }
         // Laser reload must not slow sensor acquisition or interceptor launches.
         self.scheduler.schedule(t+(1.0/pd.rate_hz).min(1.0),Event::PointDefence(id));
@@ -141,8 +153,37 @@ mod tests {
         let mut world=World::new(system,specs,10.0,123);
         // Test a sensor-equipped defender; playtest stations default to DF only.
         world.bodies[0].sensors=sensors::SensorSuite::FULL;
+        if kind==BodyKind::Ship {world.bodies[0].ship_class=Some(ShipClass::Picket);}
         world
     }
+    #[test]
+    fn battery_splits_targets_and_recharges_each_laser_independently() {
+        let mut w=fixture(BodyKind::Ship,0.005*LIGHT_SECOND);
+        w.bodies[0].ship_class=Some(ShipClass::Battleship);
+        // A second local missile, visible to the dedicated PD sensors.
+        let mut second=w.bodies[1].clone();
+        second.trajectory=Trajectory::new(-10.0,State {pos:Vec2::new(20.0*AU,0.006*LIGHT_SECOND),vel:Vec2::ZERO});
+        w.bodies.push(second);w.last_step.push(0.0);
+        w.fit_point_defence(BodyId(0));
+        w.bodies[0].point_defence.as_mut().unwrap().rate_hz=2.0;
+        w.point_defence_cycle(BodyId(0));
+        let pd=w.bodies[0].point_defence.unwrap();
+        assert_eq!(pd.lasers,8);assert_eq!(pd.shots,8);assert_eq!(pd.ready_at,[0.5;8]);
+        let events=w.combat_events(None);
+        for target in [BodyId(1),BodyId(2)] {
+            assert_eq!(events.iter().filter(|e|e.kind==CombatKind::PointDefence && e.target==Some(InterceptTarget::Own(target))).count(),4);
+        }
+        assert!((w.bodies[0].thermal.heat_j-8.0*PD_WASTE_HEAT_J).abs()<1.0);
+        w.point_defence_cycle(BodyId(0));assert_eq!(w.bodies[0].point_defence.unwrap().shots,8);
+        // Only one mount is recharged; the other seven cannot fire early.
+        w.time=0.25;w.bodies[0].point_defence.as_mut().unwrap().ready_at[3]=0.25;
+        w.point_defence_cycle(BodyId(0));
+        let pd=w.bodies[0].point_defence.unwrap();assert_eq!(pd.shots,9);assert_eq!(pd.ready_at[3],0.75);
+        assert_eq!(pd.ready_at[0],0.5);
+        w.bodies[0].damage.systems[crate::damage::System::PdLaser as usize]=crate::damage::Condition::Destroyed;
+        w.time=1.0;w.point_defence_cycle(BodyId(0));assert_eq!(w.bodies[0].point_defence.unwrap().shots,9);
+    }
+
     #[test]
     fn interceptors_acquire_and_launch_near_point_three_au() {
         let mut w=fixture(BodyKind::Ship,0.26*crate::units::AU);
@@ -166,6 +207,19 @@ mod tests {
         let id=BodyId(w.bodies.iter().position(|b|b.interceptor.is_some()).unwrap() as u32);
         assert!(w.known_body(FactionId(0),id).is_some(),"launch must be visible before next ten-second telemetry sample");
         assert!(defence_ring_radius(true,true)>10.0*defence_ring_radius(true,false));
+    }
+
+    #[test]
+    fn heat_dump_inhibits_pd_laser_until_switched_off() {
+        let mut w=fixture(BodyKind::Ship,0.1*LIGHT_SECOND);
+        w.fit_point_defence(BodyId(0));
+        w.set_heat_dump(BodyId(0),true).unwrap();
+        w.point_defence_cycle(BodyId(0));
+        assert_eq!(w.bodies[0].point_defence.unwrap().shots,0);
+        w.set_heat_dump(BodyId(0),false).unwrap();
+        w.point_defence_cycle(BodyId(0));
+        assert_eq!(w.bodies[0].point_defence.unwrap().shots,1);
+        assert!(w.bodies[0].thermal.heat_j>=PD_WASTE_HEAT_J);
     }
 
     #[test]
@@ -224,7 +278,7 @@ mod tests {
         w.point_defence_cycle(BodyId(0));
         for _ in 0..10 {w.point_defence_cycle(BodyId(0));}
         assert_eq!(w.bodies[0].point_defence.unwrap().shots,1);
-        assert_eq!(w.bodies[0].point_defence.unwrap().next_shot_at,1.0);
+        assert_eq!(w.bodies[0].point_defence.unwrap().ready_at[0],1.0);
     }
     #[test]
     fn blocked_pulse_and_missed_pulse_do_not_kill() {
@@ -245,13 +299,13 @@ mod tests {
         w.fit_point_defence(BodyId(0));
         w.bodies[0].point_defence.as_mut().unwrap().rate_hz=2.0;
         w.point_defence_cycle(BodyId(0));
-        assert_eq!(w.bodies[0].point_defence.unwrap().next_shot_at,0.5);
+        assert_eq!(w.bodies[0].point_defence.unwrap().ready_at[0],0.5);
         let mut w=fixture(BodyKind::Ship,0.06*LIGHT_SECOND);
         w.fit_point_defence(BodyId(0));
         w.bodies[0].point_defence.as_mut().unwrap().rate_hz=0.5;
         w.bodies[0].interceptor_battery=Some(interceptor::Battery {rounds:20,launched:0,ready_at:0.0,status:"Ready"});
         w.point_defence_cycle(BodyId(0));
-        assert_eq!(w.bodies[0].point_defence.unwrap().next_shot_at,2.0);
+        assert_eq!(w.bodies[0].point_defence.unwrap().ready_at[0],2.0);
         w.time=1.0;
         w.point_defence_cycle(BodyId(0));
         assert_eq!(w.bodies[0].point_defence.unwrap().shots,1);

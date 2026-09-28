@@ -83,8 +83,8 @@ impl TacticalLog {
                         format!("MISSILE {}{}",if hit {"HIT"} else {"MISSED"},event.own_body.map_or(String::new(),|id|format!(" · ROUND {}",id.0))),
                         if hit {WARM} else {TEXT_MUTED},event.received_at);
                 },
-                CombatKind::BeamPulse|CombatKind::PointDefence=>{
-                    let weapon=match event.kind {CombatKind::PointDefence=>"PD LASER",_=>"MAIN BEAM"};
+                CombatKind::BeamPulse|CombatKind::SpinalPulse|CombatKind::PointDefence=>{
+                    let weapon=match event.kind {CombatKind::PointDefence=>"PD LASER",CombatKind::SpinalPulse=>"SPINAL MOUNT",_=>"MAIN BEAM"};
                     let source=event.own_body.and_then(|id|view.bodies.iter().find(|b|b.id==id)).map_or(
                         if event.own_body.is_some() {"FRIENDLY"} else {"HOSTILE"},|b|b.name.as_str());
                     self.push(format!("beam-{weapon}-{source}"),format!("{source} · {weapon} FIRED"),ACCENT,event.received_at);
@@ -147,6 +147,12 @@ fn desired_auto_warp(view:&View)->f64 {
 mod tests {
     use super::*;
     #[test]
+    fn energy_uses_integer_si_units() {
+        for (value,expected) in [(0.0,"0 J"),(999.0,"999 J"),(999.9e9,"1 TJ"),(420e9,"420 GJ"),(12e15,"12 PJ"),(1e18,"1 EJ"),(2e24,"2 YJ")] {
+            assert_eq!(fmt_energy(value),expected);
+        }
+    }
+    #[test]
     fn speeds_switch_to_light_speed_units_above_threshold() {
         assert_eq!(fmt_speed(0.5*C),"0.500c");
         assert_eq!(fmt_speed(-0.02*C),"-0.020c");
@@ -161,7 +167,7 @@ mod tests {
         let mut ship=view.bodies.iter().find(|b|b.controllable).unwrap().clone();
         let contact=&view.contacts[0];
         use luminal_core::world::controls::{ControlledSystem as C,Mode};
-        for (key,system) in [(Key::E,C::Ecm),(Key::R,C::Screens),(Key::B,C::Boost)] {
+        for (key,system) in [(Key::E,C::Ecm),(Key::R,C::Screens)] {
             assert!(matches!(tactical_shortcut(key,&ship,None),Some(Command::SetSystemMode {system:s,mode:Mode::On,..}) if s==system));
         }
         assert!(matches!(tactical_shortcut(Key::A,&ship,None),Some(Command::SetSystemMode {system:C::Active,mode:Mode::Auto,..})));
@@ -189,7 +195,7 @@ mod tests {
         let mut target=view.contacts[0].clone();
         let mut track=test_track();track.pos=ship.pos+Vec2::new(LIGHT_SECOND,0.0);
         track.cov=[[0.0;2];2];track.velocity_sigma=0.0;
-        target.track=Some(track);target.stale=false;
+        target.track=Some(track);target.stale=false;target.detection=luminal_core::sensors::DetectionLevel::Resolved;
         for (key,payload) in [(egui::Key::L,Payload::Nuclear),(egui::Key::S,Payload::Kinetic)] {
             ship.magazine[payload.index()]=20;ship.missile_queued[payload.index()]=3;
             let commands=tactical_shortcut_commands(key,true,&ship,Some(&target));
@@ -299,7 +305,7 @@ mod tests {
         let app=LuminalApp::new();
         let mut view=app.session.view(Role::Faction(ESCORT));
         let mut contact=view.contacts[0].clone();
-        let mut report=Report {damage:Default::default(),installed:[true;15],observed_at:0.0,screen_heat:0.0};
+        let mut report=Report {damage:Default::default(),installed:[true;16],observed_at:0.0,screen_available:1.0};
         report.damage.systems[System::Power as usize]=Condition::Damaged;
         contact.damage=Some(report);contact.last_emitted_at=0.0;contact.last_received_at=600.0;
         view.time=600.0;
@@ -446,7 +452,6 @@ mod tests {
             let b = truth.bodies.iter().find(|b| b.id == id).unwrap();
             assert!(b.has_screen && b.screen_up);
             assert_eq!(b.thermal.field, 1.0);
-            assert_eq!(b.screen_j, 0.0);
         }
         assert!(app.inspected==Some(Selection::Body(BodyId(0))));
         let ship=view.bodies.iter().find(|b|b.id==BodyId(1)).unwrap();
@@ -606,6 +611,12 @@ mod tests {
         assert_eq!(ranges[1].1,params::SHIP_BEAM_AUTO_RANGE_LS.value*LIGHT_SECOND);
     }
 
+    #[test] fn heat_gauge_shows_sub_gigawatt_net_rates() {
+        assert_eq!(heat_gauge_fill(0.0),0.0);
+        assert!(heat_gauge_fill(230e6)>0.25);
+        assert!(heat_gauge_fill(1.0)>=1.0/28.0);
+        assert_eq!(heat_gauge_fill(1e15),1.0);
+    }
     #[test] fn any_arrow_cancels_navigation_but_keeps_weapon_target() {
         for key in 0..4 {
             let mut app=LuminalApp::new();let target=app.inspected;
@@ -632,7 +643,7 @@ mod tests {
 
     #[test]
     fn power_outage_chips_preserve_backup_and_crew_conditions() {
-        let mut report=Report {damage:Default::default(),installed:[true;15],observed_at:0.0,screen_heat:0.0};
+        let mut report=Report {damage:Default::default(),installed:[true;16],observed_at:0.0,screen_available:1.0};
         report.damage.systems[System::Power as usize]=Condition::Damaged;
         for system in System::ALL {
             let chip=Chip::of(Some(report),system);
@@ -736,6 +747,8 @@ struct LuminalApp {
     /// measurements, and the emission time of the last one folded in.
     bearing_display: BTreeMap<(ContactId, BodyId), (f64, f64)>,
     ship_headings: BTreeMap<BodyId, Vec2>,
+    selection_pending:bool,
+    chosen_class:luminal_core::world::ShipClass,
     tactical_log:TacticalLog,
     weapon_effects:weapon_effects::WeaponEffects,
 }
@@ -754,17 +767,18 @@ impl LuminalApp {
         if !held.iter().any(|v|*v) && !pressed.iter().any(|v|*v) && !released {return;}
         let view=self.session.view(self.role);
         let Some(ship)=view.bodies.iter().find(|b|b.controllable && b.kind==BodyKind::Ship) else {return;};
+        let rated_g=ship.ship_class.map_or(params::SHIP_MAX_ACCEL_G.value,|class|class.max_g());
         let entering=self.manual_flight.is_none_or(|m|m.body!=ship.id) || ship.autopilot.is_some();
         if entering {
             let direction=self.ship_headings.get(&ship.id).copied().unwrap_or_else(||if ship.thrust.length()>0.0 {ship.thrust.normalized()} else if ship.vel.length()>0.0 {ship.vel.normalized()} else {Vec2::new(0.0,1.0)});
-            let thrust=if ship.autopilot.is_some() {ship.thrust.length()/if ship.controls.boost_active {1.2} else {1.0}} else {ship.commanded.length()};
-            self.manual_flight=Some(ManualFlight {body:ship.id,angle:direction.y.atan2(direction.x),throttle:(thrust/(params::SHIP_MAX_ACCEL_G.value*G0)).clamp(0.0,1.0)});
+            let thrust=if ship.autopilot.is_some() {ship.thrust.length()} else {ship.commanded.length()};
+            self.manual_flight=Some(ManualFlight {body:ship.id,angle:direction.y.atan2(direction.x),throttle:(thrust/(rated_g*G0)).clamp(0.0,1.0)});
         }
         let manual=self.manual_flight.as_mut().unwrap();manual.adjust(held,pressed,dt);
         self.ship_headings.insert(ship.id,manual.direction());
         self.manual_send_elapsed+=dt;
         if entering || pressed.iter().any(|v|*v) || released || self.manual_send_elapsed>=0.1 {
-            let command=Command::SetThrust {body:ship.id,thrust:manual.direction()*(manual.throttle*params::SHIP_MAX_ACCEL_G.value*G0)};
+            let command=Command::SetThrust {body:ship.id,thrust:manual.direction()*(manual.throttle*rated_g*G0)};
             self.manual_send_elapsed=0.0;
             if let Err(error)=self.session.command(self.role,command) {self.last_message=Some(format!("Manual flight rejected: {error:?}"));}
             else if entering {self.tactical_log.push("helm".into(),"FREE FLIGHT · ARROW KEYS".into(),ACCENT,view.time);self.audio.play(audio::Cue::Click);}
@@ -773,17 +787,17 @@ impl LuminalApp {
     fn command_deck(&mut self,ui:&mut egui::Ui,view:&View) {
         let own=view.bodies.iter().find(|b|b.controllable && Some(b.faction)==self.own_faction());
         let target=match self.inspected {Some(Selection::Contact(id))=>view.contacts.iter().find(|c|c.id==id),_=>None};
-        ui.columns(5,|columns| {
+        command_columns(ui,|columns| {
             for ui in columns.iter_mut().skip(1) {
                 let rect=ui.available_rect_before_wrap();
                 ui.painter().line_segment([rect.left_top()-EVec2::new(4.0,0.0),rect.left_bottom()-EVec2::new(4.0,0.0)],Stroke::new(1.0,EDGE));
             }
             let ui=&mut columns[0];
-            sub_header(ui,"OWN SHIP / COMMAND",None);
+            sub_header(ui,"FIRE CONTROL",None);
             if let Some(ship)=own {self.compact_weapons(ui,view,ship);}
             let ui=&mut columns[1];
             sub_header(ui,"OWN SHIP",None);
-            compact_status(ui,own.map(|b|&b.damage),own.map(|b|b.thrust.length()/G0),false);
+            compact_status(ui,own.map(|b|&b.damage),own.map(|b|b.thrust.length()/G0),own.and_then(|b|b.ship_class).map(|c|c.max_g()),false);
             compact_systems(ui,"own_deck",own.map(|b|b.damage));
             self.central_controls(&mut columns[2],own,view);
             let ui=&mut columns[3];
@@ -792,7 +806,7 @@ impl LuminalApp {
             sub_header(ui,"TARGET",Some((label,CONTACT)));
             let thrust=target.filter(|c|contact_has_course(c)).and_then(|c|c.track.as_ref()).map(|t|t.accel.length()/G0)
                 .filter(|_|systems.is_some_and(|r|r.operating_effectiveness(System::Propulsion)>0.0));
-            compact_status(ui,target.and_then(|c|c.damage.as_ref()),thrust,true);
+            compact_status(ui,target.and_then(|c|c.damage.as_ref()),thrust,target.and_then(|c|c.resolved_class).map(|c|c.max_g()),true);
             compact_systems(ui,"target_deck",systems);
             let ui=&mut columns[4];
             if let Some(ship)=own && self.navigation_orders(ui,view,ship) {return;}
@@ -877,6 +891,7 @@ impl LuminalApp {
             },
             _=>unreachable!(),
         }
+        if ship.controls.evading {ui.label(egui::RichText::new("AUTO EVADE · WILL RESUME ORDER").color(HEAT).strong());}
         let status=match ap.status {
             luminal_core::world::AutopilotStatus::Holding=>if matches!(ap.order,Order::Follow {..}) {"Alongside · matching burn".into()} else {"At destination · holding".into()},
             luminal_core::world::AutopilotStatus::Closing {eta,..}=>format!("Closing · ETA {}",fmt_time(eta)),
@@ -896,35 +911,75 @@ impl LuminalApp {
         use luminal_core::world::controls::{ControlledSystem as C,Mode};
         let Some(ship)=ship else {return;};
         ui.spacing_mut().item_spacing=EVec2::new(2.0,1.0);
-        if tac_button(ui,"PING",EVec2::new(ui.available_width(),28.0),ACCENT,false,ship.damage.operating_effectiveness(System::Active)>0.0)
-            .on_hover_text("One pulse: identify all targets in effective range for 60 seconds. [P]").clicked() {self.command(Command::Ping {body:ship.id});}
+        let thermal=ship.thermal;
         let ef=ship.emissivity;
-        ui.vertical_centered(|ui| {
-            ui.label(egui::RichText::new(format!("EF {:.2}",ef.value())).monospace().size(22.0).strong().color(ACCENT))
-                .on_hover_text(format!("EMISSIVITY FACTOR\nThrust {:.0}% · heat {:.0}% · size {} · stealth {:.0}\nECM {} · recent missiles {} · recent beams {}\nDetection ranges scale directly by target EF.",ef.thrust_percent,ef.screen_percent,ef.size,ef.stealth,ef.ecm_on,ef.recent_missiles,ef.recent_beams));
-        });
-        let screen=if ship.damage.damage.state(System::Screens)==Condition::Destroyed {"DESTROYED".into()}
-            else if !ship.screen_up && ship.screen_j>0.0 {"HEAT LOCK".into()}
-            else if ship.screen_up && ship.thermal.field<0.999 {format!("RAISING {:.0}s",(1.0-ship.thermal.field)*60.0)}
-            else if !ship.screen_up && ship.thermal.field>0.0 {format!("LOWERING {:.0}s",ship.thermal.field*60.0)}
-            else {if ship.thermal.field>0.0 {"UP"} else {"DOWN"}.into()};
-        for (label,system,mode,active,status,enabled,help) in [
-            ("ECM",C::Ecm,ship.controls.ecm,ship.controls.ecm_active,if ship.controls.ecm_active {"EMITTING".into()} else {"SILENT".into()},true,"Auto emits while a resolved enemy ship is known. ECM 100 / ECCM 50; maximum 50% resolution reduction."),
-            ("SCREENS",C::Screens,ship.controls.screens,ship.thermal.field>0.0,screen,ship.has_screen,"Auto latches on after resolving an enemy ship. Transitions take 60 seconds; heat blocks shutdown."),
-            ("BOOST",C::Boost,ship.controls.boost,ship.controls.boost_active,if ship.controls.boost_active {"+20% / CHARGE HOLD".into()} else {"LASERS CHARGING".into()},true,"+20% maximum thrust; main and PD laser charging pauses. Auto stops boost for received contacts within 10 LS."),
-            ("ACTIVE",C::Active,ship.controls.active,ship.controls.active==Mode::Auto,if ship.controls.active==Mode::Auto {format!("PING IN {:.0}s",(ship.controls.next_ping_at-view.time).max(0.0))} else {"SILENT".into()},ship.sensors.active,"Auto pings every 60 seconds until switched Off, even without contacts.")
-        ] {
-            let (r,_)=ui.allocate_exact_size(EVec2::new(ui.available_width(),11.0),Sense::hover());
-            ui.painter().text(r.left_center(),egui::Align2::LEFT_CENTER,label,mono(9.0),TEXT_MUTED);
-            ui.painter().text(r.right_center(),egui::Align2::RIGHT_CENTER,status,mono(8.0),if active {ACCENT} else {TEXT_MUTED});
-            let key=match system {C::Ecm=>"E",C::Screens=>"R",C::Boost=>"B",C::Active=>"A"};
-            let response=tac_button(ui,mode.label(),EVec2::new(ui.available_width(),23.0),ACCENT,active,enabled).on_hover_text(help);
-            ui.painter().text(response.rect.right_center()-EVec2::new(8.0,0.0),egui::Align2::RIGHT_CENTER,format!("[{key}]"),mono(9.0),TEXT_MUTED);
-            if response.clicked() {
-                let mode=if system==C::Active {if mode==Mode::Auto {Mode::Off} else {Mode::Auto}} else {mode.next()};
-                self.command(Command::SetSystemMode {body:ship.id,system,mode});
+        let (r,_)=ui.allocate_exact_size(EVec2::new(ui.available_width(),157.0),Sense::hover());
+        let cx=r.center().x;let center=Pos2::new(cx,r.top()+70.0);
+        let radius=(r.width()*0.115).clamp(35.0,52.0);
+        let cool=Color32::from_rgb(64,214,128);let hot=Color32::from_rgb(238,74,56);
+        let net=thermal.net_heat_flow();let heating=net.max(0.0);let cooling=(-net).max(0.0);
+        ui.painter().rect_filled(r.expand2(EVec2::new(5.0,0.0)),8.0,Color32::from_rgb(9,15,27));
+        ui.painter().line_segment([r.left_top(),r.right_top()],Stroke::new(2.0,ACCENT.gamma_multiply(0.45)));
+        for (rate,color,start,end) in [(cooling,cool,0.0_f32,-160.0_f32),(heating,hot,0.0,160.0)] {
+            let fill=heat_gauge_fill(rate);
+            for i in 0..28 {
+                let angle=|u:f32| {let a=(start+(end-start)*u).to_radians();center+EVec2::new(a.sin(),-a.cos())*radius};
+                ui.painter().line_segment([angle(if i==0 {0.0} else {i as f32/28.0+0.006}),angle((i+1) as f32/28.0-0.006)],
+                    Stroke::new(5.0,if (i as f64)<fill*28.0 {color} else {EDGE}));
             }
         }
+        let energy=fmt_energy(thermal.heat_j);let (number,unit)=energy.split_once(' ').unwrap_or((&energy,"J"));
+        let heat_color=if thermal.heat_fraction()>=1.0 {hot} else if thermal.heat_fraction()>=0.7 {WARM} else {Color32::from_rgb(246,232,208)};
+        ui.painter().text(center-EVec2::new(0.0,28.0),egui::Align2::CENTER_CENTER,"HEAT",mono(8.0),TEXT_MUTED);
+        ui.painter().text(center-EVec2::new(0.0,2.0),egui::Align2::CENTER_CENTER,number,mono(radius*0.65),heat_color);
+        ui.painter().text(center+EVec2::new(0.0,24.0),egui::Align2::CENTER_CENTER,unit,mono(11.0),heat_color);
+        let flank=radius+22.0;let size=(r.width()*0.047).clamp(14.0,24.0);
+        for (x,align,label,value,color) in [(cx-flank,egui::Align2::RIGHT_CENTER,"EMISSIVITY",format!("{:.2}×",ef.value()),ACCENT),
+            (cx+flank,egui::Align2::LEFT_CENTER,"SCREENS",if ship.has_screen {format!("{:.0}%",ship.damage.screen_available*100.0)} else {"N/F".into()},ARMOUR)] {
+            ui.painter().text(Pos2::new(x,r.top()+45.0),align,label,mono(8.0),TEXT_MUTED);
+            ui.painter().text(Pos2::new(x,r.top()+72.0),align,value,mono(size),color);
+        }
+        let rate_label=|w:f64|fmt_energy(w).replace('J',"W");
+        ui.painter().text(Pos2::new(cx-radius-10.0,r.top()+112.0),egui::Align2::RIGHT_CENTER,format!("−{}",rate_label(cooling)),mono(9.0),cool);
+        ui.painter().text(Pos2::new(cx+radius+10.0,r.top()+112.0),egui::Align2::LEFT_CENTER,format!("+{}",rate_label(heating)),mono(9.0),hot);
+        let status=if thermal.dumping {"RADIATORS OPEN · DRIVE / LASERS OFF"} else if thermal.thrust_factor()<1.0 {"THERMAL THRUST LIMIT"} else if heating>cooling {"HEAT RISING"} else if cooling>0.0 {"HEAT FALLING"} else {"HEAT BALANCED"};
+        ui.painter().text(Pos2::new(cx,r.top()+12.0),egui::Align2::CENTER_CENTER,status,mono(8.0),if thermal.dumping {WARM} else {TEXT_MUTED});
+        ui.interact(r,ui.id().with("heat_rates"),Sense::hover()).on_hover_text("Net heat flow only: left cooling, right heating. Heat input is averaged over five seconds. Gauge scale: 1 MW to 1 PW; smaller nonzero rates retain one visible segment. Cruising at up to 50% rated thrust with screens enabled is heat balanced. Higher burns, weapons and absorbed hits build heat. Enabled screens add a small heat load; absorbed hits heat the ship immediately.");
+        let button=Rect::from_center_size(Pos2::new(cx,r.top()+140.0),EVec2::new(150.0_f32.min(r.width()),26.0));
+        let mut child=ui.new_child(egui::UiBuilder::new().max_rect(button));
+        if tac_button(&mut child,if thermal.dumping {"DUMPING · STOP"} else {"DUMP HEAT"},button.size(),WARM,thermal.dumping,true)
+            .on_hover_text("Toggle radiators: 5× cooling, 10× heat signature; thrust and beam weapons remain disabled until switched off.").clicked() {
+            self.command(Command::SetHeatDump {body:ship.id,enabled:!thermal.dumping});
+        }
+        let screen=if ship.damage.operating_effectiveness(System::Screens)<=0.0 {"DISABLED".into()}
+            else if !ship.screen_up {"OFF".into()}
+            else if ship.thermal.field<0.999 {format!("CHARGING {:.0}%",ship.damage.screen_available*100.0)}
+            else {format!("{:.0}% AVAILABLE",ship.damage.screen_available*100.0)};
+        let controls=[
+            ("ECM",C::Ecm,ship.controls.ecm,ship.controls.ecm_active,if ship.controls.ecm_active {"EMITTING".into()} else {"SILENT".into()},true,"Auto emits while a resolved enemy ship is known. Class-rated ECM/ECCM; maximum 50% resolution reduction."),
+            ("SCREENS",C::Screens,ship.controls.screens,ship.screen_up,screen,ship.has_screen,"Auto latches on after resolving an enemy ship. Charges 2% per minute. Off disables absorption immediately. Hits and idle operation heat the ship."),
+            ("EVADE",C::Evade,ship.controls.evade,ship.controls.evading,if ship.controls.evading {"EVADING".into()} else if ship.controls.evade==Mode::Auto {"WATCHING".into()} else {"OFF".into()},true,"Auto temporarily evades incoming damaging missiles, then resumes your prior movement order. Off disables automatic evasion."),
+            ("ACTIVE",C::Active,ship.controls.active,ship.controls.active==Mode::Auto,if ship.controls.active==Mode::Auto {format!("PING IN {:.0}s",(ship.controls.next_ping_at-view.time).max(0.0))} else {"SILENT".into()},ship.sensors.active,"Auto pings every 60 seconds until switched Off, even without contacts.")
+        ];
+        for row in [[Some(0),Some(2),Some(3)],[Some(1),None,Some(4)]] {ui.columns(3,|columns| {
+            for (ui,index) in columns.iter_mut().zip(row) {
+                let Some(index)=index else {
+                    ui.add_space(7.0);
+                    if tac_button(ui,"PING  [P]",EVec2::new(ui.available_width(),39.0),ACCENT,true,ship.damage.operating_effectiveness(System::Active)>0.0)
+                        .on_hover_text("Send one active sensor pulse").clicked() {self.command(Command::Ping {body:ship.id});}
+                    continue;
+                };
+                if index>=controls.len() {continue;}
+                let (label,system,mode,active,ref status,enabled,help)=controls[index];
+                ui.add_space(7.0);
+                let response=tac_button(ui,&format!("{label} · {}",mode.label()),EVec2::new(ui.available_width(),28.0),ACCENT,active,enabled).on_hover_text(help);
+                if response.clicked() {
+                    let next=if matches!(system,C::Active|C::Evade) {if mode==Mode::Auto {Mode::Off} else {Mode::Auto}} else {mode.next()};
+                    self.command(Command::SetSystemMode {body:ship.id,system,mode:next});
+                }
+                ui.label(egui::RichText::new(status).monospace().size(7.5).color(if active {ACCENT} else {TEXT_MUTED}));
+            }
+        });}
     }
 
 
@@ -937,20 +992,25 @@ impl LuminalApp {
             if tac_button(ui,"DIRECT",EVec2::new(w,20.0),ACCENT,!b.beam_auto && b.beam_target.is_some(),target.is_some_and(|c|c.track.is_some() && !c.stale)).clicked() {self.command(Command::EngageBeam {body:b.id,target:target.map(|c|c.id)});}
             if tac_button(ui,"HOLD",EVec2::new(w,20.0),ACCENT,!b.beam_auto && b.beam_target.is_none(),true).clicked() {self.command(Command::EngageBeam {body:b.id,target:None});}
         });
+        if b.ship_class==Some(luminal_core::world::ShipClass::Battleship) {
+            let left=(b.spinal_ready_at-view.time).max(0.0);
+            ui.label(egui::RichText::new(if left>0.0 {format!("SPINAL · {left:.0}s")} else {"SPINAL · READY / FORWARD 2°".into()}).monospace().size(9.0).color(WARM));
+        }
         let left=(b.beam_ready_at-view.time).max(0.0);
-        let status=if !b.thermal.can_fire() {"PWR / HEAT".into()} else if left>0.0 {format!("{left:.1}s")} else {"READY".into()};
+        let status=if b.thermal.dumping {"OFF · HEAT DUMP".into()} else if !b.thermal.can_fire() {"PWR / HEAT".into()} else if left>0.0 {format!("{left:.1}s")} else {"READY".into()};
         compact_meter(ui,&format!("BEAM · {status}"),Some(1.0-(left/params::SHIP_BEAM_RECHARGE_S.value).clamp(0.0,1.0)),ACCENT);
         ui.horizontal(|ui| {
             let w=(ui.available_width()-ui.spacing().item_spacing.x)/2.0;
             for (p,label) in [(Payload::Kinetic,"SRM"),(Payload::Nuclear,"LRM")] {
             let count=b.magazine[p.index()].saturating_sub(b.missile_queued[p.index()]);
             let chance=missile_hit_estimate(b,target,p);
-            let ready=count>0 && missile_solution_launchable(target,p,chance) && b.damage.operating_effectiveness(System::Launcher)>0.0;
-            let response=tac_button(ui,&format!("{label} {count}"),EVec2::new(w,22.0),WARM,false,ready);
+            let ready=count>0 && missile_solution_launchable(target,p,chance) && b.damage.operating_effectiveness(p.launcher_system())>0.0;
+            let volley=b.ship_class.unwrap_or(luminal_core::world::ShipClass::Frigate).launchers(p);
+            let response=tac_button(ui,&format!("{label} {count} · ×{volley}"),EVec2::new(w,22.0),WARM,false,ready);
             let bar=Rect::from_min_max(response.rect.left_bottom()+EVec2::new(3.0,-3.0),response.rect.right_bottom()+EVec2::new(-3.0,-1.0));
             ui.painter().rect_filled(bar,0.0,EDGE);
             ui.painter().rect_filled(Rect::from_min_size(bar.min,EVec2::new(bar.width()*chance as f32,bar.height())),0.0,if ready {ACCENT} else {SYS_UNKNOWN});
-            if response.on_hover_text(format!("Fire {} · {}\nEach click queues one round; independent launcher fires every {:.0} seconds.\nBefore enemy defence. LRM permits speculative bearing-only shots; its seeker must acquire the target. SRM requires at least 1% estimated chance.",payload_label(p),if target.is_some_and(|c|c.track.is_none()) {"Bearing only · hit chance unknown".into()} else {format!("estimated hit chance {:.0}%",chance*100.0)},p.launch_interval())).clicked() && let Some(c)=target {
+            if response.on_hover_text(format!("Fire {} · {}\nEach click queues one synchronized volley; launchers reload every {:.0} seconds.\nBefore enemy defence. LRM permits speculative bearing-only shots; its seeker must acquire the target. SRM requires a resolved target and at least 1% estimated chance.",payload_label(p),if target.is_some_and(|c|c.track.is_none()) {"Bearing only · hit chance unknown".into()} else {format!("estimated hit chance {:.0}%",chance*100.0)},p.launch_interval())).clicked() && let Some(c)=target {
                 self.command(Command::Launch {body:b.id,target:c.id,payload:p});
             }
         }});
@@ -962,8 +1022,9 @@ impl LuminalApp {
             if ui.add_enabled(queued>0,egui::Button::new(format!("× {queued}"))).on_hover_text("Cancel queued salvo").clicked() {self.command(Command::CancelLaunches {body:b.id});}
         });
         let rounds=b.interceptor_battery.map_or(0,|x|x.rounds);
-        ui.label(egui::RichText::new(format!("PD AUTO · {rounds} ROUNDS")).monospace().size(9.0).color(if rounds>0 {ACCENT} else {SYS_DAMAGED}))
+        ui.label(egui::RichText::new(format!("PD AUTO · {} LASERS · {rounds} INTERCEPTORS",b.point_defence.map_or(0,|pd|pd.lasers))).monospace().size(9.0).color(if rounds>0 {ACCENT} else {SYS_DAMAGED}))
             .on_hover_text(b.interceptor_battery.map_or("No launcher",|x|x.status));
+        if b.thermal.dumping {ui.label(egui::RichText::new("PD LASER OFF · HEAT DUMP").monospace().size(9.0).color(HEAT));}
         if let Some(message)=&self.last_message {ui.small(egui::RichText::new(message).color(SYS_DAMAGED));}
     }
 
@@ -984,12 +1045,16 @@ impl LuminalApp {
     }
 
     fn new() -> Self {
+        let chosen=std::env::var("LUMINAL_SHIP").ok().and_then(|name|luminal_core::world::ShipClass::COMBAT.into_iter().find(|c|c.name().eq_ignore_ascii_case(&name))).unwrap_or(luminal_core::world::ShipClass::Frigate);
+        Self::new_with_class(chosen)
+    }
+    fn new_with_class(chosen:luminal_core::world::ShipClass) -> Self {
         let seed = std::env::var("LUMINAL_SEED").ok().and_then(|s|s.parse().ok()).unwrap_or_else(|| {
             if cfg!(test) || std::env::var_os("LUMINAL_SCREENSHOT").is_some() {42} else {
                 std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos() as u64
             }
         });
-        let mut session=LocalSession::new(scenario::transport_intercept_debug_seeded(seed));
+        let mut session=LocalSession::new(scenario::transport_intercept_class(seed,chosen));
         let log_path=std::path::PathBuf::from("logs/latest.log");
         let log_error=if cfg!(test) || std::env::var_os("LUMINAL_SCREENSHOT").is_some() {None} else {
             std::fs::create_dir_all("logs").and_then(|_|session.enable_debug_log(&log_path)).err()
@@ -1013,6 +1078,8 @@ impl LuminalApp {
             dev: DevHooks { screenshot: std::env::var_os("LUMINAL_SCREENSHOT").map(Into::into), frames: 0 },
             bearing_display: BTreeMap::new(),
             ship_headings: BTreeMap::new(),
+            selection_pending:!cfg!(test) && (std::env::var_os("LUMINAL_SCREENSHOT").is_none() || std::env::var_os("LUMINAL_SHIP_SELECT").is_some()),
+            chosen_class:chosen,
             tactical_log:TacticalLog::default(),
             weapon_effects:weapon_effects::WeaponEffects::default(),
             audio:audio::Audio::default(),
@@ -1022,7 +1089,7 @@ impl LuminalApp {
         app.session.enable_bot(if app.role == Role::Faction(RAIDER) { ESCORT } else { RAIDER }, true);
         let _ = app.session.command(app.role, Command::SetWarp(AUTO_MIN_WARP));
         // AUTO ramps up from 5×; screenshot fixtures remain paused.
-        if app.dev.screenshot.is_none() {
+        if app.dev.screenshot.is_none() && !app.selection_pending {
             let _ = app.session.command(app.role, Command::SetPaused(false));
         }
         app
@@ -1032,7 +1099,7 @@ impl LuminalApp {
         let volume=self.audio.volume;
         let music_volume=self.audio.music_volume;
         let muted=self.audio.muted;
-        *self=Self::new();
+        *self=Self::new_with_class(self.chosen_class);
         self.audio.volume=volume;self.audio.music_volume=music_volume;self.audio.muted=muted;self.audio.settings_changed();
     }
 
@@ -1054,6 +1121,7 @@ impl LuminalApp {
                     ("orbit", _) => num(2).map(|c| Command::Orbit { body, celestial: c as usize }),
                     ("beam", _) => num(2).map(|c| Command::FireBeam { body, target: ContactId(c) }),
                     ("ping", _) => Some(Command::Ping { body }),
+                    ("dump", _) => Some(Command::SetHeatDump {body,enabled:true}),
                     ("launch", _) => num(2).zip(f.get(3)).map(|(c, p)| Command::Launch {
                         body,
                         target: ContactId(c),
@@ -1123,6 +1191,7 @@ impl LuminalApp {
             Command::Intercept {..}=>Some(("helm","MATCH ORDERED".into())),
             Command::Flyby {..}=>Some(("helm","FLYBY ORDERED".into())),
             Command::KeepRange {range,..}=>Some(("helm",format!("HOLD {}",fmt_distance(*range)))),
+            Command::SetHeatDump {enabled,..}=>Some(("thermal",if *enabled {"HEAT DUMP · RADIATORS OPEN".into()} else {"HEAT DUMP STOPPED".into()})),
             Command::Evade {..}=>Some(("helm","EVADE ORDERED".into())),
             Command::AllStop {..}=>Some(("helm","ALL STOP ORDERED".into())),
             Command::SetScreen {up,..}=>Some(("screen",if *up {"SCREENS RAISING".into()} else {"SCREENS LOWERING".into()})),
@@ -1130,7 +1199,7 @@ impl LuminalApp {
         };
         let ping_duration=if let Command::Ping {body}=cmd {
             self.session.view(self.role).bodies.iter().find(|b|b.id==body).map(|b|
-                2.0*sensors::ping_range(sensors::REFERENCE_EF)*b.damage.operating_effectiveness(System::Active)/LIGHT_SECOND)
+                2.0*sensors::ping_range(sensors::REFERENCE_EF)*b.ship_class.map_or(1.0,|c|c.sensor_rating()/100.0)*b.damage.operating_effectiveness(System::Active)/LIGHT_SECOND)
         } else {None};
         self.last_message = match self.session.command(self.role, cmd) {
             Ok(()) => {
@@ -1238,6 +1307,14 @@ fn draw_target_link(painter:&egui::Painter,cam:&Camera,rect:Rect,from:Vec2,to:Ve
     if rect.shrink(8.0).contains_rect(shape.visual_bounding_rect()) {painter.add(shape);}
 }
 
+fn fmt_energy(joules:f64)->String {
+    let units=["J","kJ","MJ","GJ","TJ","PJ","EJ","ZJ","YJ","RJ","QJ"];
+    let mut value=joules.max(0.0);
+    let mut unit=0;
+    while value.round()>=1000.0 && unit+1<units.len() {value/=1000.0;unit+=1;}
+    format!("{value:.0} {}",units[unit])
+}
+
 fn fmt_speed(speed: f64) -> String {
     if speed.abs()>0.01*C {format!("{}{:.3}c",if speed<0.0 {"-"} else {""},speed.abs()/C)}
     else {format!("{speed:.0} km/s")}
@@ -1263,14 +1340,26 @@ fn contact_label(c: &ContactView) -> String {
 }
 
 /// LRM seekers support speculative bearing searches even without a range fix.
+fn command_columns(ui:&mut egui::Ui,content:impl FnOnce(&mut [egui::Ui])) {
+    let rect=ui.available_rect_before_wrap();let mut x=rect.left();
+    let mut columns=Vec::new();
+    for (i,weight) in [0.175,0.20,0.25,0.20,0.175].into_iter().enumerate() {
+        let width=rect.width()*weight;
+        let r=Rect::from_min_max(Pos2::new(x+8.0,rect.top()),Pos2::new(x+width-8.0,rect.bottom()));
+        columns.push(ui.new_child(egui::UiBuilder::new().id_salt(i).max_rect(r)));x+=width;
+    }
+    content(&mut columns);
+    ui.allocate_space(rect.size());
+}
+
 fn missile_solution_launchable(target:Option<&ContactView>,payload:Payload,chance:f64)->bool {
-    target.is_some() && (payload==Payload::Nuclear || chance>=0.01)
+    target.is_some_and(|c|payload==Payload::Nuclear || (!c.stale && c.detection>=luminal_core::sensors::DetectionLevel::Resolved && chance>=0.01))
 }
 
 fn tactical_shortcut_commands(key:egui::Key,shift:bool,ship:&BodyView,target:Option<&ContactView>)->Vec<Command> {
     let Some(command)=tactical_shortcut(key,ship,target) else {return vec![];};
     let count=if shift && let Command::Launch {payload,..}=&command {
-        ship.magazine[payload.index()].saturating_sub(ship.missile_queued[payload.index()])
+        ship.magazine[payload.index()].saturating_sub(ship.missile_queued[payload.index()]).div_ceil(ship.ship_class.unwrap_or(luminal_core::world::ShipClass::Frigate).launchers(*payload).max(1))
     } else {1};
     vec![command;count as usize]
 }
@@ -1281,11 +1370,11 @@ fn tactical_shortcut(key:egui::Key,ship:&BodyView,target:Option<&ContactView>)->
     let control=match key {
         Key::E=>Some((C::Ecm,ship.controls.ecm)),
         Key::R if ship.has_screen=>Some((C::Screens,ship.controls.screens)),
-        Key::B=>Some((C::Boost,ship.controls.boost)),
+        Key::V=>Some((C::Evade,ship.controls.evade)),
         Key::A if ship.sensors.active=>Some((C::Active,ship.controls.active)),_=>None,
     };
     if let Some((system,mode))=control {
-        let mode=if system==C::Active {if mode==Mode::Auto {Mode::Off} else {Mode::Auto}} else {mode.next()};
+        let mode=if matches!(system,C::Active|C::Evade) {if mode==Mode::Auto {Mode::Off} else {Mode::Auto}} else {mode.next()};
         return Some(Command::SetSystemMode {body:ship.id,system,mode});
     }
     if key==Key::P {return Some(Command::Ping {body:ship.id});}
@@ -1299,7 +1388,7 @@ fn tactical_shortcut(key:egui::Key,ship:&BodyView,target:Option<&ContactView>)->
             let payload=if key==Key::L {Payload::Nuclear} else {Payload::Kinetic};
             let available=ship.magazine[payload.index()].saturating_sub(ship.missile_queued[payload.index()]);
             let chance=missile_hit_estimate(ship,Some(contact),payload);
-            (available>0 && ship.damage.operating_effectiveness(System::Launcher)>0.0
+            (available>0 && ship.damage.operating_effectiveness(payload.launcher_system())>0.0
                 && missile_solution_launchable(Some(contact),payload,chance))
                 .then_some(Command::Launch {body:ship.id,target:contact.id,payload})
         },
@@ -1314,7 +1403,8 @@ fn missile_hit_estimate(ship:&BodyView,target:Option<&ContactView>,payload:Paylo
     let range=(track.pos-ship.pos).length();
     let sigma=(track.cov[0][0]+track.cov[1][1]).max(0.0).sqrt();
     luminal_core::world::weapon_probability::hit_chance(payload,range,
-        luminal_core::world::weapon_probability::quality(contact.detection),sigma,0.0,1.0)
+        luminal_core::world::weapon_probability::quality(contact.detection),sigma,
+        luminal_core::world::weapon_probability::evasion_score(track.accel,track.vel-ship.vel,track.pos-ship.pos),1.0)
 }
 
 fn contact_has_course(c:&ContactView)->bool {
@@ -1329,7 +1419,7 @@ fn target_system_report(c:&ContactView,view:&View)->Option<Report> {
     let visible_time=c.last_emitted_at+(view.time-c.last_received_at).max(0.0);
     if visible_time-report.observed_at>=luminal_core::damage::SYSTEM_REPAIR_SECONDS {return None;}
     if report.operating_effectiveness(System::Beam)==0.0 && view.combat.iter().any(|e|
-        e.contact==Some(c.id) && e.kind==CombatKind::BeamPulse && e.emitted_at>report.observed_at) {return None;}
+        e.contact==Some(c.id) && matches!(e.kind,CombatKind::BeamPulse|CombatKind::SpinalPulse) && e.emitted_at>report.observed_at) {return None;}
     Some(report)
 }
 fn bearing_opacity(b:&luminal_core::session::BearingView,now:f64)->f32 {
@@ -1338,6 +1428,34 @@ fn bearing_opacity(b:&luminal_core::session::BearingView,now:f64)->f32 {
 
 impl eframe::App for LuminalApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        if self.selection_pending {
+            let mut start=false;
+            egui::Window::new("CHOOSE YOUR COMMAND").anchor(egui::Align2::CENTER_CENTER,EVec2::ZERO).collapsible(false).resizable(false).default_width(760.0).show(ui.ctx(),|ui| {
+                ui.label("Escort the transport. Destroy the raider. Your opponent receives the same ship class.");ui.add_space(12.0);
+                egui::Grid::new("class_roster").striped(true).spacing(EVec2::new(20.0,14.0)).show(ui,|ui| {
+                    for title in ["CLASS","HULL","ARMOR","SRM / LRM","PD LASERS / INT","MAX G","180° TURN"] {ui.strong(title);}ui.end_row();
+                    for class in luminal_core::world::ShipClass::COMBAT {
+                        ui.selectable_value(&mut self.chosen_class,class,class.name());
+                        ui.label(format!("{:.0}",1000.0*class.scale()));ui.label(format!("{:.0}",500.0*class.protection()));
+                        ui.label(format!("{} / {}",class.magazine()[0],class.magazine()[1]));ui.label(format!("{} / {}",class.pd_lasers(),class.interceptors()));
+                        ui.label(format!("{:.0}",class.max_g()));ui.label(format!("{:.0}s",class.turn_seconds()));ui.end_row();
+                    }
+                });
+                ui.add_space(12.0);ui.label(match self.chosen_class {
+                    luminal_core::world::ShipClass::Picket=>"Fast SRM picket. No LRM or offensive beam mounts.",
+                    luminal_core::world::ShipClass::Frigate=>"Balanced escort. Flexible missile armament and beam weapons.",
+                    luminal_core::world::ShipClass::Destroyer=>"Twice frigate scale. More weapons, armor, screens and heat capacity.",
+                    luminal_core::world::ShipClass::Cruiser=>"Missile artillery: 80 LRMs. Four times frigate scale.",
+                    _=>"Heavy slugger: eight times frigate scale, extra armor/screens, 160 SRMs. Spinal: 60 LS, 10× beam energy, 120s cycle, forward 2° arc.",
+                });
+                ui.label(format!("Sensor rating {:.0} · ECM {:.0} / ECCM {:.0} · Screen capacity {:.1}× · Launchers SRM {} / LRM {}",
+                    self.chosen_class.sensor_rating(),self.chosen_class.sensor_rating(),self.chosen_class.sensor_rating()*0.5,self.chosen_class.protection(),
+                    self.chosen_class.launchers(Payload::Kinetic),self.chosen_class.launchers(Payload::Nuclear)));
+                ui.add_space(12.0);start=tac_button(ui,"DEPLOY",EVec2::new(ui.available_width(),38.0),ACCENT,true,true).clicked();
+            });
+            if start {let class=self.chosen_class;self.restart_scenario();self.chosen_class=class;self.selection_pending=false;let _=self.session.command(self.role,Command::SetPaused(false));}
+            self.dev_screenshot(ui);ui.ctx().request_repaint();return;
+        }
         let dt = ui.input(|i| i.stable_dt) as f64;
         self.session.set_watch(self.own_faction());
         self.update_auto_speed(dt.min(0.1));
@@ -1357,7 +1475,7 @@ impl eframe::App for LuminalApp {
             if f {
                 self.fit_pending = true;
             }
-            for key in [egui::Key::E,egui::Key::R,egui::Key::B,egui::Key::A,egui::Key::L,egui::Key::S,egui::Key::P,egui::Key::Num1,egui::Key::Num2,egui::Key::Num3,egui::Key::Num0] {
+            for key in [egui::Key::E,egui::Key::R,egui::Key::B,egui::Key::A,egui::Key::V,egui::Key::L,egui::Key::S,egui::Key::P,egui::Key::Num1,egui::Key::Num2,egui::Key::Num3,egui::Key::Num0] {
                 if ui.input(|i|i.key_pressed(key)) {
                     let view=self.session.view(self.role);
                     if let Some(ship)=view.bodies.iter().find(|b|b.controllable && b.kind==BodyKind::Ship) {
@@ -1385,8 +1503,8 @@ impl eframe::App for LuminalApp {
         self.weapon_effects.observe(&view,self.own_faction(),ui.input(|i|i.time));
         self.audio.observe(&view,match self.selected {Some(Selection::Body(id))=>Some(id),_=>None});
         if ui.input(|i|i.pointer.button_clicked(egui::PointerButton::Primary)) {self.audio.play(audio::Cue::Click);}
-        let deck_height=(ui.available_height()*0.24).clamp(212.0,240.0);
-        let frame=panel_frame().inner_margin(egui::Margin {left:8,right:8,top:5,bottom:4});
+        let deck_height=(ui.available_height()*0.26).clamp(268.0,280.0);
+        let frame=panel_frame().inner_margin(egui::Margin {left:0,right:0,top:5,bottom:4});
         egui::Panel::bottom("command_deck").exact_size(deck_height).resizable(false).frame(frame).show(ui, |ui| {
             panel_style(ui);
             ui.spacing_mut().item_spacing=EVec2::new(4.0,3.0);
@@ -1474,10 +1592,10 @@ impl LuminalApp {
                     &format!("{:.0} KM/S  ·  {:.2} G", b.vel.length(), b.thrust.length() / G0), Some((state, state_color)));
                 damage_bars(ui, Some(&b.damage));
                 let power = (b.thermal.capacitor_j / params::BEAM_CAPACITOR_J.value).clamp(0.0, 1.0);
-                let heat = (b.screen_j / params::SCREEN_CAPACITY_J.value).clamp(0.0, 1.0);
+                let heat = b.damage.screen_available;
                 meter(ui, "POWER", Some(power), &format!("{:.0}%", 100.0 * power), ACCENT).on_hover_text("Beam capacitor charge");
-                meter(ui, "SCRN HEAT", Some(heat), &format!("{:.0}%", 100.0 * heat), HEAT)
-                    .on_hover_text("Energy held in the screen. Hot screens increase your signature.");
+                meter(ui, "SCREENS", Some(heat), &format!("{:.0}%", 100.0 * heat), HEAT)
+                    .on_hover_text("Remaining shield capacity. Absorbed hits heat the ship.");
                 ui.add_space(2.0);
                 system_matrix(ui, "own", Some(b.damage));
                 system_legend(ui);
@@ -1492,7 +1610,7 @@ impl LuminalApp {
                     }
                     let screen = b.damage.operating_effectiveness(System::Screens) > 0.0;
                     if tac_button(ui, if b.screen_up { "SCREEN  UP" } else { "SCREEN  DOWN" }, EVec2::new(w, 24.0), ACCENT, b.screen_up, screen)
-                        .on_hover_text("Raise the protective screen. Hot screens increase your signature.").clicked()
+                        .on_hover_text("Raise rechargeable shields. Absorbed hits heat the ship.").clicked()
                     {
                         self.command(Command::SetScreen { body: b.id, up: !b.screen_up });
                     }
@@ -1662,7 +1780,7 @@ impl LuminalApp {
                 let flying_by = matches!(order, Some(Order::Flyby(InterceptTarget::Contact(id))) if id == c.id);
                 let matching = matches!(order, Some(Order::Intercept(InterceptTarget::Contact(id))) if id == c.id);
                 if tac_button(ui, "FLYBY", EVec2::new(w, 22.0), ACCENT, flying_by, fireable)
-                    .on_hover_text("Full-thrust pass through the target's predicted position").clicked()
+                    .on_hover_text("Full thrust toward the target, without approach braking").clicked()
                 {
                     self.command(Command::Flyby { body: b.id, target: InterceptTarget::Contact(c.id) });
                 }
@@ -1749,7 +1867,7 @@ impl LuminalApp {
                     let i = p.index();
                     let available = b.magazine[i].saturating_sub(b.missile_queued[i]);
                     if payload_tile(ui, w, payload_label(p), available, b.missile_queued[i], self.payload == p)
-                        .on_hover_text(match p { Payload::Kinetic => "SRM: short-range kinetic shotgun", Payload::Nuclear => "LRM: long-range nuclear proximity warhead", Payload::Beam => "Ship beam" })
+                        .on_hover_text(match p { Payload::Kinetic => "SRM: short-range kinetic shotgun", Payload::Nuclear => "LRM: long-range nuclear-pumped laser", Payload::Beam => "Ship beam" })
                         .clicked()
                     {
                         self.payload = p;
@@ -1810,19 +1928,10 @@ impl LuminalApp {
                 }
             }
         }
-        ui.weak(format!("Power {:.0}% · weapon heat {:.0}% · field {:.0}% · {:.0} K",
-            100.0*b.thermal.capacitor_j/params::BEAM_CAPACITOR_J.value,
-            100.0*b.thermal.heat_j/params::BEAM_HEAT_LIMIT_J.value,100.0*b.thermal.field,
-            luminal_core::thermal::Thermal::temperature(b.screen_j)));
-        ui.weak(format!("Thermal emission {:.2} TW · screen {}",
-            b.thermal.emission(b.screen_j)/1e12,
-            if !b.has_screen { "not fitted" }
-            else if b.screen_up { if b.thermal.field < 0.999 { "building" } else { "established" } }
-            else if b.thermal.field > 0.001 { "collapsing / cooling" } else { "off" }));
-        ui.weak(format!("Baseline signature {:.1}× · screen emissivity {:.1}×",b.baseline_emission_factor,
-            luminal_core::thermal::Thermal::screen_emissivity(b.screen_j)));
+        ui.weak(format!("Power {:.0}% · heat {} · screens {:.0}%",100.0*b.thermal.capacitor_j/b.thermal.capacitor_capacity(),fmt_energy(b.thermal.heat_j),100.0*b.damage.screen_available));
+        ui.weak(format!("Thermal emission {:.2} TW · emissivity {:.2}×",b.thermal.emission()/1e12,b.emissivity.value()));
         if let Some(pd)=b.point_defence {
-            ui.label(format!("Point defence: automatic · {:.1}/s · {} shots",pd.rate_hz,pd.shots));
+            ui.label(format!("Point defence: {} lasers · {:.1}/s each · {} shots",pd.lasers,pd.rate_hz,pd.shots));
             ui.weak(format!("Laser kill chance: 50% per shot at {} ls; falls sharply beyond.",params::PD_HALF_RANGE_LS.value));
             if b.controllable {
                 let interceptors=b.interceptor_battery.is_some_and(|battery|battery.rounds>0) && b.damage.operating_effectiveness(luminal_core::damage::System::PdMissiles)>0.0;
@@ -1934,12 +2043,12 @@ impl LuminalApp {
             }
             if b.kind == BodyKind::Ship {
                 let mut up = b.screen_up;
-                if ui.add_enabled(b.has_screen,egui::Checkbox::new(&mut up, "Screen up")).on_hover_text("Builds gradually. Absorbed energy heats the field and radiates away; hot screens cannot collapse instantly.").changed() {
+                if ui.add_enabled(b.has_screen,egui::Checkbox::new(&mut up, "Screen up")).on_hover_text("Charges 2% per minute. Hits reduce capacity and heat the ship. Off disables absorption immediately.").changed() {
                     self.command(Command::SetScreen { body: b.id, up });
                 }
                 ui.label(format!(
                     "Screen {:.0} % full · hull {:.0} % damaged",
-                    100.0 * b.screen_j / params::SCREEN_CAPACITY_J.value,
+                    100.0 * b.damage.screen_available,
                     100.0 * b.hull_j / params::HULL_INTEGRITY_J.value
                 ));
             }
@@ -2061,6 +2170,8 @@ impl LuminalApp {
             if rect.contains(center) {
                 labels.add(center + EVec2::new(r * 0.7 + 4.0, -r * 0.7), label, col);
             } else {
+                let origin=view.bodies.iter().find(|b|b.controllable && Some(b.faction)==self.own_faction()).map_or(cam.center,|b|b.pos);
+                let label=edge_distance_label(&label,(o.center-origin).length());
                 draw_edge_marker(&painter, rect, center, &label, col, &mut labels);
             }
         }
@@ -2074,8 +2185,9 @@ impl LuminalApp {
             let age=(view.time-e.received_at).max(0.0);
             let Some(pos)=e.pos else {continue};
             let p=to_screen(&cam,rect,pos);
-            if matches!(e.kind,CombatKind::BeamPulse|CombatKind::PointDefence) {
-                let duration=0.5_f64.max(view.warp*0.2);
+            if matches!(e.kind,CombatKind::BeamPulse|CombatKind::SpinalPulse|CombatKind::PointDefence) {
+                let spinal=e.kind==CombatKind::SpinalPulse;
+                let duration=if spinal {1.0_f64.max(view.warp*0.45)} else {0.5_f64.max(view.warp*0.2)};
                 if age>=duration {continue;}
                 if let Some(aim)=e.aim {
                     let start=e.own_body.and_then(|id|view.bodies.iter().find(|b|b.id==id).map(|b|b.pos))
@@ -2084,8 +2196,17 @@ impl LuminalApp {
                         InterceptTarget::Own(id)=>view.bodies.iter().find(|b|b.id==id).map(|b|b.pos),
                         InterceptTarget::Contact(id)=>view.contacts.iter().find(|c|c.id==id).and_then(|c|c.track.as_ref()).map(|t|t.pos),
                     }).unwrap_or(aim);
-                    let color=Color32::from_rgb(150,225,255).gamma_multiply((1.0-age/duration) as f32);
-                    painter.line_segment([to_screen(&cam,rect,start),to_screen(&cam,rect,end)],Stroke::new(1.5,color));
+                    let alpha=(1.0-age/duration) as f32;
+                    let line=[to_screen(&cam,rect,start),to_screen(&cam,rect,end)];
+                    if spinal {
+                        for (width,strength) in [(18.0,0.08),(11.0,0.18),(5.0,0.95)] {
+                            painter.line_segment(line,Stroke::new(width,Color32::from_rgb(255,215,35).gamma_multiply(alpha*strength)));
+                        }
+                        painter.line_segment(line,Stroke::new(1.8,Color32::from_rgb(255,250,185).gamma_multiply(alpha)));
+                        painter.circle_filled(line[0],7.0*alpha,Color32::from_rgb(255,235,95).gamma_multiply(alpha));
+                    } else {
+                        painter.line_segment(line,Stroke::new(1.5,Color32::from_rgb(150,225,255).gamma_multiply(alpha)));
+                    }
                 }
             } else {
                 let duration=20.0_f64.max(view.warp*0.3);
@@ -2133,7 +2254,9 @@ impl LuminalApp {
             if rect.contains(p) {
                 labels.add(p + EVec2::new(r + 4.0, -r - 2.0), c.name.clone(), col.gamma_multiply(0.8));
             } else {
-                draw_edge_marker(&painter, rect, p, &c.name, col, &mut labels);
+                let origin=view.bodies.iter().find(|b|b.controllable && Some(b.faction)==self.own_faction()).map_or(cam.center,|b|b.pos);
+                let label=edge_distance_label(&c.name,(c.pos-origin).length());
+                draw_edge_marker(&painter, rect, p, &label, col, &mut labels);
             }
         }
 
@@ -2233,8 +2356,7 @@ impl LuminalApp {
                 let heading = self.ship_headings.entry(b.id).or_insert_with(|| {
                     if b.vel.length() > 0.01 {b.vel.normalized()} else {Vec2::new(0.0,1.0)}
                 });
-                *heading = if let Some(manual)=self.manual_flight.filter(|m|m.body==b.id && b.autopilot.is_none()) {manual.direction()}
-                    else {smooth_ship_heading(*heading,coast_heading(*heading,b.thrust),if view.paused {0.0} else {ui.input(|i|i.stable_dt) as f64})};
+                *heading=b.heading;
                 if b.kind==BodyKind::Ship {draw_burn_vector(&painter,p,*heading,b.thrust.length()/G0,1.0);}
                 draw_ship(&painter, p, b.vel, *heading, c, selected);
             }
@@ -2787,6 +2909,11 @@ fn draw_shadow(painter: &egui::Painter, cam: &Camera, rect: Rect, eye: Vec2, cen
     painter.add(Shape::convex_polygon(screen, Color32::from_rgba_unmultiplied(0, 0, 0, 35), Stroke::NONE));
 }
 
+fn edge_distance_label(name:&str,distance:f64)->String {
+    let au=distance/AU;
+    if au>10.0 {format!("{name} · {au:.0} AU")} else if au>0.1 {format!("{name} · {au:.1} AU")} else {name.into()}
+}
+
 /// A small arrow at the map edge pointing toward an off-screen object.
 fn draw_edge_marker(painter: &egui::Painter, rect: Rect, target: Pos2, name: &str, color: Color32, labels: &mut Labels) {
     let inner = rect.shrink(18.0);
@@ -2872,6 +2999,7 @@ fn damaging_hit_blooms_are_larger_brighter_and_longer_lived() {
     assert!(hit_bloom_style(1.0,1.0).is_none());
 }
 
+#[cfg(test)]
 fn smooth_ship_heading(previous:Vec2,target:Vec2,dt:f64)->Vec2 {
     let angle=previous.y.atan2(previous.x);
     let difference=wrap_angle(target.y.atan2(target.x)-angle);
@@ -2891,6 +3019,7 @@ fn heading_easing_is_frame_rate_independent_and_wraps_the_short_way() {
     assert!((smooth_ship_heading(start,end,0.0)-start).length()<1e-10);
 }
 
+#[cfg(test)]
 fn coast_heading(previous: Vec2, thrust: Vec2) -> Vec2 {
     if thrust.length() > 1e-5 {thrust.normalized()} else {previous}
 }
@@ -3439,6 +3568,10 @@ fn paint_chip(p: &egui::Painter, rect: Rect, code: &str, chip: Chip) {
 
 /// Subsystem status cards, grouped by department. Unknown stays unknown: a
 /// contact's matrix only reflects its latest confirmed active echo.
+fn heat_gauge_fill(rate:f64)->f64 {
+    if rate<=0.0 {0.0} else {((rate.max(1.0).log10()-6.0)/9.0).clamp(1.0/28.0,1.0)}
+}
+
 fn compact_meter(ui:&mut egui::Ui,label:&str,value:Option<f64>,color:Color32) {
     compact_meter_readout(ui,label,value,color,value.map_or("—".into(),|v|format!("{:.0}%",100.0*v)));
 }
@@ -3461,32 +3594,32 @@ fn compact_damage(ui:&mut egui::Ui,report:Option<&Report>) {
     compact_meter(ui,"ARMOUR",report.map(|r|r.damage.armour/r.damage.armour_max.max(1.0)),TEXT_MUTED);
 }
 
-fn compact_status(ui:&mut egui::Ui,report:Option<&Report>,thrust_g:Option<f64>,estimated:bool) {
+fn compact_status(ui:&mut egui::Ui,report:Option<&Report>,thrust_g:Option<f64>,max_g:Option<f64>,estimated:bool) {
     let (rect,_)=ui.allocate_exact_size(EVec2::new(ui.available_width(),66.0),Sense::hover());
     let bars=Rect::from_min_max(rect.min,rect.max-EVec2::new(23.0,0.0));
     ui.scope_builder(egui::UiBuilder::new().max_rect(bars),|ui| {
         compact_damage(ui,report);
-        compact_meter(ui,"SCREEN HEAT",report.filter(|r|r.installed[System::Screens as usize]).map(|r|r.screen_heat/params::SCREEN_CAPACITY_J.value),HEAT);
+        compact_meter(ui,"SCREENS",report.filter(|r|r.installed[System::Screens as usize]).map(|r|r.screen_available),ARMOUR);
     });
     let gauge=Rect::from_min_max(Pos2::new(rect.right()-14.0,rect.top()+9.0),Pos2::new(rect.right()-6.0,rect.bottom()-13.0));
     let p=ui.painter();
     p.rect_filled(gauge,0.0,WELL_BG);
     p.rect_stroke(gauge,0.0,Stroke::new(1.0,EDGE),StrokeKind::Inside);
-    if let Some(g)=thrust_g {
-        let fraction=(g/params::SHIP_MAX_ACCEL_G.value).clamp(0.0,1.0) as f32;
+    if let (Some(g),Some(max_g))=(thrust_g,max_g) {
+        let fraction=(g/max_g).clamp(0.0,1.0) as f32;
         p.rect_filled(Rect::from_min_max(Pos2::new(gauge.left(),gauge.bottom()-gauge.height()*fraction),gauge.max),0.0,ACCENT);
     }
     p.text(Pos2::new(gauge.center().x,rect.top()),egui::Align2::CENTER_TOP,"THR",mono(7.0),TEXT_MUTED);
     p.text(Pos2::new(gauge.center().x,rect.bottom()),egui::Align2::CENTER_BOTTOM,thrust_g.map_or("—".into(),|g|format!("{g:.0}")),mono(8.0),ACCENT);
     ui.interact(Rect::from_min_max(Pos2::new(rect.right()-22.0,rect.top()),rect.max),ui.id().with("thrust"),Sense::hover())
-        .on_hover_text(thrust_g.map_or("Thrust unknown".into(),|g|format!("{}{g:.1}g thrust / {:.0}g scale",if estimated {"Estimated "} else {""},params::SHIP_MAX_ACCEL_G.value)));
+        .on_hover_text(thrust_g.map_or("Thrust unknown".into(),|g|format!("{}{g:.1}g thrust · {}",if estimated {"Estimated "} else {""},max_g.map_or("maximum unknown".into(),|max|format!("{:.0}% of {max:.0}g maximum",100.0*g/max)))));
 }
 
 fn compact_systems(ui:&mut egui::Ui,salt:&str,report:Option<Report>) {
     let groups:[(&str,&[System]);5]=[
         ("SENSORS",&[System::Passive,System::Active,System::Direction]),
         ("ELECTRONIC WARFARE",&[System::Ecm,System::Eccm]),
-        ("WEAPONS",&[System::Beam,System::Launcher,System::PdMissiles,System::PdLaser]),
+        ("WEAPONS",&[System::Beam,System::Launcher,System::SrmLauncher,System::PdMissiles,System::PdLaser]),
         ("ENGINEERING",&[System::Propulsion,System::Power,System::Screens,System::Repair]),
         ("COMMAND",&[System::Crew,System::Mind]),
     ];
@@ -3524,7 +3657,7 @@ fn paint_repair_progress(p:&egui::Painter,cell:Rect,report:Option<Report>,system
 fn system_matrix(ui: &mut egui::Ui, salt: &str, report: Option<Report>) {
     const ROWS: [&[(&str, &[System])]; 3] = [
         &[("SENSORS", &[System::Passive, System::Active, System::Direction]), ("EW", &[System::Ecm, System::Eccm])],
-        &[("WEAPONS", &[System::Beam, System::Launcher, System::PdMissiles, System::PdLaser]), ("COMMAND", &[System::Crew, System::Mind])],
+        &[("WEAPONS", &[System::Beam, System::Launcher, System::SrmLauncher, System::PdMissiles, System::PdLaser]), ("COMMAND", &[System::Crew, System::Mind])],
         &[("ENGINEERING", &[System::Propulsion, System::Power, System::Screens, System::Repair])],
     ];
     let (gap, group_gap, label_h, chip_h, row_gap) = (3.0, 9.0, 10.0, 17.0, 4.0);

@@ -56,6 +56,7 @@ pub enum Command {
     ArmBeams { body: BodyId },
     /// Request gradual screen buildup or energy-conserving collapse.
     SetScreen { body: BodyId, up: bool },
+    SetHeatDump {body:BodyId,enabled:bool},
     SetSystemMode {body:BodyId,system:crate::world::controls::ControlledSystem,mode:crate::world::controls::Mode},
     SetWarp(f64),
     SetPaused(bool),
@@ -85,7 +86,7 @@ impl Command {
             Self::Follow {body,..} | Self::SetThrust { body, .. } | Self::Orbit { body, .. } | Self::Intercept { body, .. }
             | Self::AppendWaypoint {body,..} | Self::Flyby { body, .. } | Self::KeepRange {body,..} | Self::Evade {body,..} | Self::MoveTo { body, .. } | Self::AllStop { body }
             | Self::SetDriveLimit { body, .. } | Self::Launch { body, .. } | Self::FireBeam { body, .. }
-            | Self::Ping { body } | Self::EngageBeam { body, .. } | Self::SetScreen { body, .. } | Self::SetSystemMode {body,..}
+            | Self::SetHeatDump {body,..} | Self::Ping { body } | Self::EngageBeam { body, .. } | Self::SetScreen { body, .. } | Self::SetSystemMode {body,..}
             | Self::CancelLaunches { body } | Self::DeployProbe {body,..} | Self::ArmBeams { body } => Some(body),
             Self::SetWarp(_) | Self::SetPaused(_) => None,
         }
@@ -110,6 +111,9 @@ impl From<OrderError> for Rejection {
 /// Command-ship state, delayed friendly telemetry, or truth for the spectator.
 #[derive(Clone, Debug)]
 pub struct BodyView {
+    pub ship_class:Option<crate::world::ShipClass>,
+    pub heading:Vec2,
+    pub spinal_ready_at:f64,
     pub controls:crate::world::controls::Controls,
     pub emissivity:crate::sensors::EmissivityFactors,
     pub damage:crate::damage::Report,
@@ -121,6 +125,7 @@ pub struct BodyView {
     pub sensors: crate::sensors::SensorSuite,
     pub probes: u32,
     pub thermal: crate::thermal::Thermal,
+    pub thermal_rated_accel:f64,
     pub id: BodyId,
     pub name: String,
     pub kind: BodyKind,
@@ -142,7 +147,6 @@ pub struct BodyView {
     pub missile: Option<MissileView>,
     pub screen_up: bool,
     /// Energy stored in the screen and taken by the hull, J.
-    pub screen_j: f64,
     pub hull_j: f64,
     /// A combatant; unarmed ships (transports) are shown differently.
     pub armed: bool,
@@ -336,7 +340,7 @@ impl LocalSession {
                             Command::Ping {..} => "Active ping".into(),
                             Command::Flyby {target:InterceptTarget::Contact(c),..} => format!("Flyby ordered on {c}"),
                             Command::EngageBeam {target:Some(c),..} => format!("Main beam assigned to {c}"),
-                            Command::Launch {target,payload,..} => format!("Queue {} missile → {target}",payload.name()),
+                            Command::Launch {target,payload,..} => format!("Queue {} volley → {target}",payload.name()),
                             Command::SetScreen {up,..} => format!("Screen {}",if *up {"raised"} else {"lowered"}),
                             _ => format!("{cmd:?}"),
                         };
@@ -407,7 +411,7 @@ impl LocalSession {
         if let Some(body) = cmd.body() {
             let kind = self.owned(role, body)?;
             if let Command::SetThrust { thrust, .. } = &cmd {
-                let max_g = if kind == BodyKind::Ship { params::SHIP_MAX_ACCEL_G.value } else { params::PROBE_MAX_ACCEL_G.value };
+                let max_g = if kind == BodyKind::Ship { self.world.body(body).and_then(|b|b.ship_class).map_or(120.0,|c|c.max_g()) } else { params::PROBE_MAX_ACCEL_G.value };
                 if thrust.length() / G0 > max_g * (1.0 + 1e-9) { return Err(Rejection::ExceedsMaxAccel { requested_g: thrust.length()/G0, max_g }); }
             }
             self.world.log_command(&cmd);
@@ -421,7 +425,7 @@ impl LocalSession {
             Command::SetThrust { body, thrust } => {
                 let kind = self.owned(role, body)?;
                 let max_g = match kind {
-                    BodyKind::Ship => params::SHIP_MAX_ACCEL_G.value,
+                    BodyKind::Ship => self.world.body(body).and_then(|b|b.ship_class).map_or(120.0,|c|c.max_g()),
                     BodyKind::Station => 0.0,
                     BodyKind::Probe => params::PROBE_MAX_ACCEL_G.value,
                     BodyKind::Missile => params::MISSILE_MAX_ACCEL_G.value,
@@ -482,6 +486,7 @@ impl LocalSession {
                 self.owned(role, body)?;
                 self.world.arm_beams(body)?;
             }
+            Command::SetHeatDump {body,enabled}=>{self.owned(role,body)?;self.world.set_heat_dump(body,enabled)?;}
             Command::SetScreen { body, up } => {
                 self.owned(role, body)?;
                 self.world.set_screen(body, up)?;
@@ -556,10 +561,10 @@ impl LocalSession {
                 let known;
                 let b = if let Role::Faction(f) = role { known = w.known_body(f, BodyId(i as u32))?; &known } else { b };
                 let s = b.trajectory.state_at(t)?;
-                Some(BodyView {
+                Some(BodyView {ship_class:b.ship_class,heading:b.heading_at(t),spinal_ready_at:b.spinal_ready_at,
                     controls:b.controls,
                     emissivity:b.emissivity_factors(t),
-                    damage:crate::damage::Report {damage:b.damage,installed:b.installed_systems(),observed_at:b.trajectory.start(),screen_heat:b.screen_j},
+                    damage:crate::damage::Report {damage:b.damage,installed:b.installed_systems(),observed_at:b.trajectory.start(),screen_available:b.screen_available()},
                     interceptor_battery:b.interceptor_battery,interceptor:b.interceptor.map(|i|(i.dv_left,i.expires)),
                     point_defence: b.point_defence.map(|mut pd| {pd.rate_hz*=b.operating_effectiveness(crate::damage::System::PdLaser);pd}),
                     has_screen: b.has_screen,
@@ -567,6 +572,7 @@ impl LocalSession {
                     sensors: b.sensors,
                     probes: b.probes,
                     thermal: b.thermal,
+                    thermal_rated_accel:b.heat_rated_accel(),
                     id: BodyId(i as u32),
                     name: b.name.clone(),
                     kind: b.kind,
@@ -590,7 +596,7 @@ impl LocalSession {
                         }),
                     }),
                     screen_up: b.screen_up,
-                    screen_j: b.screen_j,
+
                     hull_j: b.hull_j,
                     armed: b.armed,
                     controllable: b.controllable && w.decider(b.faction,t)==Some(BodyId(i as u32)),
@@ -703,7 +709,7 @@ impl LocalSession {
             pings: w.ping_emissions.iter().filter(|(id, front)| visible(w.bodies[id.0 as usize].faction)
                 && !w.hidden_ping_circles.contains(&(*id,front.t_emit.to_bits()))
                 && !matches!(w.bodies[id.0 as usize].kind, BodyKind::Station | BodyKind::Missile)).map(|(id, front)| OwnPing {
-                origin:front.origin,t_emit:front.t_emit,useful_range:crate::sensors::ping_range(crate::sensors::REFERENCE_EF) * w.bodies[id.0 as usize].operating_effectiveness(crate::damage::System::Active) * if matches!(w.bodies[id.0 as usize].kind,BodyKind::Probe|BodyKind::Missile) { params::PROBE_SENSOR_FACTOR.value.sqrt() } else {1.0}
+                origin:front.origin,t_emit:front.t_emit,useful_range:crate::sensors::ping_range(crate::sensors::REFERENCE_EF) * w.bodies[id.0 as usize].sensor_rating()/100.0 * w.bodies[id.0 as usize].operating_effectiveness(crate::damage::System::Active) * if matches!(w.bodies[id.0 as usize].kind,BodyKind::Probe|BodyKind::Missile) { params::PROBE_SENSOR_FACTOR.value.sqrt() } else {1.0}
             }).collect(),
             contacts,
             celestials,
@@ -853,6 +859,7 @@ mod tests {
             Command::AllStop { body },
             Command::Ping { body },
             Command::SetScreen { body, up: true },
+            Command::SetHeatDump {body,enabled:true},
             Command::Orbit { body, celestial: 1 },
             Command::FireBeam { body, target: ContactId(0) },
             Command::EngageBeam { body, target: Some(ContactId(0)) },
@@ -1053,7 +1060,9 @@ mod tests {
         let me = Role::Faction(ESCORT);
         let cruiser = BodyId(2);
         assert_eq!(s.command(me, Command::SetThrust { body: cruiser, thrust: Vec2::ZERO }), Err(Rejection::NotYourBody));
-        let too_hard = Vec2::new(101.0 * G0, 0.0);
+        assert_eq!(s.command(me,Command::SetHeatDump {body:cruiser,enabled:true}),Err(Rejection::NotYourBody));
+        assert_eq!(s.command(Role::Spectator,Command::SetHeatDump {body:BodyId(1),enabled:true}),Err(Rejection::SpectatorCannotCommand));
+        let too_hard = Vec2::new(121.0 * G0, 0.0);
         assert!(matches!(
             s.command(me, Command::SetThrust { body: BodyId(1), thrust: too_hard }),
             Err(Rejection::ExceedsMaxAccel { .. })

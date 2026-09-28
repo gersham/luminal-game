@@ -66,11 +66,9 @@ fn choose_target<'a>(view:&'a View,ship:&BodyView)->(Option<&'a ContactView>,boo
 fn station_detour(ship:&BodyView,site:&crate::world::SensorSite,destination:crate::kinematics::Vec2)->Option<crate::kinematics::Vec2> {
     use crate::kinematics::Vec2;
 
-    let ef=ship.emissivity.value();
-    let passive=if site.sensors.passive {crate::sensors::detection_ranges(ef)[2]} else {0.0};
-    let active=if site.sensors.active {crate::sensors::ping_range(ef)} else {0.0};
-    // Active identity-quality fixes warrant a larger avoidance margin.
-    let radius=1.2*passive.max(3.0*active);
+    // Avoid the close precision-sensor zone, never chase an expanding heat signature.
+    // A station is a tactical risk, not a mission-ending exclusion radius.
+    let radius=if site.sensors.active {1.5*AU} else if site.sensors.passive {AU} else {0.0};
     if radius<=0.0 {return None;}
     let relative=ship.pos-site.pos;
     let distance=relative.length();
@@ -100,15 +98,12 @@ impl Doctrine {
             let objective=view.objective.as_ref().filter(|o|o.attacker==b.faction);
             let site=objective.and_then(|o|o.sensor_site.as_ref());
             let search_destination=objective.map(|o|o.center);
-            let immediate_threat=engage && target.is_some_and(|c|
-                (c.track.as_ref().unwrap().pos-b.pos).length()<=Payload::Nuclear.engagement_range());
-            let detour=site.filter(|_|!immediate_threat).and_then(|site|station_detour(b,site,
-                target.and_then(|c|c.track.as_ref()).map_or(search_destination.unwrap_or(site.pos),|t|t.pos)));
+            let detour=site.filter(|_|target.is_none()).and_then(|site|station_detour(b,site,
+                search_destination.unwrap_or(site.pos)));
             if site.is_some() {
                 use crate::world::controls::{ControlledSystem,Mode};
                 for (system,current,mode) in [
                     (ControlledSystem::Screens,b.controls.screens,if detour.is_some() {Mode::Off} else {Mode::Auto}),
-                    (ControlledSystem::Boost,b.controls.boost,if detour.is_some() {Mode::Off} else {Mode::Auto}),
                     (ControlledSystem::Ecm,b.controls.ecm,if detour.is_some() {Mode::Off} else {Mode::Auto}),
                     (ControlledSystem::Active,b.controls.active,Mode::Off),
                 ] {if current!=mode {out.push(Command::SetSystemMode {body:b.id,system,mode});}}
@@ -149,7 +144,7 @@ impl Doctrine {
             } else {out.push(Command::Flyby { body: b.id, target: InterceptTarget::Contact(c.id) });}
             // Let beam fire control judge useful long-range shots from the
             // received solution; do not force wasteful directed fire at 1 AU.
-            if !b.beam_auto {out.push(Command::ArmBeams {body:b.id});}
+            if !b.beam_auto && b.ship_class!=Some(crate::world::ShipClass::Picket) {out.push(Command::ArmBeams {body:b.id});}
             // Screen policy belongs to the platform's On/Off/Auto controller.
             if range <= Payload::Nuclear.engagement_range() && view.time >= *self.salvo_at.get(&b.id).unwrap_or(&0.0) {
                 let close=range<0.1*AU;
@@ -161,7 +156,8 @@ impl Doctrine {
                     let eta=crate::world::weapon_probability::flight_seconds(payload,range,0.0);
                     let sigma=(tr.cov[0][0]+tr.cov[1][1]+(tr.velocity_sigma*eta).powi(2)).max(0.0).sqrt();
                     let confidence=crate::world::weapon_probability::hit_chance(payload,range,
-                        crate::world::weapon_probability::quality(c.detection),sigma,0.0,1.0);
+                        crate::world::weapon_probability::quality(c.detection),sigma,
+                        crate::world::weapon_probability::evasion_score(tr.accel,tr.vel-b.vel,tr.pos-b.pos),1.0);
                     if confidence<0.5 || c.detection<crate::sensors::DetectionLevel::Resolved {
                         if range<crate::units::AU && view.time>=*self.ping_at.get(&b.id).unwrap_or(&0.0) {
                             out.push(Command::Ping {body:b.id});
@@ -243,10 +239,8 @@ mod tests {
             pos:Vec2::new(3.0*AU,0.0),sensors:crate::sensors::SensorSuite::FULL});
         let mut ai=Doctrine::default();
         let cautious=ai.orders(&view);
-        assert!(cautious.iter().any(|c|matches!(c,Command::MoveTo {..})));
+        assert!(cautious.iter().any(|c|matches!(c,Command::Flyby {..})));
         assert!(!cautious.iter().any(|c|matches!(c,Command::Ping {..}|Command::Launch {..})));
-        assert!(cautious.iter().any(|c|matches!(c,Command::SetSystemMode {
-            system:crate::world::controls::ControlledSystem::Screens,mode:crate::world::controls::Mode::Off,..})));
         view.contacts[1].track.as_mut().unwrap().pos=Vec2::new(0.1*AU,0.0);
         assert!(ai.orders(&view).iter().any(|c|matches!(c,Command::KeepRange {target:InterceptTarget::Contact(ContactId(2)),..})));
         let ship=view.bodies.iter().find(|b|b.controllable).unwrap();

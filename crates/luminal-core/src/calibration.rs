@@ -186,7 +186,7 @@ fn run_frigate_duel(depth:u32,seed:u64,range_au:f64,battle:Option<f64>,salvo:Opt
             if battle.is_some() && w.bodies[i].alive_at(w.time()) && (w.time() as u64).is_multiple_of(60) {let _=w.ping(BodyId(i as u32));}
         }
         w.advance_to((w.time()+if battle.is_some() {1.0} else {30.0}).min(limit));
-        for (i,peak) in peak_screen.iter_mut().enumerate() {*peak=peak.max(w.bodies[i].screen_j/SCREEN_CAPACITY_J.value);}
+        for (i,peak) in peak_screen.iter_mut().enumerate() {*peak=peak.max(1.0-w.bodies[i].screen_available());}
         if first_damage_s.is_none() && w.bodies[..2].iter().any(|b|b.damage.hull<b.damage.hull_max) {first_damage_s=Some(w.time());}
         if first_loss_s.is_none() && w.bodies[..2].iter().any(|b|!b.alive_at(w.time())) {first_loss_s=Some(w.time());}
         if progress && w.time()>=next_progress {
@@ -227,11 +227,27 @@ mod tests {
     }
     #[test]
     #[ignore = "sustained balance gate; run explicitly in release mode"]
-    fn sustained_frigate_battle_survives_opening_and_reaches_knockout() {
+    fn short_range_exchange_is_punishing_but_allows_counterfire() {
         let r=frigate_battle(5,1000,0.002,10.0);
         assert!(r.hits.iter().all(|n|*n>=5),"both ships must return sustained fire: {r:?}");
-        assert!(r.first_loss_s.is_some_and(|t|(300.0..7200.0).contains(&t)),"no opening kill or indefinite screen tank: {r:?}");
+        assert!(r.first_loss_s.zip(r.first_damage_s).is_some_and(|(loss,first)|loss-first>=30.0 && loss<300.0),
+            "inside 1 ls both ships must exchange fire, then die promptly: {r:?}");
         assert_eq!(r.interceptors_launched,[0,0],"inside 5 ls the lasers defend instead");
+    }
+    #[test]
+    #[ignore = "full closing duel; run explicitly in release mode"]
+    fn closing_frigates_reach_damaging_beam_combat() {
+        let r=class_battle(ShipClass::Frigate,2000,None,0.35);
+        assert!(r.missile_hp[0]>500.0,"SRMs must inflict substantial damage: {r:?}");
+        assert!(r.reached_beams && r.beam_finish && r.beam_hp>500.0,"beam hits must penetrate and finish: {r:?}");
+        assert!(r.interceptor_kills>0 && r.winner>=0);
+    }
+    #[test]
+    #[ignore = "full regression duel for delayed acceleration feedback"]
+    fn mutual_range_holding_does_not_permanently_spoil_beam_aim() {
+        let r=class_battle(ShipClass::Destroyer,2000,None,0.35);
+        assert!(r.beam_finish && r.beam_hp>1000.0 && r.time<28_800.0,
+            "previously both ships oscillated at full thrust and missed forever: {r:?}");
     }
     #[test]
     fn weapon_trial_is_repeatable_and_records_delivery() {
@@ -246,4 +262,113 @@ mod tests {
         assert!(beam_trial(30.0,10.0,1000)<1.0);
         assert!(beam_trial(1.0,10.0,1000)>1e12);
     }
+}
+
+/// Closing, like-class duels with the actual fitted hulls, magazines, sensors,
+/// thermal model, automatic evasion and local missile defence. Both pilots use
+/// their received tracks, spend LRMs while closing, then SRMs, then beam standoff.
+#[derive(Debug)]
+pub struct ClassBattle {
+    pub class:ShipClass,pub seed:u64,pub depth:u32,pub time:f64,pub winner:i32,
+    pub launched:[u32;2],pub missile_hits:[usize;2],pub missile_hp:[f64;2],pub missile_crit:[usize;2],
+    pub beam_hits:usize,pub beam_hp:f64,pub beam_finish:bool,pub reached_beams:bool,
+    pub loss_reason:&'static str,
+    pub hull:[f64;2],pub interceptors_used:u32,pub interceptor_kills:usize,pub pd_kills:usize,
+}
+pub fn class_battle(class:ShipClass,seed:u64,depth:Option<u32>,range_au:f64)->ClassBattle {
+    assert!(range_au.is_finite() && range_au>0.0);
+    let closing=std::env::var("LUMINAL_DUEL_CLOSURE_KMS").ok().and_then(|s|s.parse::<f64>().ok()).unwrap_or(2000.0);
+    assert!(closing.is_finite() && closing.abs()<0.5*C);
+    let beams_only=std::env::var("LUMINAL_DUEL_MISSILES").as_deref()==Ok("off");
+    let source=crate::scenario::transport_intercept_class(seed,class);
+    let system=System {bodies:vec![]};
+    let base=Vec2::new(20.0*AU,0.0);
+    let specs=(0..2).map(|i|BodySpec {name:format!("{} {i}",class.name()),kind:BodyKind::Ship,faction:FactionId(i),
+        state:State {pos:base+Vec2::new(0.0,i as f64*range_au*AU),vel:Vec2::new(0.0,if i==0 {closing*0.5} else {-closing*0.5})},
+        thrust:Vec2::ZERO,magazine:0}).collect();
+    let mut w=World::new(system,specs,100_000.0,seed);
+    let depth=depth.unwrap_or(class.interceptors());
+    for i in 0..2 {
+        let original=w.bodies[i].clone();
+        let mut body=source.bodies[1].clone();body.faction=FactionId(i as u8);body.name=original.name;
+        body.trajectory=original.trajectory;body.autopilot=None;body.route=None;body.commanded=Vec2::ZERO;
+        body.beam_auto=false;body.beam_target=None;body.controllable=true;
+        body.controls=controls::Controls::default();body.controls.screens=controls::Mode::On;
+        body.screen_up=true;body.thermal.field=1.0;
+        if beams_only {body.magazine=[0,0];}
+        body.interceptor_battery.as_mut().unwrap().rounds=depth;
+        body.facing=if i==0 {std::f64::consts::FRAC_PI_2} else {-std::f64::consts::FRAC_PI_2};body.turn_target=body.facing;
+        w.bodies[i]=body;
+        w.scheduler.schedule(0.0,Event::PointDefence(BodyId(i as u32)));
+        w.reset_platform_history(BodyId(i as u32));
+    }
+    let contacts:Vec<_>=(0..2).map(|i| {
+        let id=BodyId(i);let other=BodyId(1-i);let faction=FactionId(i as u8);
+        let c=w.contact_id(faction,other);let origin=w.state(id,0.0).unwrap().pos;let seen=w.state(other,0.0).unwrap();let rel=seen.pos-origin;
+        w.perceptions.get_mut(&faction).unwrap().ingest(Observation {contact:c,sensor:id,origin,emitted_at:0.0,sensor_received_at:0.0,decider_received_at:0.0,
+            source:Source::Emission,detection:sensors::DetectionLevel::Resolved,snr:1e12,
+            measurement:Measurement::BearingRange {range:rel.length(),bearing:bearing_of(rel),sigma_range:0.001,sigma_bearing:1e-10}},&w.system);
+        let tr=w.perceptions.get_mut(&faction).unwrap().contacts.get_mut(&c).unwrap().track.as_mut().unwrap();
+        tr.x[2]=seen.vel.x;tr.x[3]=seen.vel.y;tr.p[2][2]=0.001;tr.p[3][3]=0.001;
+        c
+    }).collect();
+    w.tactical_frame();
+    if let Some(path)=std::env::var_os("LUMINAL_DUEL_LOG") {w.enable_debug_log(std::path::Path::new(&path)).unwrap();}
+    let mut reached_beams=false;
+    let limit=std::env::var("LUMINAL_DUEL_STOP_S").ok().and_then(|s|s.parse().ok()).unwrap_or(28_800.0);
+    while w.time()<limit && w.bodies[..2].iter().all(|b|b.alive_at(w.time())) {
+        for (i,&c) in contacts.iter().enumerate() {
+            let id=BodyId(i as u32);let b=&w.bodies[i];
+            let Some(tr)=w.received_picture(id).and_then(|p|p.contacts.get(&c)).and_then(|c|c.estimate(w.time(),&w.system)) else {let _=w.ping(id);continue;};
+            let range=(tr.pos()-w.state(id,w.time()).unwrap().pos).length();
+            let payload=if b.magazine[0]>0 {Payload::Kinetic} else {Payload::Beam};
+            let desired=autopilot::weapon_standoff(payload);
+            if b.autopilot.is_none_or(|ap|!matches!(ap.order,Order::KeepRange(_,range) if (range-desired).abs()<1.0)) {
+                let _=w.set_tactical_range(id,InterceptTarget::Contact(c),Some(desired));
+            }
+            let heat=w.bodies[i].thermal;
+            if !heat.dumping && heat.heat_fraction()>1.0 {let _=w.set_heat_dump(id,true);}
+            else if heat.dumping && heat.heat_fraction()<0.25 {let _=w.set_heat_dump(id,false);}
+            if class!=ShipClass::Picket && !w.bodies[i].beam_auto {let _=w.arm_beams(id);}
+            for p in Payload::ALL {
+                if range<=if p==Payload::Kinetic {2.0*autopilot::weapon_standoff(p)} else {p.engagement_range()} && w.bodies[i].missile_queued[p.index()]==0 && w.time()>=w.bodies[i].missile_ready_at[p.index()] {
+                    let _=w.queue_launch(id,c,p);
+                }
+            }
+            if (w.time() as u64).is_multiple_of(60) {let _=w.ping(id);}
+        }
+        w.advance_to(w.time()+5.0);
+        if (w.time() as u64).is_multiple_of(300) {
+            let range=w.state(BodyId(0),w.time()).zip(w.state(BodyId(1),w.time())).map(|(a,b)|(a.pos-b.pos).length()/crate::units::LIGHT_SECOND);
+            for (i,contact) in contacts.iter().enumerate() {
+                let b=&w.bodies[i];
+                let tr=w.received_picture(BodyId(i as u32)).and_then(|p|p.contacts.get(contact)).and_then(|c|c.estimate(w.time(),&w.system));
+                let actual=w.state(BodyId(1-i as u32),w.time());
+                let tracking=tr.zip(actual).map(|(tr,s)|(tr.pos()-s.pos,tr.vel()-s.vel,tr.accel()));
+                w.debug_note("DUEL_STATE",format!("body={i} range_ls={range:?} hull={} armour={} heat_fraction={} dumping={} autopilot={:?} commanded={:?} systems={:?}",
+                    b.damage.hull,b.damage.armour,b.thermal.heat_fraction(),b.thermal.dumping,b.autopilot,b.commanded,b.damage.systems));
+                w.debug_note("DUEL_TRACK",format!("body={i} error_pos_vel_accel={tracking:?} actual={actual:?} thrust={:?}",w.bodies[1-i].trajectory.thrust_at(w.time())));
+            }
+        }
+        // A shield-only grazing pulse is not evidence of a damaging beam fight.
+        reached_beams|=w.bodies[..2].iter().all(|b|b.alive_at(w.time()))
+            && w.hits.iter().filter(|h|h.payload==Payload::Beam).map(|h|h.hull_damage+h.armour_damage).sum::<f64>()
+                >=0.05*w.bodies[0].damage.hull_max;
+        for loss in &w.losses {
+            assert!(!w.bodies[loss.body.0 as usize].alive_at(w.time()),"lost body remains alive");
+        }
+    }
+    ClassBattle {class,seed,depth,time:w.time(),winner:match (w.bodies[0].alive_at(w.time()),w.bodies[1].alive_at(w.time())) {(true,false)=>0,(false,true)=>1,(false,false)=>2,_=>-1},
+        launched:std::array::from_fn(|j|w.bodies.iter().filter(|b|b.missile.is_some_and(|m|m.payload==Payload::ALL[j])).count() as u32),
+        missile_hits:std::array::from_fn(|j|w.hits.iter().filter(|h|h.payload==Payload::ALL[j]).count()),
+        missile_hp:std::array::from_fn(|j|w.hits.iter().filter(|h|h.payload==Payload::ALL[j]).map(|h|h.hull_damage+h.armour_damage).sum()),
+        missile_crit:std::array::from_fn(|j|w.hits.iter().filter(|h|h.payload==Payload::ALL[j] && h.system_hit.is_some()).count()),
+        beam_hits:w.hits.iter().filter(|h|h.payload==Payload::Beam).count(),beam_hp:w.hits.iter().filter(|h|h.payload==Payload::Beam).map(|h|h.hull_damage+h.armour_damage).sum(),
+        beam_finish:w.losses.iter().any(|l|l.body.0<2 && matches!(l.cause,LossCause::ShipBeam {..})),reached_beams,
+        loss_reason:if w.bodies[..2].iter().any(|b|b.damage.hull<=0.0) {"hull"}
+            else if w.bodies[..2].iter().any(|b|b.damage.state(crate::damage::System::Power)==crate::damage::Condition::Destroyed) {"reactor"} else {"timeout"},
+        hull:std::array::from_fn(|i|w.bodies[i].damage.hull/w.bodies[i].damage.hull_max),
+        interceptors_used:w.bodies[..2].iter().map(|b|b.interceptor_battery.unwrap().launched).sum(),
+        interceptor_kills:w.losses.iter().filter(|l|matches!(l.cause,LossCause::Interceptor {..})).count(),
+        pd_kills:w.losses.iter().filter(|l|matches!(l.cause,LossCause::PointDefence {..})).count()}
 }

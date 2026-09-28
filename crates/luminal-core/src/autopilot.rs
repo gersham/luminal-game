@@ -75,7 +75,8 @@ pub fn weapon_standoff(payload:crate::missile::Payload)->f64 {
     use crate::missile::Payload;
     match payload {
         Payload::Beam=>crate::params::SHIP_BEAM_AUTO_RANGE_LS.value*crate::units::LIGHT_SECOND/3.0,
-        Payload::Nuclear|Payload::Kinetic=>payload.engagement_range()*0.5,
+        Payload::Nuclear=>payload.engagement_range()*0.5,
+        Payload::Kinetic=>0.01*crate::units::AU,
     }
 }
 /// Fraction of the drive a move order plans to brake with; the rest absorbs control lag
@@ -135,7 +136,11 @@ pub fn rendezvous(ship: State, target: State, ff: Vec2, max_accel: f64) -> Appro
 }
 
 pub fn keep_range(ship:State,target:State,ff:Vec2,range:f64,max_accel:f64)->Approach {
-    approach(ship,target,ff,range,INTERCEPT_BRAKE_FRACTION*max_accel,max_accel)
+    // Hostile acceleration is a delayed, filtered estimate. Two ships mirroring
+    // it at unity gain can sustain alternating full burns forever at standoff.
+    // Let velocity feedback do most of the matching; friendly Follow retains
+    // its separate full feed-forward formation controller.
+    approach(ship,target,ff*0.25,range,INTERCEPT_BRAKE_FRACTION*max_accel,max_accel)
 }
 
 /// Full burn toward the target's current estimated position, without approach braking.
