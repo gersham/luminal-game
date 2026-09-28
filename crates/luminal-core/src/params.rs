@@ -385,10 +385,10 @@ pub const NUCLEAR_AOE_KM: Param = Param {
 
 pub const NUCLEAR_ENERGY_J: Param = Param {
     key: "payload.nuclear_energy",
-    value: 7.5e13,
+    value: 1.0e15,
     unit: "J",
     commitment: Placeholder,
-    note: "75 TJ within half the AoE; falls as 1/d² to a quarter at the edge, before screen coupling.",
+    note: "1 PJ on a successful probabilistic LRM proximity strike, half an SRM direct hit, before screen coupling.",
 };
 
 

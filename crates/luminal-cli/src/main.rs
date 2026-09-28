@@ -51,6 +51,17 @@ fn main() {
         }
         return;
     }
+    if matches!(first.as_deref(),Some("--srm-salvo"|"--lrm-salvo")) {
+        let lrm=first.as_deref()==Some("--lrm-salvo");
+        let payload=if lrm {luminal_core::missile::Payload::Nuclear} else {luminal_core::missile::Payload::Kinetic};
+        let seeds=args.next().and_then(|s|s.parse::<u64>().ok()).unwrap_or(50);
+        println!("range_au,depth,seed,killed,hull,hits,interceptor_kills,pd_kills,finished");
+        for range in if lrm {[0.1,1.0]} else {[0.1,0.19]} {for depth in [0,30] {for seed in 1000..1000+seeds {
+            let r=luminal_core::world::calibration::missile_salvo(payload,depth,seed,range);
+            println!("{range},{depth},{seed},{},{},{},{},{},{}",r.destroyed[1],r.hull[1],r.hits[1],r.interceptor_kills,r.pd_kills,r.finished);
+        }}}
+        return;
+    }
     if first.as_deref()==Some("--missile-balance") {
         let seeds=args.next().and_then(|s|s.parse::<u64>().ok()).unwrap_or(5);
         println!("payload,range_au,error_ls,seed,hit,damage_j,closest_km,finished");

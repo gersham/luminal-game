@@ -16,6 +16,8 @@ impl CombatKind {
 }
 #[derive(Clone, Debug)]
 pub struct CombatEvent {
+    /// Known platform category, retained after its map object disappears.
+    pub subject_kind:Option<BodyKind>,
     /// Coarse visible impact intensity, not enemy subsystem telemetry (0..1).
     pub impact_strength:f32,
     /// Exact damage telemetry is shared with allies only.
@@ -267,7 +269,7 @@ impl World {
                 _=>None,
             }.filter(|(fired,_,_)|(*fired-t).abs()<1e-6).map(|(_,_,aim)|aim)
         });
-        self.refinement.truth_events.push(CombatEvent { impact_strength,damage:damage.clone(),contact:None, emitted_at: t, received_at: t, pos:Some(pos), kind, own_body: body, aim });
+        self.refinement.truth_events.push(CombatEvent { subject_kind:body.map(|id|self.bodies[id.0 as usize].kind),impact_strength,damage:damage.clone(),contact:None, emitted_at: t, received_at: t, pos:Some(pos), kind, own_body: body, aim });
         self.refinement.flashes.push(Flash { impact_strength,damage,front: Front { origin: pos, t_emit: t }, kind, body, owner, pending, aim });
     }
     pub(super) fn delay_alert(&mut self, id: BodyId, t: f64, kind: AlertKind) {
@@ -316,7 +318,9 @@ impl World {
             self.refinement.retired_contacts.insert((faction, contact));
         }
         let contact=if !own && pos.is_some() {flash.body.map(|body|self.contact_id(faction,body))} else {None};
-        Some(CombatEvent {impact_strength:flash.impact_strength,damage:if own {flash.damage.clone()} else {None},contact,emitted_at:flash.front.t_emit,received_at:arrival,pos,kind:flash.kind,
+        let classified=own || contact.is_some_and(|c|self.perceptions.get(&faction).and_then(|p|p.contacts.get(&c)).is_some_and(|c|c.resolved));
+        let subject_kind=flash.body.filter(|_|classified).map(|id|self.bodies[id.0 as usize].kind);
+        Some(CombatEvent {subject_kind,impact_strength:flash.impact_strength,damage:if own {flash.damage.clone()} else {None},contact,emitted_at:flash.front.t_emit,received_at:arrival,pos,kind:flash.kind,
             // A visible beam discharge carries its beam direction, not the
             // target's identity or true position. Anchor it at the observed flash.
             aim:if own {flash.aim} else if matches!(flash.kind,CombatKind::BeamPulse|CombatKind::PointDefence) {
@@ -693,6 +697,18 @@ mod tests {
         w.record_combat(0.0, pos, CombatKind::BeamPulse, Some(BodyId(1)), None);
         w.advance_to(11.0);
         assert!(!w.contact_retired(FactionId(0), contact), "ships survive their beam discharge");
+    }
+
+    #[test] fn ship_destruction_category_arrives_with_the_flash_not_before() {
+        let mut w=fleet();w.bodies[1].faction=FactionId(1);
+        let pos=w.state(BodyId(1),0.0).unwrap().pos;
+        w.record_combat(0.0,pos,CombatKind::Destroyed,Some(BodyId(1)),None);
+        w.advance_to(9.0);
+        assert!(!w.refinement.received.get(&FactionId(0)).is_some_and(|events|events.iter().any(|e|e.kind==CombatKind::Destroyed)));
+        w.advance_to(11.0);
+        let event=w.refinement.received[&FactionId(0)].iter().find(|e|e.kind==CombatKind::Destroyed).unwrap();
+        assert_eq!(event.subject_kind,Some(BodyKind::Ship));assert!(event.own_body.is_none());
+        assert!(event.received_at>=10.0);assert!(event.contact.is_some());
     }
 
     #[test]

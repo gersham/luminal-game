@@ -61,6 +61,13 @@ impl TacticalLog {
         }
         for event in fresh.iter().rev() {
             match event.kind {
+                CombatKind::Destroyed if event.subject_kind==Some(BodyKind::Ship)=>{
+                    let name=if event.own_body==selected && selected.is_some() {"OWN SHIP".into()}
+                        else if let Some(body)=event.own_body {view.bodies.iter().find(|b|b.id==body).map_or("FRIENDLY SHIP".into(),|b|b.name.clone())}
+                        else if let Some(contact)=event.contact {view.contacts.iter().find(|c|c.id==contact).map(contact_label).unwrap_or_else(||format!("T{}",contact.0))}
+                        else {"SHIP".into()};
+                    self.push(format!("ship-destroyed-{:?}",key(event)),format!("{name} · DESTROYED"),DANGER,event.received_at);
+                },
                 CombatKind::Impact=>{
                     let source=if event.own_body==selected && selected.is_some() {"OWN SHIP".into()}
                         else if let Some(b)=event.own_body.and_then(|id|view.bodies.iter().find(|b|b.id==id)) {b.name.clone()}
@@ -284,12 +291,12 @@ mod tests {
     }
 
     #[test]
-    fn combat_log_reports_missile_results_and_beams_not_destruction() {
+    fn combat_log_reports_missile_results_and_beams_not_missile_destruction() {
         let app=LuminalApp::new();
         let mut view=app.session.view(Role::Faction(ESCORT));
         view.contacts.clear();
         view.combat=[CombatKind::Destroyed,CombatKind::MissileHit,CombatKind::MissileMiss,CombatKind::BeamPulse].into_iter().enumerate().map(|(i,kind)|
-            luminal_core::world::CombatEvent {impact_strength:0.0,damage:None,contact:None,aim:None,pos:None,kind,own_body:Some(BodyId(1)),emitted_at:i as f64,received_at:i as f64}).collect();
+            luminal_core::world::CombatEvent {subject_kind:Some(BodyKind::Missile),impact_strength:0.0,damage:None,contact:None,aim:None,pos:None,kind,own_body:Some(BodyId(1)),emitted_at:i as f64,received_at:i as f64}).collect();
         let mut log=TacticalLog::default();
         log.observe(&view,Some(BodyId(1)),0.0);
         assert_eq!(log.lines.len(),3);
@@ -313,6 +320,21 @@ mod tests {
         assert_eq!(TacticalLog::opacity(8.0),1.0);
         assert_eq!(TacticalLog::opacity(24.0),0.5);
         assert_eq!(TacticalLog::opacity(40.0),0.0);
+    }
+
+    #[test] fn ship_destruction_logs_survive_removed_objects_and_ignore_expendables() {
+        let app=LuminalApp::new();let mut view=app.session.view(Role::Faction(ESCORT));
+        view.bodies.clear();view.contacts.clear();
+        view.combat=[Some(BodyKind::Ship),Some(BodyKind::Ship),Some(BodyKind::Missile),Some(BodyKind::Missile),None].into_iter().enumerate().map(|(i,subject_kind)|
+            luminal_core::world::CombatEvent {subject_kind,impact_strength:0.0,damage:None,
+                contact:if i==1 {Some(ContactId(1))} else {None},own_body:if i==0 {Some(BodyId(1))} else {None},
+                aim:None,pos:None,kind:CombatKind::Destroyed,emitted_at:i as f64,received_at:10.0+i as f64}).collect();
+        let mut log=TacticalLog::default();log.observe(&view,Some(BodyId(1)),0.0);
+        assert_eq!(log.lines.len(),2);
+        assert!(log.lines.iter().any(|l|l.text=="OWN SHIP · DESTROYED"));
+        assert!(log.lines.iter().any(|l|l.text=="T1 · DESTROYED"));
+        log.observe(&view,Some(BodyId(1)),1.0);
+        assert_eq!(log.lines.len(),2);assert!(log.lines.iter().all(|l|l.count==1));
     }
 
     #[test]
@@ -340,6 +362,7 @@ mod tests {
         let mut log=TacticalLog::default();
         log.observe(&view,Some(BodyId(1)),0.0);
         view.combat=(1..=2).map(|i|luminal_core::world::CombatEvent {
+            subject_kind:Some(BodyKind::Ship),
             impact_strength:0.65,
             damage:Some(if i==1 {"SCREEN +3.00 TJ"} else {"HULL -2.00 · PROP DAMAGED"}.into()),
             contact:None,aim:None,pos:None,kind:CombatKind::Impact,own_body:Some(BodyId(1)),
@@ -521,6 +544,45 @@ mod tests {
         assert_eq!(missile_hit_estimate(ship,Some(&contact),Payload::Kinetic),0.0);
     }
 
+    #[test] fn weapon_rings_follow_magazine_depletion_independently() {
+        let app=LuminalApp::new();let view=app.session.view(Role::Faction(ESCORT));
+        let mut ship=view.bodies.iter().find(|b|b.controllable).unwrap().clone();
+        assert_eq!(weapon_ranges(&ship).len(),3);
+        ship.magazine[Payload::Nuclear.index()]=0;
+        assert_eq!(weapon_ranges(&ship).iter().map(|r|r.0).collect::<Vec<_>>(),vec!["SRM","BEAM"]);
+        ship.magazine[Payload::Kinetic.index()]=0;
+        assert_eq!(weapon_ranges(&ship).iter().map(|r|r.0).collect::<Vec<_>>(),vec!["BEAM"]);
+        ship.magazine[Payload::Nuclear.index()]=1;
+        ship.missile_queued[Payload::Nuclear.index()]=1;
+        let ranges=weapon_ranges(&ship);
+        assert_eq!(ranges[0].0,"LRM");assert_eq!(ranges[0].1,Payload::Nuclear.engagement_range());
+        assert_eq!(ranges[1].1,params::SHIP_BEAM_AUTO_RANGE_LS.value*LIGHT_SECOND);
+    }
+
+    #[test] fn any_arrow_cancels_navigation_but_keeps_weapon_target() {
+        for key in 0..4 {
+            let mut app=LuminalApp::new();let target=app.inspected;
+            let mut pressed=[false;4];pressed[key]=true;
+            app.free_flight_input(pressed,pressed,false,0.016);
+            let view=app.session.view(Role::Faction(ESCORT));
+            let ship=view.bodies.iter().find(|b|b.controllable).unwrap();
+            assert!(ship.autopilot.is_none());assert!(app.inspected==target);
+            assert!(app.manual_flight.is_some());
+        }
+    }
+    #[test] fn manual_turns_and_throttle_are_bounded_and_frame_independent() {
+        let initial=ManualFlight {body:BodyId(1),angle:0.0,throttle:0.0};
+        let mut one=initial;let mut many=initial;
+        one.adjust([true,false,true,false],[false;4],1.0);
+        for _ in 0..100 {many.adjust([true,false,true,false],[false;4],0.01);}
+        assert!((one.angle-many.angle).abs()<1e-10);assert!((one.throttle-many.throttle).abs()<1e-10);
+        assert!(one.direction().y>0.99);assert_eq!(one.throttle,0.5);
+        one.adjust([false,true,true,false],[false;4],10.0);assert_eq!(one.throttle,1.0);
+        one.adjust([false,false,false,true],[false;4],10.0);assert_eq!(one.throttle,0.0);
+        let angle=one.angle;one.adjust([false,true,false,false],[false;4],0.1);
+        assert_ne!(one.angle,angle);assert_eq!(one.throttle,0.0,"turning at idle must not light the drive");
+    }
+
     #[test]
     fn power_outage_chips_preserve_backup_and_crew_conditions() {
         let mut report=Report {damage:Default::default(),installed:[true;15],observed_at:0.0,screen_heat:0.0};
@@ -576,7 +638,6 @@ const UNKNOWN: Color32 = Color32::from_rgb(240, 210, 80);
 const CONTACT: Color32 = ENEMY;
 const BELIEF: Color32 = Color32::from_rgb(255, 220, 90);
 const DANGER: Color32 = Color32::from_rgb(255, 70, 70);
-const EMISSION: Color32 = Color32::from_rgb(255, 50, 50);
 
 #[derive(Clone, Copy)]
 struct Camera {
@@ -591,7 +652,22 @@ enum Selection {
     Contact(ContactId),
 }
 
+#[derive(Clone,Copy)]
+struct ManualFlight {body:BodyId,angle:f64,throttle:f64}
+impl ManualFlight {
+    fn direction(self)->Vec2 {Vec2::new(self.angle.cos(),self.angle.sin())}
+    fn adjust(&mut self,held:[bool;4],pressed:[bool;4],dt:f64) {
+        // Input is wall-clock based, independent of simulation warp. A tap
+        // gives 3 degrees / 5% throttle; holding gives 90 degrees / 50% per second.
+        let amount=|i:usize,tap:f64,rate:f64|if pressed[i] {tap} else if held[i] {rate*dt} else {0.0};
+        self.angle=wrap_angle(self.angle+amount(0,3f64.to_radians(),std::f64::consts::FRAC_PI_2)-amount(1,3f64.to_radians(),std::f64::consts::FRAC_PI_2));
+        self.throttle=(self.throttle+amount(2,0.05,0.5)-amount(3,0.05,0.5)).clamp(0.0,1.0);
+    }
+}
+
 struct LuminalApp {
+    manual_flight:Option<ManualFlight>,
+    manual_send_elapsed:f64,
     audio:audio::Audio,
     auto_speed:bool,
     auto_speed_elapsed:f64,
@@ -627,6 +703,26 @@ struct DevHooks {
 }
 
 impl LuminalApp {
+    fn free_flight_input(&mut self,held:[bool;4],pressed:[bool;4],released:bool,dt:f64) {
+        if !held.iter().any(|v|*v) && !pressed.iter().any(|v|*v) && !released {return;}
+        let view=self.session.view(self.role);
+        let Some(ship)=view.bodies.iter().find(|b|b.controllable && b.kind==BodyKind::Ship) else {return;};
+        let entering=self.manual_flight.is_none_or(|m|m.body!=ship.id) || ship.autopilot.is_some();
+        if entering {
+            let direction=self.ship_headings.get(&ship.id).copied().unwrap_or_else(||if ship.thrust.length()>0.0 {ship.thrust.normalized()} else if ship.vel.length()>0.0 {ship.vel.normalized()} else {Vec2::new(0.0,1.0)});
+            let thrust=if ship.autopilot.is_some() {ship.thrust.length()/if ship.controls.boost_active {1.2} else {1.0}} else {ship.commanded.length()};
+            self.manual_flight=Some(ManualFlight {body:ship.id,angle:direction.y.atan2(direction.x),throttle:(thrust/(params::SHIP_MAX_ACCEL_G.value*G0)).clamp(0.0,1.0)});
+        }
+        let manual=self.manual_flight.as_mut().unwrap();manual.adjust(held,pressed,dt);
+        self.ship_headings.insert(ship.id,manual.direction());
+        self.manual_send_elapsed+=dt;
+        if entering || pressed.iter().any(|v|*v) || released || self.manual_send_elapsed>=0.1 {
+            let command=Command::SetThrust {body:ship.id,thrust:manual.direction()*(manual.throttle*params::SHIP_MAX_ACCEL_G.value*G0)};
+            self.manual_send_elapsed=0.0;
+            if let Err(error)=self.session.command(self.role,command) {self.last_message=Some(format!("Manual flight rejected: {error:?}"));}
+            else if entering {self.tactical_log.push("helm".into(),"FREE FLIGHT · ARROW KEYS".into(),ACCENT,view.time);self.audio.play(audio::Cue::Click);}
+        }
+    }
     fn command_deck(&mut self,ui:&mut egui::Ui,view:&View) {
         let own=view.bodies.iter().find(|b|b.controllable && Some(b.faction)==self.own_faction());
         let target=match self.inspected {Some(Selection::Contact(id))=>view.contacts.iter().find(|c|c.id==id),_=>None};
@@ -816,6 +912,7 @@ impl LuminalApp {
             ship_headings: BTreeMap::new(),
             tactical_log:TacticalLog::default(),
             audio:audio::Audio::default(),
+            manual_flight:None,manual_send_elapsed:0.0,
         }
         .with_env_setup();
         app.session.enable_bot(if app.role == Role::Faction(RAIDER) { ESCORT } else { RAIDER }, true);
@@ -1087,6 +1184,9 @@ impl eframe::App for LuminalApp {
         ui.ctx().request_repaint();
 
         if !ui.ctx().egui_wants_keyboard_input() {
+            let keys=[egui::Key::ArrowLeft,egui::Key::ArrowRight,egui::Key::ArrowUp,egui::Key::ArrowDown];
+            let (held,pressed,released)=ui.input(|i|(keys.map(|k|i.key_down(k)),keys.map(|k|i.key_pressed(k)),keys.iter().any(|k|i.key_released(*k))));
+            self.free_flight_input(held,pressed,released,dt.min(0.1));
             let (space, f, t) = ui.input(|i| (i.key_pressed(egui::Key::Space), i.key_pressed(egui::Key::F),i.key_pressed(egui::Key::T)));
             if t {self.track_player = !self.track_player;self.fit_pending=false;}
             if space {
@@ -1700,7 +1800,9 @@ impl LuminalApp {
         let panel = Rect::from_min_size(Pos2::new(rect.left()+10.0, rect.bottom()-85.0), EVec2::new(310.0,75.0));
         painter.rect_filled(panel,0.0,PANEL_BG.gamma_multiply(0.9));
         painter.line_segment([panel.left_top(),panel.left_bottom()],Stroke::new(2.0,ACCENT));
-        painter.text(panel.min+EVec2::new(10.0,7.0),egui::Align2::LEFT_TOP,"NAVIGATION / FIRING SOLUTION",egui::FontId::monospace(9.0),ACCENT);
+        let heading=self.manual_flight.filter(|m|m.body==ship.id && ship.autopilot.is_none())
+            .map_or("NAVIGATION / FIRING SOLUTION".into(),|m|format!("FREE FLIGHT · {:.0}% · ← → TURN / ↑ ↓ THROTTLE",m.throttle*100.0));
+        painter.text(panel.min+EVec2::new(10.0,7.0),egui::Align2::LEFT_TOP,heading,egui::FontId::monospace(9.0),ACCENT);
         for (i,line) in lines.iter().enumerate() {
             painter.text(panel.min+EVec2::new(10.0,24.0+i as f32*15.0),egui::Align2::LEFT_TOP,line,egui::FontId::monospace(10.0),TEXT_HI);
         }
@@ -1910,16 +2012,9 @@ impl LuminalApp {
             }
         }
 
-        // Emission footprint of the selected ship, under the ships so it never hides one.
-        for b in view.bodies.iter().filter(|b| self.selected == Some(Selection::Body(b.id))) {
-            let w = sensors::platform_emission_w(b.kind==BodyKind::Missile,b.baseline_emission_factor,b.thrust,b.thermal.emission(b.screen_j));
-            draw_emission(&painter, &cam, rect, b.pos, w);
-        }
-
-        // Only the player's commanded ship gets a defence ring, never allies/enemies.
+        // Only the player's ship gets weapon envelopes; no emission or PD discs.
         for b in view.bodies.iter().filter(|b| b.controllable && Some(b.faction)==self.own_faction()) {
-            draw_defence_ranges(&painter,&cam,rect,b.pos,b.point_defence.is_some_and(|pd|pd.rate_hz>0.0),
-                b.interceptor_battery.is_some_and(|battery|battery.rounds>0) && b.damage.operating_effectiveness(luminal_core::damage::System::PdMissiles)>0.0);
+            draw_weapon_ranges(&painter,&cam,rect,b);
         }
 
         // Own (or, for the spectator, all) ships.
@@ -1949,7 +2044,8 @@ impl LuminalApp {
                 let heading = self.ship_headings.entry(b.id).or_insert_with(|| {
                     if b.vel.length() > 0.01 {b.vel.normalized()} else {Vec2::new(0.0,1.0)}
                 });
-                *heading = coast_heading(*heading, b.thrust);
+                *heading = if let Some(manual)=self.manual_flight.filter(|m|m.body==b.id && b.autopilot.is_none()) {manual.direction()}
+                    else {coast_heading(*heading, b.thrust)};
                 draw_ship(&painter, p, b.vel, *heading, c, selected);
             }
             if b.avoidance.active {
@@ -2176,12 +2272,25 @@ fn sigma_major(cov: [[f64; 2]; 2]) -> f64 {
     (tr + disc).max(0.0).sqrt()
 }
 
-fn draw_defence_ranges(painter:&egui::Painter,cam:&Camera,rect:Rect,pos:Vec2,laser:bool,interceptors:bool) {
-    let center=to_screen(cam,rect,pos);
-    let radius=luminal_core::world::point_defence::defence_ring_radius(laser,interceptors);
-    if radius>0.0 {
-        painter.circle_stroke(center,(radius/cam.km_per_px) as f32,
-            Stroke::new(1.0,Color32::from_rgba_unmultiplied(160,160,160,90)));
+fn weapon_ranges(ship:&BodyView)->Vec<(&'static str,f64,Color32)> {
+    let mut ranges=Vec::new();
+    for (payload,label,color) in [(Payload::Nuclear,"LRM",Color32::from_rgb(92,139,190)),(Payload::Kinetic,"SRM",Color32::from_rgb(84,174,183))] {
+        // Queued rounds still aboard count until actually launched.
+        if ship.magazine[payload.index()]>0 {ranges.push((label,payload.engagement_range(),color));}
+    }
+    ranges.push(("BEAM",params::SHIP_BEAM_AUTO_RANGE_LS.value*LIGHT_SECOND,Color32::from_rgb(180,173,122)));
+    ranges
+}
+fn draw_weapon_ranges(painter:&egui::Painter,cam:&Camera,rect:Rect,ship:&BodyView) {
+    let center=to_screen(cam,rect,ship.pos);
+    for (label,range,color) in weapon_ranges(ship) {
+        let radius=(range/cam.km_per_px) as f32;
+        if !radius.is_finite() || radius<2.0 || radius>1e6 {continue;}
+        painter.circle_stroke(center,radius,Stroke::new(1.0,color.gamma_multiply(0.45)));
+        let at=center+EVec2::new(radius*0.707,-radius*0.707);
+        if radius>=28.0 && rect.shrink(30.0).contains(at) {
+            painter.text(at+EVec2::new(4.0,-4.0),egui::Align2::LEFT_BOTTOM,format!("{label} · {}",fmt_distance(range)),mono(9.0),color.gamma_multiply(0.75));
+        }
     }
 }
 
@@ -2221,10 +2330,6 @@ fn draw_contact(
                 let forecast = view.system.predict(State { pos: t.pos, vel: t.vel }, t.accel, view.time, FORECAST_S, 60);
                 let fp: Vec<Pos2> = forecast.points.iter().map(|&p| to_screen(cam, rect, p)).collect();
                 painter.extend(Shape::dotted_line(&fp, color.gamma_multiply(0.12), 8.0, 1.0));
-            }
-            // Footprint from the estimated thrust: what we believe it is radiating.
-            if selected && contact_has_course(c) {
-                draw_emission(painter, cam, rect, t.pos, sensors::ship_emission_w(t.accel));
             }
             let p = to_screen(cam, rect, t.pos);
             if c.resolved_interceptor {
@@ -2581,16 +2686,6 @@ fn draw_contact_marker(painter: &egui::Painter, p: Pos2, vel: Vec2, color: Color
         p - forward * 2.0, p - forward * 5.0 - side * 5.5];
     if selected {painter.add(Shape::convex_polygon(points,CONTACT,Stroke::new(1.5,CONTACT)));}
     else {painter.add(Shape::closed_line(points,stroke));}
-}
-
-/// Translucent red disc out to the range at which `power_w` is detected half the time.
-fn draw_emission(painter: &egui::Painter, cam: &Camera, rect: Rect, pos: Vec2, power_w: f64) {
-    let r = (sensors::passive_detection_range_km(power_w) / cam.km_per_px).min(1e6) as f32;
-    if r < 2.0 {
-        return;
-    }
-    let p = to_screen(cam, rect, pos);
-    painter.circle_filled(p, r, EMISSION.gamma_multiply(0.06));
 }
 
 /// A missile: a small diagonal cross, kept legible at every zoom level.

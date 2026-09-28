@@ -22,6 +22,25 @@ quality/uncertainty, target evasion, and ECM/ECCM; point defence remains a
 separate layer. LRM proximity bursts and SRM direct hits retain distinct damage.
 The animation is intentionally an abstraction, not a fuel-accurate trajectory.
 
+Successful SRM direct hits deliver 2 PJ; LRM proximity hits deliver 1 PJ.
+Full salvos are dangerous to ships with exhausted interceptor magazines; see
+[salvo calibration](calibration/exhausted-defences.md) for controlled trials.
+Own-ship map rings show LRM (2 AU), SRM (0.2 AU), and the nominal beam envelope
+(3 light-seconds). Missile rings disappear when their magazines are empty.
+Beam range is a useful engagement guide, not a hard cutoff against stationary
+targets. Emission footprints and point-defence rings are no longer drawn.
+
+**Free flight:** Left/Right turn; Up/Down adjust throttle (0–100%). Any arrow
+cancels the current automatic manoeuvre or move-to order, retaining the weapon
+target and camera tracking. Tap for 3°/5% adjustments; hold for smooth control.
+At zero throttle the ship coasts; changing heading does not cancel velocity.
+Navigation orders restore autopilot. Control rates use real time, not time warp.
+The navigation readout shows free-flight mode and commanded throttle.
+
+The combat log reports observed ship destruction (including the player's ship),
+but suppresses missile/interceptor destruction messages. Enemy reports arrive
+only after light travel and require a classified ship contact.
+
 A native, top-down space-combat prototype about fighting across light-seconds and
 astronomical units. Command a frigate, hunt uncertain contacts, launch missiles,
 and manage a ship that can lose individual systems before its hull gives out.

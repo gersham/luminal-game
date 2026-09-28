@@ -110,15 +110,25 @@ pub fn stationary_frigate_duel(depth:u32,seed:u64)->DuelResult {
     frigate_duel(depth,seed,1.0)
 }
 pub fn frigate_duel(depth:u32,seed:u64,range_au:f64)->DuelResult {
-    run_frigate_duel(depth,seed,range_au,None)
+    run_frigate_duel(depth,seed,range_au,None,None)
 }
 /// Sustained battle: finite missile magazines followed by repeating beams. The
 /// second ship has the same initial fix but cannot fire until its reaction delay.
 pub fn frigate_battle(depth:u32,seed:u64,range_au:f64,reaction_s:f64)->DuelResult {
     assert!(reaction_s.is_finite() && reaction_s>=0.0);
-    run_frigate_duel(depth,seed,range_au,Some(reaction_s))
+    run_frigate_duel(depth,seed,range_au,Some(reaction_s),None)
 }
-fn run_frigate_duel(depth:u32,seed:u64,range_au:f64,battle:Option<f64>)->DuelResult {
+/// One attacker dumps twenty SRMs; target retains screens and laser PD but
+/// does not counterfire. Both platforms manoeuvre together at 100g so the
+/// target evasion penalty is exercised without changing their separation.
+pub fn srm_salvo(depth:u32,seed:u64,range_au:f64)->DuelResult {
+    missile_salvo(Payload::Kinetic,depth,seed,range_au)
+}
+pub fn missile_salvo(payload:Payload,depth:u32,seed:u64,range_au:f64)->DuelResult {
+    assert!(payload!=Payload::Beam);
+    run_frigate_duel(depth,seed,range_au,None,Some(payload))
+}
+fn run_frigate_duel(depth:u32,seed:u64,range_au:f64,battle:Option<f64>,salvo:Option<Payload>)->DuelResult {
     assert!(range_au.is_finite() && range_au>0.0);
     let system=System {bodies:vec![Celestial {name:"Reference".into(),kind:CelestialKind::Star,
         gm:0.0,radius:1.0,orbit:Orbit::Fixed(Vec2::ZERO)}]};
@@ -151,6 +161,7 @@ fn run_frigate_duel(depth:u32,seed:u64,range_au:f64,battle:Option<f64>)->DuelRes
         contacts.push(c);
     }
     w.tactical_frame();
+    if salvo.is_some() {for i in 0..2 {w.set_thrust(BodyId(i),Vec2::new(100.0*G0,0.0)).unwrap();}}
     let mut opened=[false;2];
     let limit=std::env::var("LUMINAL_DUEL_STOP_S").ok().and_then(|v|v.parse().ok()).unwrap_or(if battle.is_some() {7200.0} else {2.0*range_au*AU/(MISSILE_DELTA_V_KMS.value*MISSILE_BURN_FRACTION.value)+7200.0});
     let progress=std::env::var_os("LUMINAL_CALIBRATION_PROGRESS").is_some();
@@ -160,8 +171,13 @@ fn run_frigate_duel(depth:u32,seed:u64,range_au:f64,battle:Option<f64>)->DuelRes
     let mut peak_screen=[0.0_f64;2];
     while w.time()<limit {
         for i in 0..2 {
+            if salvo.is_some() && i==1 {continue;}
             if !opened[i] && w.time()>=if i==1 {battle.unwrap_or(0.0)} else {0.0} && w.bodies[i].alive_at(w.time()) {
-                for _ in 0..MAGAZINE_FRIGATE.value as u32 {for payload in Payload::ALL {
+                for _ in 0..if salvo.is_some() {20} else {MAGAZINE_FRIGATE.value as u32} {for payload in Payload::ALL {
+                    if salvo.is_some_and(|selected|payload!=selected) {continue;}
+                    // Match the game's range gates: impossible SRM shots must
+                    // not act as free decoys that exhaust defence at 1 AU.
+                    if range_au*AU>payload.engagement_range() {continue;}
                     w.queue_launch(BodyId(i as u32),contacts[i],payload).unwrap();
                 }}
                 if battle.is_some() {w.arm_beams(BodyId(i as u32)).unwrap();}
@@ -181,7 +197,7 @@ fn run_frigate_duel(depth:u32,seed:u64,range_au:f64,battle:Option<f64>)->DuelRes
             // Continue after a knockout long enough to resolve counterfire already
             // in flight; stop at both lost or two minutes after the first loss.
             if w.bodies[..2].iter().all(|b|!b.alive_at(w.time())) || first_loss_s.is_some_and(|at|w.time()>at+120.0) {break;}
-        } else if w.time()>30.0 && !w.bodies.iter().any(|b|b.missile.is_some() && b.alive_at(w.time())) {break;}
+        } else if w.time()>30.0 && !w.bodies.iter().any(|b|b.alive_at(w.time()) && (b.missile.is_some() || b.missile_queued.iter().any(|n|*n>0))) {break;}
     }
     DuelResult {seed,depth,
         pd_kills:w.losses.iter().filter(|loss|matches!(loss.cause,LossCause::PointDefence {..}) && w.bodies[loss.body.0 as usize].missile.is_some()).count(),
@@ -193,7 +209,7 @@ fn run_frigate_duel(depth:u32,seed:u64,range_au:f64,battle:Option<f64>)->DuelRes
         damage_j:std::array::from_fn(|i|w.hits.iter().filter(|h|h.body==BodyId(i as u32)).map(|h|h.energy_j).sum()),
         destroyed:std::array::from_fn(|i|!w.bodies[i].alive_at(w.time())),
         interceptors_launched:std::array::from_fn(|i|w.bodies[i].interceptor_battery.unwrap().launched),
-        finished:if battle.is_some() {first_loss_s.is_some()} else {!w.bodies.iter().any(|b|b.missile.is_some() && b.alive_at(w.time()))}}
+        finished:if battle.is_some() {first_loss_s.is_some()} else {!w.bodies.iter().any(|b|b.alive_at(w.time()) && (b.missile.is_some() || b.missile_queued.iter().any(|n|*n>0)))}}
 }
 
 #[cfg(test)]

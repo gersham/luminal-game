@@ -4,6 +4,9 @@
 use super::*;
 use crate::units::{C,G0,LIGHT_SECOND};
 
+/// Direct shotgun strike: enough penetrating energy to punish exhausted defences.
+pub const SRM_HIT_ENERGY_J:f64=2.0e15;
+
 #[derive(Clone,Copy,Debug)]
 pub(super) struct Flight {
     pub due:f64, start:f64, target:BodyId, aim:State, quality:f64,
@@ -155,7 +158,7 @@ impl World {
             self.destroy(id,t,LossCause::Expended);
             if m.payload==Payload::Nuclear && armed {self.record_combat(t,if hit {target.pos} else {me.pos},CombatKind::NuclearBurst,Some(id),None);}
             if hit {
-                let energy=if m.payload==Payload::Nuclear {NUCLEAR_ENERGY_J.value} else {5.0e13};
+                let energy=if m.payload==Payload::Nuclear {NUCLEAR_ENERGY_J.value} else {SRM_HIT_ENERGY_J};
                 self.deliver(flight.target,t,energy,m.payload,id);
             } else {self.record_combat(t,me.pos,CombatKind::MissileMiss,Some(id),None);}
         }
@@ -164,6 +167,9 @@ impl World {
 
 #[cfg(test)] mod tests {
     use super::*;
+    #[test] fn lrm_proximity_damage_is_half_srm_direct_damage() {
+        assert_eq!(NUCLEAR_ENERGY_J.value*2.0,SRM_HIT_ENERGY_J);
+    }
     #[test] fn srm_accuracy_bonus_is_modest_and_does_not_extend_range() {
         let p=Payload::Kinetic;let r=autopilot::weapon_standoff(p);
         assert!((hit_chance(p,r,1.0,0.0,0.0,1.0)-(0.9/1.3)*1.1).abs()<1e-10);
