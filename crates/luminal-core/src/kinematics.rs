@@ -3,6 +3,13 @@
 use crate::units::C;
 use std::ops::{Add, Mul, Neg, Sub};
 
+pub const MAX_SPEED: f64 = 0.99 * C;
+
+fn limit_velocity(v: Vec2) -> Vec2 {
+    let speed=v.length();
+    if speed>MAX_SPEED {v*(MAX_SPEED/speed)} else {v}
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Vec2 {
     pub x: f64,
@@ -67,7 +74,7 @@ pub struct State {
 
 /// Relativistic motion (PROPOSAL). Drives and gravity change a body's proper velocity
 /// `u = γv` at a constant rate in system time; ordinary velocity is `u / sqrt(1 + u²/c²)`,
-/// so speed approaches but never reaches c. At everyday speeds this is Newtonian.
+/// with a gameplay cap of 0.99c applied by `advance`. At everyday speeds this is Newtonian.
 pub fn proper_velocity(vel: Vec2) -> Vec2 {
     let b2 = (vel.dot(vel) / (C * C)).min(1.0 - 1e-15);
     vel * (1.0 / (1.0 - b2).sqrt())
@@ -105,10 +112,48 @@ fn displacement(u0: Vec2, a: Vec2, tau: f64) -> Vec2 {
 
 /// State after `tau` seconds of constant proper-velocity change `accel` from `s`.
 pub fn advance(s: State, accel: Vec2, tau: f64) -> State {
-    if tau==0.0 {return s;}
-    if accel==Vec2::ZERO {return State {pos:s.pos+s.vel*tau,vel:s.vel};}
-    let u0 = proper_velocity(s.vel);
-    State { pos: s.pos + displacement(u0, accel, tau), vel: velocity_from_proper(u0 + accel * tau) }
+    let vel=limit_velocity(s.vel);
+    if tau==0.0 {return State {pos:s.pos,vel};}
+    if accel==Vec2::ZERO {return State {pos:s.pos+vel*tau,vel};}
+    let sign=tau.signum();
+    let dt=tau.abs();
+    let a=accel*sign;
+    let u0=proper_velocity(vel);
+    let cap=proper_velocity(Vec2::new(MAX_SPEED,0.0)).length();
+    let f=a.length();
+    let u1=u0+a*dt;
+    if u1.length()<=cap {
+        return State {pos:s.pos+displacement(u0,a,dt)*sign,vel:limit_velocity(velocity_from_proper(u1))};
+    }
+    // Integrate up to the speed limit, then discard outward acceleration while
+    // retaining its turning component. No hidden excess momentum accumulates.
+    let dot=u0.dot(a);
+    let remaining=(cap*cap-u0.dot(u0)).max(0.0);
+    let root=(dot*dot+f*f*remaining).sqrt();
+    let hit=if dot>=0.0 {remaining/(root+dot).max(f64::MIN_POSITIVE)} else {(root-dot)/(f*f)};
+    let hit=hit.clamp(0.0,dt);
+    let n=(u0+a*hit).normalized();
+    let axis=a*(1.0/f);
+    let q=n.dot(axis).clamp(0.0,1.0);
+    let tail=dt-hit;
+    let (travel,end)=if q>=1.0-1e-14 {
+        (axis*(MAX_SPEED*tail),axis*MAX_SPEED)
+    } else {
+        // On the limit sphere, q'=|a|(1-q²)/cap, so q=tanh(z).
+        let z0=q.atanh();
+        let h=f*tail/cap;
+        let z1=z0+h;
+        let transverse=(n-axis*q).normalized();
+        let log_cosh_delta=h+(-2.0*z1).exp().ln_1p()-(-2.0*z0).exp().ln_1p();
+        let side=2.0*((-z0).exp().atan()-(-z1).exp().atan());
+        let travel=if h<1e-6 {
+            let zm=z0+0.5*h;
+            (axis*zm.tanh()+transverse*(2.0*(-zm).exp()/(1.0+(-2.0*zm).exp())))*(MAX_SPEED*tail)
+        } else {(axis*log_cosh_delta+transverse*side)*(MAX_SPEED*cap/f)};
+        let end=(axis*z1.tanh()+transverse*(2.0*(-z1).exp()/(1.0+(-2.0*z1).exp())))*MAX_SPEED;
+        (travel,end)
+    };
+    State {pos:s.pos+(displacement(u0,a,hit)+travel)*sign,vel:limit_velocity(end)}
 }
 
 /// Constant acceleration from `t0` until the next segment begins.
@@ -146,7 +191,7 @@ pub struct Trajectory {
 impl Trajectory {
     pub fn new(t0: f64, initial: State) -> Self {
         Self {
-            segments: vec![Segment { t0, pos: initial.pos, vel: initial.vel, accel: Vec2::ZERO, thrust: Vec2::ZERO }],
+            segments: vec![Segment { t0, pos: initial.pos, vel: limit_velocity(initial.vel), accel: Vec2::ZERO, thrust: Vec2::ZERO }],
             end: None,
         }
     }
@@ -223,7 +268,7 @@ impl Trajectory {
     pub(crate) fn weapon_course(&mut self,t:f64,velocity:Vec2,signature_thrust:Vec2) {
         assert!(t>=self.last().t0);
         let pos=self.last().state_at(t).pos;
-        let segment=Segment {t0:t,pos,vel:velocity,accel:Vec2::ZERO,thrust:signature_thrust};
+        let segment=Segment {t0:t,pos,vel:limit_velocity(velocity),accel:Vec2::ZERO,thrust:signature_thrust};
         if t==self.last().t0 {*self.segments.last_mut().unwrap()=segment;} else {self.segments.push(segment);}
     }
 
@@ -274,9 +319,28 @@ mod tests {
         traj.set_thrust(0.0, Vec2::new(100.0 * G0, 0.0)).unwrap();
         let month = 30.0 * 86_400.0;
         let s = traj.state_at(month).unwrap();
-        assert!(s.vel.length() < C && s.vel.length() > 0.99 * C, "{}", s.vel.length() / C);
+        assert!((s.vel.length()-MAX_SPEED).abs()<1e-8, "{}", s.vel.length() / C);
         // Position is continuous and never outruns light.
-        assert!(s.pos.x < C * month);
+        assert!(s.pos.x <= MAX_SPEED * month);
+    }
+
+    #[test]
+    fn speed_cap_turns_consistently_and_brakes_without_windup() {
+        let initial=State {pos:Vec2::ZERO,vel:Vec2::new(0.98*C,0.0)};
+        let a=Vec2::new(1.0,1.0);
+        let duration=4e6;
+        let whole=advance(initial,a,duration);
+        let mut stepped=initial;
+        for _ in 0..1000 {stepped=advance(stepped,a,duration/1000.0);}
+        assert!((whole.vel-stepped.vel).length()<1e-6);
+        assert!((whole.pos-stepped.pos).length()<10.0);
+        assert!(whole.pos.length()<=MAX_SPEED*duration);
+        assert!(whole.vel.length()<=MAX_SPEED+1e-9);
+        let brake=advance(whole,-whole.vel.normalized(),1000.0);
+        assert!(brake.vel.length()<whole.vel.length());
+        let coast=advance(State {pos:Vec2::ZERO,vel:Vec2::new(2.0*C,0.0)},Vec2::ZERO,10.0);
+        assert_eq!(coast.vel.length(),MAX_SPEED);
+        assert_eq!(coast.pos.x,10.0*MAX_SPEED);
     }
 
     #[test]

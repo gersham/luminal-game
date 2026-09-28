@@ -103,7 +103,7 @@ impl World {
             let pulse=Pulse {shooter:id,target,front:Front {origin,t_emit:t},hit:self.rng.uniform()<hit_probability(range)};
             self.debug_note("PD_SHOT",format!("shooter={id:?} target={target:?} range_km={range} chance={} hit_roll={}",hit_probability(range),pulse.hit));
             self.scheduler.schedule(t+(range/C).max(0.001),Event::PointDefencePulse(pulse));
-            self.record_combat(t,origin,CombatKind::PointDefence,Some(id),Some(faction));
+            self.record_beam(t,origin,CombatKind::PointDefence,id,target,faction);
         }
         // Laser reload must not slow sensor acquisition or interceptor launches.
         self.scheduler.schedule(t+(1.0/pd.rate_hz).min(1.0),Event::PointDefence(id));
@@ -259,12 +259,12 @@ mod tests {
     }
     #[test]
     fn range_curve_is_last_ditch_defence() {
-        assert_eq!(PD_LASER_MAX_RANGE_LS.value,1.0);
-        assert_eq!(hit_probability(0.006*LIGHT_SECOND),0.5);
-        assert!(hit_probability(0.012*LIGHT_SECOND)<0.016);
-        assert!(hit_probability(0.024*LIGHT_SECOND)<0.00025);
+        assert_eq!(PD_LASER_MAX_RANGE_LS.value,2.0);
+        assert_eq!(hit_probability(0.012*LIGHT_SECOND),0.5);
+        assert!(hit_probability(0.024*LIGHT_SECOND)<0.016);
+        assert!(hit_probability(0.048*LIGHT_SECOND)<0.00025);
         let mut rng=Rng::new(123);
-        let hits=(0..10_000).filter(|_|rng.uniform()<hit_probability(0.006*LIGHT_SECOND)).count();
+        let hits=(0..10_000).filter(|_|rng.uniform()<hit_probability(0.012*LIGHT_SECOND)).count();
         assert!((4800..5200).contains(&hits),"deterministic sampling remains close to 50%: {hits}");
     }
 

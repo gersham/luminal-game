@@ -10,6 +10,7 @@ pub const SRM_HIT_ENERGY_J:f64=2.0e15;
 #[derive(Clone,Copy,Debug)]
 pub(super) struct Flight {
     pub due:f64, start:f64, target:BodyId, aim:State, quality:f64,
+    center_launch:bool, last_course:f64, correction_left:f64,
     range:f64, sigma:f64, interceptor:bool, chance:f64,
 }
 
@@ -42,7 +43,8 @@ impl World {
         let own=self.state(id,self.time).unwrap();
         let contact=self.received_picture(m.launcher).and_then(|p|p.contacts.get(&m.target));
         let track=contact.and_then(|c|c.estimate(self.time,&self.system));
-        let aim=track.as_ref().map(|t|State {pos:t.pos(),vel:t.vel()}).unwrap_or(State {
+        let center_launch=contact.is_some_and(|c|c.detection(self.time)==sensors::DetectionLevel::Approximate);
+        let aim=track.as_ref().map(|t|State {pos:t.pos(),vel:if center_launch {Vec2::ZERO} else {t.vel()}}).unwrap_or(State {
             pos:own.pos+m.search_heading*autopilot::weapon_standoff(m.payload),vel:Vec2::ZERO});
         let range=(aim.pos-own.pos).length();
         let closing=(own.vel-aim.vel).dot((aim.pos-own.pos).normalized());
@@ -50,6 +52,7 @@ impl World {
         let quality=contact.map_or(0.0,|c|quality(c.detection(self.time)));
         let sigma=track.as_ref().map_or(5.0*LIGHT_SECOND,|t|(t.pos_cov()[0][0]+t.pos_cov()[1][1]).max(0.0).sqrt());
         self.probability_flights.insert(id,Flight {due:self.time+seconds,start:self.time,target:m.target_body,
+            center_launch,last_course:self.time,correction_left:m.payload.delta_v()*MISSILE_RESERVE_FRACTION.value,
             aim,quality,range,sigma,interceptor:false,chance:0.0});
         self.debug_note("MISSILE_PLAN",format!("missile={id:?} target={:?} payload={:?} range_km={range} flight_s={seconds} quality={quality} sigma_km={sigma}",m.target_body,m.payload));
     }
@@ -64,6 +67,7 @@ impl World {
         let seconds=(range/(speed+closing).max(speed*0.25)).max(range/C).max(0.1);
         let chance=interceptor::hit_probability((aim.vel-own.vel).length());
         self.probability_flights.insert(id,Flight {due:self.time+seconds,start:self.time,target:defence.target,
+            center_launch:false,last_course:self.time,correction_left:0.0,
             aim,quality:1.0,range,sigma:0.0,interceptor:true,chance});
         self.debug_note("INTERCEPT_PLAN",format!("missile={id:?} target={:?} flight_s={seconds} chance={chance}",defence.target));
     }
@@ -84,7 +88,7 @@ impl World {
         // Prefer the weapon's own, light-delayed terminal observation. Prior to
         // acquisition, its animation follows only the datalink's received track.
         if !flight.interceptor && let Some(m)=missile {
-            if let Some(tr)=self.received_picture(id).and_then(|p|p.contacts.get(&m.target))
+            if !flight.center_launch && let Some(tr)=self.received_picture(id).and_then(|p|p.contacts.get(&m.target))
                 .and_then(|c|c.estimate(t,&self.system)) {
                 flight.aim=State {pos:tr.pos(),vel:tr.vel()};
             } else {flight.aim.pos=flight.aim.pos+flight.aim.vel*(t-self.bodies[id.0 as usize].missile.unwrap().last_guide);}
@@ -99,6 +103,7 @@ impl World {
                 let range=(seen.pos-me.pos).length();
                 let level=self.detect_ship(id,flight.target,emitted,range,false);
                 if range<=MISSILE_ACTIVE_RANGE_LS*LIGHT_SECOND && level>=sensors::DetectionLevel::Resolved
+                    && missile::in_search_cone(m.search_heading,seen.pos-me.pos)
                     && self.system.occluder(seen.pos,emitted,me.pos,t).is_none() {
                     let prior=m.local_fix;
                     let fix=sensors::SeekerFix::update(prior,emitted,seen.pos,flight.aim.vel);
@@ -124,11 +129,19 @@ impl World {
         } else if let Some((_,seen))=retarded_state(&self.bodies[flight.target.0 as usize].trajectory,me.pos,t) {
             flight.aim=seen;
         }
-        self.probability_flights.insert(id,flight);
         if remaining<=1e-6 {self.resolve_probability_weapon(id,flight);return;}
         let destination=flight.aim.pos+flight.aim.vel*remaining;
         let velocity=(destination-me.pos)*(1.0/remaining);
-        let velocity=velocity.normalized()*velocity.length().min(0.3*C);
+        let mut velocity=velocity.normalized()*velocity.length().min(0.3*C);
+        if flight.center_launch && t>flight.start {
+            let correction=velocity-me.vel;
+            let allowed=(self.bodies[id.0 as usize].max_accel()*(t-flight.last_course).max(0.0)).min(flight.correction_left);
+            let used=correction.length().min(allowed);
+            velocity=me.vel+correction.normalized()*used;
+            flight.correction_left=(flight.correction_left-used).max(0.0);
+        }
+        flight.last_course=t;
+        self.probability_flights.insert(id,flight);
         let thrust=velocity.normalized()*self.bodies[id.0 as usize].max_accel();
         self.bodies[id.0 as usize].trajectory.weapon_course(t,velocity,thrust);
         let dt=remaining.min(if remaining<30.0 {0.25} else {5.0});
@@ -154,7 +167,9 @@ impl World {
             let launcher=&self.bodies[m.launcher.0 as usize];
             let ecm=sensors::resolution_factor(target_body.ecm_strength(),launcher.controls.eccm_rating*launcher.operating_effectiveness(crate::damage::System::Eccm));
             let armed=(me.pos-m.launched_at).length()>2.0*NUCLEAR_AOE_KM.value || m.payload==Payload::Kinetic;
-            let chance=if blocked || !armed {0.0} else {hit_chance(m.payload,flight.range,flight.quality,flight.sigma,evasion,0.6+0.4*ecm)};
+            let hit_radius=if m.payload==Payload::Nuclear {NUCLEAR_AOE_KM.value} else {KINETIC_PATTERN_KM.value};
+            let missed_center_pass=flight.center_launch && (target.pos-me.pos).length()>hit_radius;
+            let chance=if blocked || !armed || missed_center_pass {0.0} else {hit_chance(m.payload,flight.range,flight.quality,flight.sigma,evasion,0.6+0.4*ecm)};
             let hit=self.rng.uniform()<chance;
             self.debug_note("MISSILE_RESULT",format!("missile={id:?} target={:?} payload={:?} model=probability chance={chance} hit={hit} quality={} range_km={}",flight.target,m.payload,flight.quality,flight.range));
             self.destroy(id,t,LossCause::Expended);
@@ -169,6 +184,49 @@ impl World {
 
 #[cfg(test)] mod tests {
     use super::*;
+    #[test]
+    fn approximate_launch_aims_at_center_and_seeker_corrections_are_bounded() {
+        let target_pos=Vec2::new(AU,3.0*LIGHT_SECOND);
+        let specs=vec![
+            BodySpec {name:"Launcher".into(),kind:BodyKind::Ship,faction:FactionId(0),
+                state:State {pos:Vec2::ZERO,vel:Vec2::ZERO},thrust:Vec2::ZERO,magazine:10},
+            BodySpec {name:"Target".into(),kind:BodyKind::Ship,faction:FactionId(1),
+                state:State {pos:target_pos,vel:Vec2::ZERO},thrust:Vec2::ZERO,magazine:0},
+        ];
+        let mut w=World::new(crate::celestial::System {bodies:vec![]},specs,3000.0,42);
+        let contact=w.contact_id(FactionId(0),BodyId(1));
+        w.perceptions.get_mut(&FactionId(0)).unwrap().ingest(Observation {
+            detection:sensors::DetectionLevel::Approximate,contact,sensor:BodyId(0),origin:Vec2::ZERO,
+            emitted_at:-500.0,sensor_received_at:0.0,decider_received_at:0.0,source:Source::Emission,snr:100.0,
+            measurement:Measurement::BearingRange {bearing:0.0,range:AU,sigma_range:LIGHT_SECOND,sigma_bearing:LIGHT_SECOND/AU}},&w.system);
+        let center=w.perceptions[&FactionId(0)].contacts[&contact].estimate(0.0,&w.system).unwrap().pos();
+        let id=w.launch(BodyId(0),contact,Payload::Nuclear).unwrap();
+        let flight=w.probability_flights[&id];
+        assert!(flight.center_launch);
+        assert_eq!(flight.aim.pos,center);
+        assert_eq!(flight.aim.vel,Vec2::ZERO);
+        w.guide_probability_weapon(id);
+        let velocity=w.state(id,0.0).unwrap().vel;
+        assert!((velocity.normalized()-center.normalized()).length()<1e-10);
+        assert!(w.bodies[id.0 as usize].missile.unwrap().local_fix.is_none());
+        // Put a terminal seeker within resolution range, crossing too fast to snap onto the new aim.
+        w.time=5.0;
+        let velocity=Vec2::new(0.0,10_000.0);
+        w.bodies[id.0 as usize].trajectory=Trajectory::new(5.0,State {pos:target_pos-Vec2::new(2.0*LIGHT_SECOND,0.0),vel:velocity});
+        w.bodies[id.0 as usize].missile.as_mut().unwrap().search_heading=Vec2::new(1.0,0.0);
+        w.guide_probability_weapon(id);
+        assert!(w.bodies[id.0 as usize].missile.unwrap().local_fix.is_some());
+        let changed=(w.state(id,5.0).unwrap().vel-velocity).length();
+        assert!(changed>0.0 && changed<=5.0*w.bodies[id.0 as usize].max_accel()+1e-8);
+        assert!(w.probability_flights[&id].correction_left<flight.correction_left);
+        // A probability roll must never teleport a distant miss onto the hidden target.
+        let flight=w.probability_flights[&id];
+        w.time=flight.due;
+        w.resolve_probability_weapon(id,flight);
+        assert!(w.hits.is_empty());
+        assert!(w.combat_events(None).iter().any(|e|e.own_body==Some(id) && e.kind==CombatKind::MissileMiss));
+    }
+
     #[test] fn interceptor_outcomes_report_hit_or_miss_before_disappearing() {
         for (chance,kind) in [(1.0,CombatKind::MissileHit),(0.0,CombatKind::MissileMiss)] {
             let specs=(0..2).map(|i|BodySpec {name:format!("Round {i}"),kind:BodyKind::Missile,
@@ -177,6 +235,7 @@ impl World {
             let mut world=World::new(crate::celestial::System {bodies:vec![]},specs,0.0,42);
             let aim=world.state(BodyId(1),0.0).unwrap();
             world.resolve_probability_weapon(BodyId(0),Flight {due:0.0,start:0.0,target:BodyId(1),
+                center_launch:false,last_course:0.0,correction_left:0.0,
                 aim,quality:1.0,range:100.0,sigma:0.0,interceptor:true,chance});
             let events=world.combat_events(None);
             let result=events.iter().find(|e|e.own_body==Some(BodyId(0)) && e.kind==kind).unwrap();

@@ -26,12 +26,13 @@ pub struct CombatEvent {
     pub damage: Option<String>,
     /// Observer-local association; never a foreign truth body ID.
     pub contact: Option<ContactId>,
+    pub target: Option<InterceptTarget>,
     pub aim: Option<Vec2>,
     pub emitted_at: f64, pub received_at: f64, pub pos: Option<Vec2>, pub kind: CombatKind,
     /// Own identity only; foreign events never reveal body IDs.
     pub own_body: Option<BodyId>,
 }
-struct Flash { velocity:Option<Vec2>, front: Front, kind: CombatKind, body: Option<BodyId>, owner: Option<FactionId>, pending: Vec<FactionId>, aim: Option<Vec2>, damage:Option<String>, impact_strength:f32 }
+struct Flash { target:Option<BodyId>, velocity:Option<Vec2>, front: Front, kind: CombatKind, body: Option<BodyId>, owner: Option<FactionId>, pending: Vec<FactionId>, aim: Option<Vec2>, damage:Option<String>, impact_strength:f32 }
 
 pub(super) fn impact_strength(before:&crate::damage::Damage,after:&crate::damage::Damage)->f32 {
     use crate::damage::{Condition,System};
@@ -181,12 +182,9 @@ impl World {
             let mut rng=Rng::stream(seed,71); (rng.gaussian(),rng.gaussian())
         });
         match &mut obs.measurement {
-            Measurement::BearingRange {bearing,range,sigma_range,sigma_bearing} if obs.detection==sensors::DetectionLevel::Approximate => {
-                // Persistent bounded offsets keep the source inside, but not at
-                // the centre of, the reported ellipse. Never randomise per frame.
-                *range=(*range+radial.tanh()*0.8**sigma_range).max(0.0);
-                *bearing=sensors::wrap_angle(*bearing+angular.tanh()*0.8**sigma_bearing);
-            }
+            // Approximate position bias is applied once per contact in Cartesian
+            // coordinates after filtering, so sensors cannot average it away.
+            Measurement::BearingRange {..} if obs.detection==sensors::DetectionLevel::Approximate => {},
             Measurement::BearingRange {bearing,range,..} if obs.detection>=sensors::DetectionLevel::Resolved => {
                 *range=(*range+radial.tanh()*0.1).max(0.0);
                 *bearing=sensors::wrap_angle(*bearing+angular.tanh()*1e-7);
@@ -256,6 +254,11 @@ impl World {
         let all = if faction.is_none() { &self.refinement.truth_events } else if let Some(e) = events { e } else { return vec![] };
         all.iter().rev().take(64).cloned().collect()
     }
+    pub(super) fn record_beam(&mut self,t:f64,pos:Vec2,kind:CombatKind,body:BodyId,target:BodyId,owner:FactionId) {
+        self.record_combat(t,pos,kind,Some(body),Some(owner));
+        if let Some(flash)=self.refinement.flashes.last_mut() {flash.target=Some(target);}
+        if let Some(event)=self.refinement.truth_events.last_mut() {event.target=Some(InterceptTarget::Own(target));}
+    }
     pub(super) fn record_combat(&mut self, t: f64, pos: Vec2, kind: CombatKind, body: Option<BodyId>, owner: Option<FactionId>) {
         self.record_combat_damage(t,pos,kind,body,owner,None);
     }
@@ -274,8 +277,8 @@ impl World {
             }.filter(|(fired,_,_)|(*fired-t).abs()<1e-6).map(|(_,_,aim)|aim)
         });
         let velocity=body.and_then(|id|self.state(id,t)).map(|s|s.vel);
-        self.refinement.truth_events.push(CombatEvent { velocity, subject_kind:body.map(|id|self.bodies[id.0 as usize].kind),impact_strength,damage:damage.clone(),contact:None, emitted_at: t, received_at: t, pos:Some(pos), kind, own_body: body, aim });
-        self.refinement.flashes.push(Flash { velocity,impact_strength,damage,front: Front { origin: pos, t_emit: t }, kind, body, owner, pending, aim });
+        self.refinement.truth_events.push(CombatEvent { target:None, velocity, subject_kind:body.map(|id|self.bodies[id.0 as usize].kind),impact_strength,damage:damage.clone(),contact:None, emitted_at: t, received_at: t, pos:Some(pos), kind, own_body: body, aim });
+        self.refinement.flashes.push(Flash { target:None, velocity,impact_strength,damage,front: Front { origin: pos, t_emit: t }, kind, body, owner, pending, aim });
     }
     pub(super) fn delay_alert(&mut self, id: BodyId, t: f64, kind: AlertKind) {
         let b = &self.bodies[id.0 as usize];
@@ -325,7 +328,13 @@ impl World {
         let contact=if !own && pos.is_some() {flash.body.map(|body|self.contact_id(faction,body))} else {None};
         let classified=own || contact.is_some_and(|c|self.perceptions.get(&faction).and_then(|p|p.contacts.get(&c)).is_some_and(|c|c.resolved));
         let subject_kind=flash.body.filter(|_|classified).map(|id|self.bodies[id.0 as usize].kind);
-        Some(CombatEvent {velocity:if own {flash.velocity} else {None},subject_kind,impact_strength:flash.impact_strength,damage:if own {flash.damage.clone()} else {None},contact,emitted_at:flash.front.t_emit,received_at:arrival,pos,kind:flash.kind,
+        let target=flash.target.and_then(|id| {
+            if self.bodies[id.0 as usize].faction==faction {Some(InterceptTarget::Own(id))}
+            else {let c=self.contact_id(faction,id);
+                self.perceptions.get(&faction).and_then(|p|p.contacts.get(&c)).filter(|c|c.resolved)
+                    .map(|_|InterceptTarget::Contact(c))}
+        });
+        Some(CombatEvent {target,velocity:if own {flash.velocity} else {None},subject_kind,impact_strength:flash.impact_strength,damage:if own {flash.damage.clone()} else {None},contact,emitted_at:flash.front.t_emit,received_at:arrival,pos,kind:flash.kind,
             // A visible beam discharge carries its beam direction, not the
             // target's identity or true position. Anchor it at the observed flash.
             aim:if own {flash.aim} else if matches!(flash.kind,CombatKind::BeamPulse|CombatKind::PointDefence) {
@@ -671,10 +680,10 @@ mod tests {
             measurement:Measurement::BearingRange {bearing:0.0,range:0.1*AU,sigma_bearing:0.005,sigma_range:100_000.0},
             snr:9.0,source:Source::Emission};
         let biased=w.bias_observation(obs);
-        assert_ne!(biased.measurement,obs.measurement);
+        assert_eq!(biased.measurement,obs.measurement); // bias belongs to the fused position estimate
         assert_eq!(biased.measurement,w.bias_observation(obs).measurement);
         for _ in 0..50 { w.perceptions.get_mut(&FactionId(0)).unwrap().ingest(biased,&w.system); }
-        let tr=w.perceptions[&FactionId(0)].contacts[&obs.contact].track.as_ref().unwrap();
+        let tr=w.perceptions[&FactionId(0)].contacts[&obs.contact].estimate(0.0,&w.system).unwrap();
         assert!((tr.pos()-(obs.origin+Vec2::new(0.1*AU,0.0))).length()>100.0);
         assert!(tr.pos_cov()[0][0].sqrt()>50_000.0,"repeated frames must not create a precision fix");
     }
@@ -723,7 +732,7 @@ mod tests {
         let origin=w.state(BodyId(1),0.0).unwrap().pos;
         let aim=w.state(BodyId(0),0.0).unwrap().pos;
         w.bodies[1].last_beam=Some((0.0,origin,aim));
-        w.record_combat(0.0,origin,CombatKind::BeamPulse,Some(BodyId(1)),None);
+        w.record_beam(0.0,origin,CombatKind::BeamPulse,BodyId(1),BodyId(0),FactionId(1));
         w.advance_to(9.0);
         assert!(w.combat_events(Some(FactionId(0))).is_empty());
         w.advance_to(11.0);
@@ -733,6 +742,7 @@ mod tests {
         assert!(event.own_body.is_none());
         let observed=event.pos.expect("visible source");
         let endpoint=event.aim.expect("enemy beam must be drawable");
+        assert_eq!(event.target,Some(InterceptTarget::Own(BodyId(0))));
         assert!(((endpoint-observed)-(aim-origin)).length()<1e-6);
     }
 

@@ -103,7 +103,7 @@ mod tests {
         view.combat.clear();
         let mut effects=WeaponEffects::default();
         effects.observe(&view,Some(ESCORT),0.0);
-        view.combat=vec![luminal_core::world::CombatEvent {velocity:Some(Vec2::new(2.0,3.0)),
+        view.combat=vec![luminal_core::world::CombatEvent {target:None,velocity:Some(Vec2::new(2.0,3.0)),
             subject_kind:Some(BodyKind::Missile),impact_strength:0.0,damage:None,contact:None,
             aim:None,pos:Some(Vec2::ZERO),kind:CombatKind::MissileMiss,
             emitted_at:0.0,received_at:0.0,own_body:Some(BodyId(999)),

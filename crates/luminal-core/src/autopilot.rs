@@ -138,13 +138,24 @@ pub fn keep_range(ship:State,target:State,ff:Vec2,range:f64,max_accel:f64)->Appr
     approach(ship,target,ff,range,INTERCEPT_BRAKE_FRACTION*max_accel,max_accel)
 }
 
-/// Burn toward the earliest predicted encounter. No braking or velocity matching.
-pub fn flyby(ship: State, target: State, target_accel: Vec2, max_accel: f64) -> Approach {
+/// Full burn toward the target's current estimated position, without approach braking.
+pub fn flyby(ship: State, target: State, _target_accel: Vec2, max_accel: f64) -> Approach {
     let delta = target.pos - ship.pos;
-    let (direction, eta) = crate::missile::intercept_aim(
-        ship, target, target_accel, max_accel, crate::params::FLYBY_HORIZON_S.value,
-    ).unwrap_or((delta.normalized(), f64::INFINITY));
-    Approach { thrust: direction * max_accel, eta, gap: delta.length(), rel_speed: (target.vel - ship.vel).length() }
+    let closing=(ship.vel-target.vel).dot(delta.normalized());
+    let eta=if closing>0.0 {delta.length()/closing} else {f64::INFINITY};
+    Approach { thrust: delta.normalized() * max_accel, eta, gap: delta.length(), rel_speed: (target.vel - ship.vel).length() }
+}
+
+/// Maximum lateral displacement from an incoming missile's predicted flight line.
+pub fn evade_missile(ship:State,missile:State,max_accel:f64)->Vec2 {
+    let relative=ship.pos-missile.pos;
+    let velocity=ship.vel-missile.vel;
+    let axis=velocity.normalized();
+    let miss=relative-axis*relative.dot(axis);
+    let direction=if miss.length()>1e-6 {miss.normalized()}
+        else if axis!=Vec2::ZERO {Vec2::new(-axis.y,axis.x)}
+        else {relative.normalized()};
+    direction*max_accel
 }
 
 /// How far ahead the collision check looks, s.
@@ -231,6 +242,18 @@ fn clamp(v: Vec2, max: f64) -> Vec2 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn evasive_burn_maximizes_lateral_miss_distance() {
+        let ship=State {pos:Vec2::ZERO,vel:Vec2::ZERO};
+        let missile=State {pos:Vec2::new(10000.0,0.0),vel:Vec2::new(-100.0,0.0)};
+        let burn=evade_missile(ship,missile,1.2);
+        assert!((burn.length()-1.2).abs()<1e-12);
+        assert!(burn.x.abs()<1e-12);
+        assert!(burn.y.abs()>1.19);
+        let offset=State {pos:Vec2::new(10000.0,100.0),..missile};
+        assert!(evade_missile(ship,offset,1.2).y<0.0);
+    }
+
     #[test]
     fn weapon_range_presets_settle_from_inside_and_outside_against_moving_targets() {
         use crate::missile::Payload;

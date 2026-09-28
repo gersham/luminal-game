@@ -26,16 +26,17 @@ impl DetectionLevel {
 }
 pub const PING_RESOLUTION_S:f64=60.0;
 pub const CONTACT_TRANSITION_S:f64=2.0;
-/// Size 7, stealth 50%, full nominal thrust, raised cold screens, ECM off.
-pub const REFERENCE_EF:f64=1.4;
+/// Unit-EF reference used for nominal range displays.
+pub const REFERENCE_EF:f64=1.0;
 fn signature_scale(ef:f64)->f64 {
-    if ef.is_finite() {ef.max(0.0)/REFERENCE_EF} else {0.0}
+    if ef.is_finite() {ef.max(0.0)} else {0.0}
 }
 pub fn detection_ranges(ef:f64)->[f64;4] {
-    [0.01,0.1,2.0,10.0].map(|au|au*crate::units::AU*signature_scale(ef))
+    [0.1,1.0,5.0,20.0].map(|au|au*crate::units::AU*signature_scale(ef))
 }
 pub fn ping_range(ef:f64)->f64 {
-    crate::units::AU*signature_scale(ef)
+    // Active illumination reaches five AU even for a cold target.
+    5.0*crate::units::AU*signature_scale(ef).max(1.0)
 }
 /// Sensor degradation affects distance, not intensity: half effectiveness is
 /// explicitly half range. Active identification has its own range envelope.
@@ -55,12 +56,17 @@ pub fn ship_detection_ew(suite:SensorSuite,effectiveness:[f64;2],active:f64,ef:f
     let ping=if suite.active {active.clamp(0.0,1.0)} else {0.0};
     let locating=passive.max(ping);
     let resolution_factor=resolution_factor.clamp(0.5,1.0);
-    if (locating>0.0 && range<=identity*locating*resolution_factor) || (ping>0.0 && range<=ping_range(ef)*ping*resolution_factor) {Identity}
+    if (locating>0.0 && range<=identity*locating*resolution_factor) || (ping>0.0 && range<=resolved*ping*resolution_factor) {Identity}
     else if passive>0.0 && range<=resolved*passive*resolution_factor {Resolved}
-    else if passive>0.0 && range<=approximate*passive {Approximate}
+    else if (passive>0.0 && range<=approximate*passive) || (ping>0.0 && range<=ping_range(ef)*ping*resolution_factor) {Approximate}
     else if direction_active && suite.direction_finding && effectiveness[1]>0.0 && range<=bearing*effectiveness[1] {Bearing}
     else {None}
 }
+/// Possible unobserved manoeuvre since light left the target. Include boosted drive authority.
+pub fn movement_radius(age:f64)->f64 {
+    0.5*crate::params::SHIP_MAX_ACCEL_G.value*1.2*G0*age.max(0.0).powi(2)
+}
+
 /// Approximate ellipse semi-axes, 1–10 light-seconds, growing with range.
 pub fn approximate_axes(range:f64,ef:f64)->(f64,f64) {
     let ranges=detection_ranges(ef);
@@ -271,15 +277,18 @@ mod tests {
     fn reference_frigate_has_requested_boundaries_and_independent_ping_range() {
         use DetectionLevel::*;
         let au=crate::units::AU;
-        for (range,passive,active) in [(0.1,Resolved,Identity),(0.101,Approximate,Identity),
-            (1.0,Approximate,Identity),(1.001,Approximate,Approximate),
-            (2.001,Bearing,Bearing),(10.0,Bearing,Bearing),(10.001,None,None)] {
-            assert_eq!(ship_detection(SensorSuite::FULL,[1.0,1.0],0.0,REFERENCE_EF,range*au,true),passive);
-            assert_eq!(ship_detection(SensorSuite::FULL,[1.0,1.0],1.0,REFERENCE_EF,range*au,true),active);
+        for ef in [0.5,1.0,1.4,2.0] {
+            for (range,expected) in [(0.1,Identity),(0.101,Resolved),(1.0,Resolved),
+                (1.001,Approximate),(5.0,Approximate),(5.001,Bearing),(20.0,Bearing),(20.001,None)] {
+                assert_eq!(ship_detection(SensorSuite::FULL,[1.0,1.0],0.0,ef,range*ef*au,true),expected);
+            }
+        }
+        for (range,expected) in [(0.999,Identity),(1.001,Approximate),(4.999,Approximate),(5.001,Bearing)] {
+            assert_eq!(ship_detection(SensorSuite::FULL,[1.0,1.0],1.0,1.0,range*au,true),expected);
         }
         // Typical ECM adds 50% signature but cuts resolution distance by half.
         let ef=REFERENCE_EF*1.5;
-        for (range,expected) in [(0.749,Identity),(0.751,Approximate)] {
+        for (range,expected) in [(0.749,Identity),(0.751,Approximate),(3.749,Approximate),(3.751,Approximate)] {
             assert_eq!(ship_detection_ew(SensorSuite::FULL,[1.0,1.0],1.0,ef,range*au,true,resolution_factor(100.0,50.0)),expected);
         }
     }
@@ -291,18 +300,18 @@ mod tests {
         let hot=EmissivityFactors {thrust_percent:100.0,screen_percent:100.0,screen_on:true,ecm_on:true,recent_missiles:true,recent_beams:true,..cold};
         assert!((hot.value()-41.58).abs()<1e-9);
         let au=crate::units::AU;
-        for (range,expected) in [(0.005,Identity),(0.08,Resolved),(1.0,Approximate),(5.0,Bearing),(11.0,None)] {
+        for (range,expected) in [(0.05,Identity),(0.8,Resolved),(4.0,Approximate),(15.0,Bearing),(21.0,None)] {
             assert_eq!(ship_detection(SensorSuite::FULL,[1.0,1.0],0.0,REFERENCE_EF,range*au,true),expected);
         }
-        assert_eq!(ship_detection(SensorSuite::FULL,[1.0,1.0],0.0,REFERENCE_EF,5.0*au,false),None);
-        assert_eq!(ship_detection(SensorSuite::FULL,[1.0,0.5],0.0,REFERENCE_EF,6.0*au,true),None);
+        assert_eq!(ship_detection(SensorSuite::FULL,[1.0,1.0],0.0,REFERENCE_EF,15.0*au,false),None);
+        assert_eq!(ship_detection(SensorSuite::FULL,[1.0,0.5],0.0,REFERENCE_EF,11.0*au,true),None);
         assert_eq!(ship_detection(SensorSuite::FULL,[1.0,1.0],1.0,REFERENCE_EF,0.9*au,false),Identity);
-        assert_eq!(ship_detection(SensorSuite::FULL,[0.0,0.0],0.5,REFERENCE_EF,0.6*au,true),None);
+        assert_eq!(ship_detection(SensorSuite::FULL,[0.0,0.0],0.5,REFERENCE_EF,2.6*au,true),None);
         assert_eq!(resolution_factor(100.0,50.0),0.5);
         assert_eq!(resolution_factor(50.0,100.0),1.0);
         assert_eq!(resolution_factor(1e6,0.0),0.5);
-        assert_eq!(ship_detection_ew(SensorSuite::FULL,[1.0,1.0],0.0,REFERENCE_EF,0.08*au,true,0.5),Approximate);
-        assert_eq!(ship_detection_ew(SensorSuite::FULL,[1.0,1.0],0.0,REFERENCE_EF,5.0*au,true,0.5),Bearing);
+        assert_eq!(ship_detection_ew(SensorSuite::FULL,[1.0,1.0],0.0,REFERENCE_EF,0.8*au,true,0.5),Approximate);
+        assert_eq!(ship_detection_ew(SensorSuite::FULL,[1.0,1.0],0.0,REFERENCE_EF,15.0*au,true,0.5),Bearing);
     }
     #[test]
     fn accelerating_seeker_fits_current_not_average_velocity() {

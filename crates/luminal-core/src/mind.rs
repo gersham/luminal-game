@@ -293,6 +293,7 @@ pub fn triangulate(a: (Vec2, f64, f64), b: (Vec2, f64, f64)) -> Option<(Vec2, [[
 
 #[derive(Clone, Debug)]
 pub struct Contact {
+    region_offset: Option<Vec2>,
     evidence:BTreeMap<(BodyId,u8),Observation>,
     /// Identification requires a direct passive localisation or a usable echo,
     /// not triangulated bearings or interception of the target's ping.
@@ -337,21 +338,31 @@ impl Contact {
         let mut track=self.usable_track(t)?.at(t,sys);
         if self.detection(t)==crate::sensors::DetectionLevel::Approximate {
             let evidence=self.best_evidence(t)?;
-            let last_ping=self.evidence.values().filter(|o|o.source==Source::Echo && o.detection>=crate::sensors::DetectionLevel::Resolved)
-                .map(|o|o.sensor_received_at).max_by(f64::total_cmp);
-            let blend=last_ping.map_or(1.0,|at|((t-at-crate::sensors::PING_RESOLUTION_S)/60.0).clamp(0.0,1.0));
-            if let Measurement::BearingRange {bearing,range,sigma_range,sigma_bearing}=evidence.measurement {
-                let min=crate::units::LIGHT_SECOND*0.5*blend;
-                let cap=crate::units::LIGHT_SECOND*5.0;
-                let radial=sigma_range.clamp(min,cap);
-                let angular=(range*sigma_bearing).clamp(min*0.65,cap)/range.max(1.0);
-                let cov=polar_cov(bearing,range,radial,angular);
-                track.p[0][0]=track.p[0][0].max(cov[0][0]);
-                track.p[1][1]=track.p[1][1].max(cov[1][1]);
-            }
+            let age=(t-evidence.emitted_at).max(0.0);
+            let movement=crate::sensors::movement_radius(age)+0.5*track.accel().length()*age*age;
+            let offset=self.region_offset.unwrap_or_else(||region_offset(self.id,evidence));
+            // A conservative sum of the measurement/prediction ellipse, the
+            // unknown-manoeuvre disk, and its fixed displacement from the center.
+            let pad=movement+offset.length();
+            for i in 0..2 {for j in 0..2 {track.p[i][j]*=2.0;}}
+            track.p[0][0]+=0.5*pad*pad;
+            track.p[1][1]+=0.5*pad*pad;
+            track.x[0]+=offset.x;track.x[1]+=offset.y;
         }
         Some(track)
     }
+}
+
+/// A bounded, fixed world-coordinate displacement, shared by all reports for a contact.
+fn region_offset(id:ContactId,obs:&Observation)->Vec2 {
+    let measurement=match obs.measurement {
+        Measurement::BearingRange {range,sigma_range,sigma_bearing,..}=>2.0*sigma_range.min(range*sigma_bearing),
+        _=>0.0,
+    };
+    let radius=measurement.max(crate::sensors::movement_radius(obs.sensor_received_at-obs.emitted_at)).max(1.0);
+    let mut rng=crate::rng::Rng::stream(obs.origin.x.to_bits()^obs.origin.y.to_bits()^obs.emitted_at.to_bits(),id.0 as u64);
+    let angle=std::f64::consts::TAU*rng.uniform();
+    Vec2::new(angle.cos(),angle.sin())*(radius*(0.2+0.3*rng.uniform()))
 }
 
 /// A report whose light left this long before the track's newest one is too stale to
@@ -387,7 +398,7 @@ impl Perception {
         let c = self
             .contacts
             .entry(obs.contact)
-            .or_insert_with(|| Contact { evidence:BTreeMap::new(),resolved:false, systematic_floor:None,id: obs.contact, track: None, bearings: BTreeMap::new(), last: obs });
+            .or_insert_with(|| Contact { region_offset:None,evidence:BTreeMap::new(),resolved:false, systematic_floor:None,id: obs.contact, track: None, bearings: BTreeMap::new(), last: obs });
         let mut obs=obs;
         if matches!(obs.measurement,Measurement::Bearing {..}) {obs.detection=obs.detection.min(crate::sensors::DetectionLevel::Bearing);}
         let key=(obs.sensor,obs.source as u8);
@@ -452,6 +463,10 @@ impl Perception {
                 }
             }
         }
+        if c.region_offset.is_none() && obs.detection==crate::sensors::DetectionLevel::Approximate
+            && matches!(obs.measurement,Measurement::BearingRange {..}) {
+            c.region_offset=Some(region_offset(c.id,&obs));
+        }
         // Correlated calibration error cannot be averaged away by repeated frames.
         // Smaller/stronger-range measurements progressively lower this floor.
         if let Some(tr)=&mut c.track {
@@ -485,6 +500,45 @@ impl Perception {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn approximate_region_keeps_offset_and_covers_delayed_manoeuvres_for_both_sensors() {
+        use crate::sensors::DetectionLevel as D;
+        let sys=System {bodies:vec![]};
+        for source in [Source::Emission,Source::Echo] {
+            let mut p=Perception::new(FactionId(0));
+            let report=Observation {detection:D::Approximate,contact:ContactId(1),sensor:BodyId(0),origin:Vec2::ZERO,
+                emitted_at:0.0,sensor_received_at:1000.0,decider_received_at:1000.0,source,snr:100.0,
+                measurement:Measurement::BearingRange {bearing:0.0,range:crate::units::C*1000.0,sigma_range:1000.0,sigma_bearing:1e-5}};
+            p.ingest(report,&sys);
+            let offset=p.contacts[&ContactId(1)].region_offset.unwrap();
+            assert!(offset.length()>1000.0);
+            for now in [1000.0,1050.0] {
+                let c=&p.contacts[&ContactId(1)];
+                let estimate=c.estimate(now,&sys).unwrap();
+                let unbiased=c.track.as_ref().unwrap().at(now,&sys);
+                assert!((estimate.pos()-unbiased.pos()-offset).length()<1e-5);
+                let cov=estimate.pos_cov();
+                let det=cov[0][0]*cov[1][1]-cov[0][1]*cov[1][0];
+                for i in 0..32 {
+                    let a=i as f64*std::f64::consts::TAU/32.0;
+                    let truth=unbiased.pos()+Vec2::new(a.cos(),a.sin())*crate::sensors::movement_radius(now);
+                    let d=truth-estimate.pos();
+                    let squared=(cov[1][1]*d.x*d.x-2.0*cov[0][1]*d.x*d.y+cov[0][0]*d.y*d.y)/det;
+                    assert!(squared<=4.0,"manoeuvre outside displayed two-sigma region");
+                }
+            }
+            // Repeated reports from another sensor/source do not reroll the offset.
+            p.ingest(Observation {sensor:BodyId(2),source:Source::Echo,emitted_at:1.0,sensor_received_at:1001.0,
+                decider_received_at:1001.0,..report},&sys);
+            assert_eq!(p.contacts[&ContactId(1)].region_offset,Some(offset));
+            p.ingest(Observation {detection:D::Resolved,emitted_at:1002.0,sensor_received_at:1002.0,
+                decider_received_at:1002.0,..report},&sys);
+            let c=&p.contacts[&ContactId(1)];
+            assert_eq!(c.detection(1002.0),D::Resolved);
+            assert_eq!(c.estimate(1002.0,&sys).unwrap().pos(),c.track.as_ref().unwrap().pos());
+        }
+    }
+
     #[test] fn ping_identity_expires_from_sensor_receipt_not_relay_receipt() {
         use crate::sensors::DetectionLevel as D;
         let mut p=Perception::new(FactionId(0));let sys=System::default();

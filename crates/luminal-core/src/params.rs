@@ -40,8 +40,8 @@ pub const INTERCEPTOR_HALF_SPEED_C:Param=Param {key:"interceptor.half_speed",val
 pub const INTERCEPTOR_MAX_SPEED_C:Param=Param {key:"interceptor.max_speed",value:0.5,unit:"c",commitment:Proposal,note:"No engagement or kill probability at or above this encounter speed."};
 
 pub const PD_RATE_HZ: Param=Param {key:"point_defence.rate",value:1.0,unit:"shots/s",commitment:Established,note:"Default firing rate per fitted emplacement."};
-pub const PD_HALF_RANGE_LS: Param=Param {key:"point_defence.half_range",value:0.006,unit:"ls",commitment:Proposal,note:"Last-ditch laser defence: 50% per shot at 0.006 ls; hard maximum remains 1 ls."};
-pub const PD_LASER_MAX_RANGE_LS: Param=Param {key:"point_defence.laser_last_ditch_range",value:1.0,unit:"ls",commitment:Proposal,note:"Lasers fire within 1 ls; interceptors are the primary outer defence. Hit probability still falls with range."};
+pub const PD_HALF_RANGE_LS: Param=Param {key:"point_defence.half_range",value:0.012,unit:"ls",commitment:Proposal,note:"Last-ditch laser defence: 50% per shot at 0.012 ls; hard maximum is 2 ls."};
+pub const PD_LASER_MAX_RANGE_LS: Param=Param {key:"point_defence.laser_last_ditch_range",value:2.0,unit:"ls",commitment:Proposal,note:"Lasers fire within 2 ls; interceptors are the primary outer defence. Hit probability still falls with range."};
 pub const PD_FALLOFF_POWER: Param=Param {key:"point_defence.falloff",value:6.0,unit:"exponent",commitment:Proposal,note:"Hit chance 1/(1+(range/half_range)^6), rapid falloff beyond."};
 pub const PD_MAX_RANGE_LS: Param=Param {key:"point_defence.max_range",value:INTERCEPTOR_RANGE_LS.value,unit:"ls",commitment:Proposal,note:"Interceptor fire-control acquisition reaches 0.27 AU; laser firing retains its separate close-in cutoff."};
 pub const PD_SENSOR_NOISE_FLOOR: Param=Param {key:"point_defence.sensor_noise_floor",value:1e-22,unit:"W/m²",commitment:Proposal,note:"Dedicated missile fire control supports the extended envelope; local passive channel and light-time still required."};

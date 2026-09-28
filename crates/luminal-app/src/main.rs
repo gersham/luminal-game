@@ -14,7 +14,7 @@ use luminal_core::scenario::{self, ESCORT, RAIDER};
 use luminal_core::session::{
     AutopilotStatus, BodyId, BodyView, Command, ContactView, InterceptTarget, LocalSession, Order, Payload, Phase, Role, View,
 };
-use luminal_core::units::{AU, G0, LIGHT_SECOND};
+use luminal_core::units::{AU, C, G0, LIGHT_SECOND};
 use luminal_core::world::{BodyKind, FactionId};
 use std::collections::{BTreeMap,BTreeSet,VecDeque};
 use luminal_core::world::CombatKind;
@@ -147,6 +147,13 @@ fn desired_auto_warp(view:&View)->f64 {
 mod tests {
     use super::*;
     #[test]
+    fn speeds_switch_to_light_speed_units_above_threshold() {
+        assert_eq!(fmt_speed(0.5*C),"0.500c");
+        assert_eq!(fmt_speed(-0.02*C),"-0.020c");
+        assert!(fmt_speed(0.01*C).ends_with("km/s"));
+        assert!(fmt_speed(0.0101*C).ends_with("c"));
+    }
+    #[test]
     fn tactical_keys_map_orders_and_respect_missile_gates() {
         use egui::Key;
         let app=LuminalApp::new();
@@ -217,11 +224,27 @@ mod tests {
         assert_eq!(app.camera.center,position);
     }
     #[test]
+    fn manual_ping_holds_zoom_until_sweep_finishes() {
+        let mut app=LuminalApp::new();
+        app.command(Command::Ping {body:BodyId(1)});
+        let mut view=app.session.view(app.role);
+        let rect=Rect::from_min_size(Pos2::ZERO,EVec2::new(1000.0,600.0));
+        app.camera.km_per_px=1.0;
+        app.update_tracking_zoom(&view,rect,0.1);
+        assert_eq!(app.camera.km_per_px,1.0);
+        assert!(app.manual_ping_zoom_until>view.time);
+        view.time=app.manual_ping_zoom_until+1.0;
+        app.update_tracking_zoom(&view,rect,0.1);
+        assert!(app.camera.km_per_px>1.0,"automatic zoom resumes after the sweep");
+    }
+
+    #[test]
     fn tracking_zoom_smoothly_frames_target_and_preserves_bearing_only_scale() {
         let mut app=LuminalApp::new();
         let mut view=app.session.view(app.role);
         let rect=Rect::from_min_size(Pos2::ZERO,EVec2::new(1000.0,600.0));
         let own=view.bodies.iter().find(|b|b.controllable).unwrap().pos;
+        app.inspected=Some(Selection::Contact(view.contacts[0].id));
         let initial=app.camera.km_per_px;
         app.update_tracking_zoom(&view,rect,0.1);
         assert_eq!(app.camera.km_per_px,initial,"no invented range for bearings");
@@ -321,7 +344,7 @@ mod tests {
         let mut view=app.session.view(Role::Faction(ESCORT));
         view.contacts.clear();
         view.combat=[CombatKind::Destroyed,CombatKind::MissileHit,CombatKind::MissileMiss,CombatKind::BeamPulse].into_iter().enumerate().map(|(i,kind)|
-            luminal_core::world::CombatEvent {velocity:None,subject_kind:Some(BodyKind::Missile),impact_strength:0.0,damage:None,contact:None,aim:None,pos:None,kind,own_body:Some(BodyId(1)),emitted_at:i as f64,received_at:i as f64}).collect();
+            luminal_core::world::CombatEvent {target:None,velocity:None,subject_kind:Some(BodyKind::Missile),impact_strength:0.0,damage:None,contact:None,aim:None,pos:None,kind,own_body:Some(BodyId(1)),emitted_at:i as f64,received_at:i as f64}).collect();
         let mut log=TacticalLog::default();
         log.observe(&view,Some(BodyId(1)),0.0);
         assert_eq!(log.lines.len(),3);
@@ -351,7 +374,7 @@ mod tests {
         let app=LuminalApp::new();let mut view=app.session.view(Role::Faction(ESCORT));
         view.bodies.clear();view.contacts.clear();
         view.combat=[Some(BodyKind::Ship),Some(BodyKind::Ship),Some(BodyKind::Missile),Some(BodyKind::Missile),None].into_iter().enumerate().map(|(i,subject_kind)|
-            luminal_core::world::CombatEvent {velocity:None,subject_kind,impact_strength:0.0,damage:None,
+            luminal_core::world::CombatEvent {target:None,velocity:None,subject_kind,impact_strength:0.0,damage:None,
                 contact:if i==1 {Some(ContactId(1))} else {None},own_body:if i==0 {Some(BodyId(1))} else {None},
                 aim:None,pos:None,kind:CombatKind::Destroyed,emitted_at:i as f64,received_at:10.0+i as f64}).collect();
         let mut log=TacticalLog::default();log.observe(&view,Some(BodyId(1)),0.0);
@@ -386,7 +409,7 @@ mod tests {
         let mut view=app.session.view(Role::Faction(ESCORT));
         let mut log=TacticalLog::default();
         log.observe(&view,Some(BodyId(1)),0.0);
-        view.combat=(1..=2).map(|i|luminal_core::world::CombatEvent {velocity:None,
+        view.combat=(1..=2).map(|i|luminal_core::world::CombatEvent {target:None,velocity:None,
             subject_kind:Some(BodyKind::Ship),
             impact_strength:0.65,
             damage:Some(if i==1 {"SCREEN +3.00 TJ"} else {"HULL -2.00 · PROP DAMAGED"}.into()),
@@ -401,7 +424,7 @@ mod tests {
     }
 
     #[test]
-    fn restart_restores_direction_only_target_without_truth_range() {
+    fn restart_restores_transport_follow_and_historical_enemy_bearing() {
         let mut app=LuminalApp::new();
         app.session.tick(2.0);
         app.command(Command::SetWarp(1.0));
@@ -425,20 +448,19 @@ mod tests {
             assert_eq!(b.thermal.field, 1.0);
             assert_eq!(b.screen_j, 0.0);
         }
-        let Some(Selection::Contact(target))=app.inspected else {panic!("enemy must be targeted")};
+        assert!(app.inspected==Some(Selection::Body(BodyId(0))));
         let ship=view.bodies.iter().find(|b|b.id==BodyId(1)).unwrap();
-        let enemy=view.contacts.iter().find(|c|c.id==target).unwrap();
+        let enemy=&view.contacts[0];
         assert!(enemy.last_emitted_at<0.0,"briefing must use historical light");
         assert!(!contact_has_course(enemy));
         assert!(enemy.track.is_none() && enemy.resolved_kind.is_none());
-        assert!(matches!(ship.autopilot.map(|a|a.order),Some(Order::Intercept(_))));
+        assert!(matches!(ship.autopilot.map(|a|a.order),Some(Order::Follow {target:BodyId(0),..})));
         assert!(enemy.bearings[0].received_at-enemy.bearings[0].emitted_at>600.0);
         assert_eq!(bearing_opacity(&enemy.bearings[0],view.time),1.0);
         assert_eq!(contact_label(enemy),"T1");
         let rect=Rect::from_min_size(Pos2::ZERO,EVec2::new(1000.0,700.0));
         app.fit(&view,rect);
-        let bearing=enemy.bearings[0].bearing;
-        let target_pos=ship.pos+Vec2::new(bearing.cos(),bearing.sin())*AU;
+        let target_pos=view.bodies.iter().find(|b|b.id==BodyId(0)).unwrap().pos;
         let midpoint=(ship.pos+target_pos)*0.5;
         assert!((app.camera.center-midpoint).length()<1e-6);
         for pos in [ship.pos,target_pos] {
@@ -643,8 +665,6 @@ mod tests {
 }
 /// How far ahead to forecast committed motion, seconds.
 const FORECAST_S: f64 = 8.0 * 3600.0;
-/// Weight of each new bearing in the displayed running average.
-const BEARING_SMOOTHING: f64 = 0.15;
 
 /// Velocity tail length, px per km/s of Sun-frame speed, and its cap.
 const TAIL_PX_PER_KMS: f64 = 0.01;
@@ -703,6 +723,7 @@ struct LuminalApp {
     camera: Camera,
     track_player: bool,
     tracking_zoom_hold:f64,
+    manual_ping_zoom_until:f64,
     /// Frame the scene on the next map draw.
     fit_pending: bool,
     opening_fit: bool,
@@ -809,7 +830,7 @@ impl LuminalApp {
                             if button.clicked() {self.command(command.clone());}
                         }
                     });}
-                    if c.track.is_none() {ui.small("Bearing only · close to acquire range; EVADE burns away");}
+                    if c.track.is_none() {ui.small("EVADE: maximum lateral burn against incoming missiles, then coast");}
                 }
             } else {ui.weak("Select a contact on the map");}
         });
@@ -832,7 +853,7 @@ impl LuminalApp {
                 if let Some(other)=view.bodies.iter().find(|b|b.id==target) {
                     ui.label(format!("Separation {} / 1 LS",fmt_distance((other.pos-ship.pos).length())));
                     ui.small(format!("Alongside error {}",fmt_distance((other.pos+offset-ship.pos).length())));
-                    ui.small(format!("Relative speed {:.1} km/s",(other.vel-ship.vel).length()));
+                    ui.small(format!("Relative speed {}",fmt_speed((other.vel-ship.vel).length())));
                     ui.small(format!("Friendly burn {:.1}g",other.thrust.length()/G0));
                 }
             },
@@ -880,7 +901,7 @@ impl LuminalApp {
         let ef=ship.emissivity;
         ui.vertical_centered(|ui| {
             ui.label(egui::RichText::new(format!("EF {:.2}",ef.value())).monospace().size(22.0).strong().color(ACCENT))
-                .on_hover_text(format!("EMISSIVITY FACTOR\nThrust {:.0}% · heat {:.0}% · size {} · stealth {:.0}\nECM {} · recent missiles {} · recent beams {}\nDetection ranges scale by EF / 100.",ef.thrust_percent,ef.screen_percent,ef.size,ef.stealth,ef.ecm_on,ef.recent_missiles,ef.recent_beams));
+                .on_hover_text(format!("EMISSIVITY FACTOR\nThrust {:.0}% · heat {:.0}% · size {} · stealth {:.0}\nECM {} · recent missiles {} · recent beams {}\nDetection ranges scale directly by target EF.",ef.thrust_percent,ef.screen_percent,ef.size,ef.stealth,ef.ecm_on,ef.recent_missiles,ef.recent_beams));
         });
         let screen=if ship.damage.damage.state(System::Screens)==Condition::Destroyed {"DESTROYED".into()}
             else if !ship.screen_up && ship.screen_j>0.0 {"HEAT LOCK".into()}
@@ -969,8 +990,6 @@ impl LuminalApp {
             }
         });
         let mut session=LocalSession::new(scenario::transport_intercept_debug_seeded(seed));
-        let target=session.contact_truth(Role::Spectator,ESCORT).unwrap().into_iter()
-            .find_map(|(contact,body)|(body==BodyId(2)).then_some(contact)).unwrap();
         let log_path=std::path::PathBuf::from("logs/latest.log");
         let log_error=if cfg!(test) || std::env::var_os("LUMINAL_SCREENSHOT").is_some() {None} else {
             std::fs::create_dir_all("logs").and_then(|_|session.enable_debug_log(&log_path)).err()
@@ -984,10 +1003,11 @@ impl LuminalApp {
             camera: Camera { center: Vec2::ZERO, km_per_px: AU / 500.0 },
             track_player:true,
             tracking_zoom_hold:0.0,
+            manual_ping_zoom_until:0.0,
             fit_pending: true,
             opening_fit: true,
             selected: Some(Selection::Body(BodyId(1))),
-            inspected: Some(Selection::Contact(target)),
+            inspected: Some(Selection::Body(BodyId(0))),
             last_message: log_error,
             payload: Payload::Kinetic,
             dev: DevHooks { screenshot: std::env::var_os("LUMINAL_SCREENSHOT").map(Into::into), frames: 0 },
@@ -1108,8 +1128,13 @@ impl LuminalApp {
             Command::SetScreen {up,..}=>Some(("screen",if *up {"SCREENS RAISING".into()} else {"SCREENS LOWERING".into()})),
             _=>None,
         };
+        let ping_duration=if let Command::Ping {body}=cmd {
+            self.session.view(self.role).bodies.iter().find(|b|b.id==body).map(|b|
+                2.0*sensors::ping_range(sensors::REFERENCE_EF)*b.damage.operating_effectiveness(System::Active)/LIGHT_SECOND)
+        } else {None};
         self.last_message = match self.session.command(self.role, cmd) {
             Ok(()) => {
+                if let Some(duration)=ping_duration {self.manual_ping_zoom_until=self.manual_ping_zoom_until.max(self.session.view(self.role).time+duration);}
                 self.audio.play(audio::Cue::Click);
                 if let Some((key,text))=note {self.tactical_log.push(key.into(),text,ACCENT,self.session.view(self.role).time);}
                 None
@@ -1185,11 +1210,44 @@ fn tracking_zoom_scale(view:&View,origin:Vec2,rect:Rect,selected:InterceptTarget
     Some(desired.max(2.0*LIGHT_SECOND/(rect.width().min(rect.height()) as f64).max(1.0)).clamp(1e-3,1e8))
 }
 
+fn sparse_distance(value:f64)->String {
+    if value>=10.0 {format!("{value:.0}")}
+    else if value>0.0 {
+        let decimals=(1.0-value.log10().floor()).clamp(0.0,8.0) as usize;
+        let text=format!("{value:.decimals$}");
+        text.trim_end_matches('0').trim_end_matches('.').to_string()
+    } else {"0".into()}
+}
+
+fn draw_target_link(painter:&egui::Painter,cam:&Camera,rect:Rect,from:Vec2,to:Vec2) {
+    let pts=[to_screen(cam,rect,from),to_screen(cam,rect,to)];
+    let color=Color32::from_rgb(235,80,80);
+    painter.extend(Shape::dashed_line(&pts,Stroke::new(1.0,color.gamma_multiply(0.7)),6.0,4.0));
+    let distance=(to-from).length();
+    let text=if distance>=0.1*AU {format!("{} AU",sparse_distance(distance/AU))}
+        else {format!("{} LS",sparse_distance(distance/LIGHT_SECOND))};
+    let galley=painter.layout_no_wrap(text,mono(10.0),color);
+    if pts[0].distance(pts[1])<140.0_f32.max(galley.size().x*3.0) {return;}
+    let mut direction=(pts[1]-pts[0]).normalized();
+    // Keep text upright when the target is left of the ship.
+    if direction.x<0.0 {direction = -direction;}
+    let above=EVec2::new(direction.y,-direction.x);
+    let center=pts[0].lerp(pts[1],0.5)+above*(galley.size().y*0.5+4.0);
+    let shape=egui::epaint::TextShape::new(center-galley.size()*0.5,galley,color)
+        .with_angle_and_anchor(direction.y.atan2(direction.x),egui::Align2::CENTER_CENTER);
+    if rect.shrink(8.0).contains_rect(shape.visual_bounding_rect()) {painter.add(shape);}
+}
+
+fn fmt_speed(speed: f64) -> String {
+    if speed.abs()>0.01*C {format!("{}{:.3}c",if speed<0.0 {"-"} else {""},speed.abs()/C)}
+    else {format!("{speed:.0} km/s")}
+}
+
 fn fmt_distance(km: f64) -> String {
     if km >= 0.1 * AU {
-        format!("{:.2} AU", km / AU)
+        format!("{} AU", sparse_distance(km / AU))
     } else if km >= 0.5 * LIGHT_SECOND {
-        format!("{:.2} ls", km / LIGHT_SECOND)
+        format!("{} ls", sparse_distance(km / LIGHT_SECOND))
     } else {
         format!("{km:.0} km")
     }
@@ -1314,7 +1372,7 @@ impl eframe::App for LuminalApp {
         if !view.bodies.iter().any(|b| self.selected == Some(Selection::Body(b.id)) && b.controllable && b.kind == BodyKind::Ship) {
             self.selected = view.bodies.iter().find(|b| b.controllable && b.kind == BodyKind::Ship).map(|b| Selection::Body(b.id));
         }
-        self.smooth_bearings(&mut view);
+        self.smooth_bearings(&mut view,dt);
         let overlay = match (self.role, self.overlay) {
             (Role::Spectator, Some(f)) => Some((
                 self.session.view(Role::Faction(f)),
@@ -1591,7 +1649,7 @@ impl LuminalApp {
                 let closure = -(tr.vel - b.vel).dot(rel.normalized());
                 readouts(ui, &[
                     ("RANGE", fmt_distance(rel.length()), TEXT_HI),
-                    (if closure >= 0.0 { "CLOSING" } else { "OPENING" }, format!("{:.0} km/s", closure.abs()), if closure >= 0.0 { SYS_DAMAGED } else { TEXT_HI }),
+                    (if closure >= 0.0 { "CLOSING" } else { "OPENING" }, fmt_speed(closure.abs()), if closure >= 0.0 { SYS_DAMAGED } else { TEXT_HI }),
                     ("ERROR 2σ", format!("±{}", fmt_distance(2.0 * sigma_major(tr.cov))), TEXT),
                     ("AGE", fmt_age((view.time - tr.updated_at).max(0.0)), TEXT),
                 ]);
@@ -1794,9 +1852,9 @@ impl LuminalApp {
             .min_by(|a, b| a.1.total_cmp(&b.1))
         {
             let rel = b.vel - view.system.state(view.celestials.iter().position(|c| c.name == nearest.0.name).unwrap(), view.time).vel;
-            ui.label(format!("{:.1} km/s relative to {}, {} above surface", rel.length(), nearest.0.name, fmt_distance(nearest.1)));
+            ui.label(format!("{} relative to {}, {} above surface", fmt_speed(rel.length()), nearest.0.name, fmt_distance(nearest.1)));
         }
-        ui.label(format!("Speed {:.1} km/s (system frame)", b.vel.length()));
+        ui.label(format!("Speed {} (system frame)", fmt_speed(b.vel.length())));
         ui.label(format!("Thrust {:.2} g", b.thrust.length() / G0));
         let forecast = view.system.predict(State { pos: b.pos, vel: b.vel }, b.thrust, view.time, FORECAST_S, 2);
         if let Some((i, t)) = forecast.impact {
@@ -1821,7 +1879,7 @@ impl LuminalApp {
                 Order::Flyby(InterceptTarget::Own(o)) => format!("fly by {}", view.bodies.iter().find(|x| x.id == o).map_or("?", |x| x.name.as_str())),
                 Order::Flyby(InterceptTarget::Contact(c)) => format!("fly by {c}"),
                 Order::KeepRange(_,range)=>format!("hold range {}",fmt_distance(range)),
-                Order::Evade(_)=>"evade · maximum separation".into(),
+                Order::Evade(_)=>"evade · incoming missiles / coast when clear".into(),
                 Order::MoveTo { frame, .. } => format!("move and stop (frame: {})", view.celestials[frame].name),
             };
             let status = match ap.status {
@@ -1871,7 +1929,7 @@ impl LuminalApp {
                 } else if b.point_defence.is_some() { "Point defence only".into() } else { "Unarmed".into() });
             }
             ui.weak(format!("Sensors: passive {} · active {} · direction finding {}",if b.sensors.passive {"fitted"} else {"absent"},if b.sensors.active {"fitted"} else {"absent"},if b.sensors.direction_finding {"fitted"} else {"absent"}));
-            if ui.add_enabled(b.sensors.active,egui::Button::new("Ping")).on_hover_text("Send one active pulse. White ring shows round-trip detection range, fading near 1 AU. The pulse exposes you at 10× passive/direction-finding range after light travel time.").clicked() {
+            if ui.add_enabled(b.sensors.active,egui::Button::new("Ping")).on_hover_text("Send one active pulse. White ring shows round-trip detection range, fading at 5 AU (reduced by sensor damage). The pulse exposes you at 10× passive/direction-finding range after light travel time.").clicked() {
                 self.command(Command::Ping { body: b.id });
             }
             if b.kind == BodyKind::Ship {
@@ -1891,7 +1949,7 @@ impl LuminalApp {
     fn draw_navigation_readout(&self, painter: &egui::Painter, rect: Rect, view: &View) {
         let Some(Selection::Body(id)) = self.selected else { return };
         let Some(ship) = view.bodies.iter().find(|b| b.id == id) else { return };
-        let mut lines = vec![format!("SPEED  {:>8.0} km/s    THRUST  {:.0}g", ship.vel.length(), ship.thrust.length()/G0)];
+        let mut lines = vec![format!("SPEED  {}    THRUST  {:.0}g", fmt_speed(ship.vel.length()), ship.thrust.length()/G0)];
         if let Some(Selection::Contact(id)) = self.inspected
             && let Some(contact) = view.contacts.iter().find(|c| c.id == id) {
             if let Some(track) = &contact.track {
@@ -1899,7 +1957,7 @@ impl LuminalApp {
                 let closing = -(track.vel-ship.vel).dot(rel.normalized());
                 lines.push(format!("RANGE  {}    {}", fmt_distance(rel.length()), contact_label(contact)));
                 lines.push(if contact_has_course(contact) {
-                    format!("{}  {:.0} km/s · ESTIMATED", if closing>=0.0 {"CLOSING"} else {"OPENING"}, closing.abs())
+                    format!("{}  {} · ESTIMATED", if closing>=0.0 {"CLOSING"} else {"OPENING"}, fmt_speed(closing.abs()))
                 } else {"CLOSURE UNKNOWN · BEARING / POSITION ONLY".into()});
             } else { lines.push("RANGE / CLOSURE UNKNOWN · BEARING ONLY".into()); }
         } else { lines.push("NO TARGET DESIGNATED".into()); }
@@ -1922,7 +1980,7 @@ impl LuminalApp {
 
     fn update_tracking_zoom(&mut self,view:&View,rect:Rect,dt:f64) {
         self.tracking_zoom_hold=(self.tracking_zoom_hold-dt).max(0.0);
-        if !self.track_player || self.tracking_zoom_hold>0.0 {return;}
+        if !self.track_player || self.tracking_zoom_hold>0.0 || view.time<self.manual_ping_zoom_until {return;}
         let Some(ship)=view.bodies.iter().find(|b|b.controllable && b.kind==BodyKind::Ship) else {return;};
         let Some(selected)=self.inspected.map(|s|match s {
             Selection::Body(id)=>InterceptTarget::Own(id),Selection::Contact(id)=>InterceptTarget::Contact(id),
@@ -2020,8 +2078,14 @@ impl LuminalApp {
                 let duration=0.5_f64.max(view.warp*0.2);
                 if age>=duration {continue;}
                 if let Some(aim)=e.aim {
+                    let start=e.own_body.and_then(|id|view.bodies.iter().find(|b|b.id==id).map(|b|b.pos))
+                        .or_else(||e.contact.and_then(|id|view.contacts.iter().find(|c|c.id==id).and_then(|c|c.track.as_ref()).map(|t|t.pos))).unwrap_or(pos);
+                    let end=e.target.and_then(|target|match target {
+                        InterceptTarget::Own(id)=>view.bodies.iter().find(|b|b.id==id).map(|b|b.pos),
+                        InterceptTarget::Contact(id)=>view.contacts.iter().find(|c|c.id==id).and_then(|c|c.track.as_ref()).map(|t|t.pos),
+                    }).unwrap_or(aim);
                     let color=Color32::from_rgb(150,225,255).gamma_multiply((1.0-age/duration) as f32);
-                    painter.line_segment([p,to_screen(&cam,rect,aim)],Stroke::new(1.5,color));
+                    painter.line_segment([to_screen(&cam,rect,start),to_screen(&cam,rect,end)],Stroke::new(1.5,color));
                 }
             } else {
                 let duration=20.0_f64.max(view.warp*0.3);
@@ -2122,9 +2186,7 @@ impl LuminalApp {
                 }
                 Order::Follow {target:target_id,..} => {
                     if let Some(target)=view.bodies.iter().find(|b|b.id==target_id) {
-                        painter.extend(Shape::dashed_line(&[to_screen(&cam,rect,b.pos),to_screen(&cam,rect,target.pos)],Stroke::new(1.0,Color32::from_rgb(235,80,80)),6.0,4.0));
-                        let at=to_screen(&cam,rect,(b.pos+target.pos)*0.5);
-                        painter.text(at,egui::Align2::CENTER_BOTTOM,fmt_distance((b.pos-target.pos).length()),mono(10.0),Color32::from_rgb(235,80,80));
+                        draw_target_link(&painter,&cam,rect,b.pos,target.pos);
                     }
                 }
                 Order::Intercept(target) | Order::Flyby(target) | Order::KeepRange(target,_) | Order::Evade(target) => {
@@ -2133,17 +2195,7 @@ impl LuminalApp {
                         InterceptTarget::Contact(ci) => view.contacts.iter().find(|x| x.id == ci).and_then(|x| x.track.as_ref()).map(|t| t.pos),
                     };
                     if let Some(to) = to {
-                        let pts = [to_screen(&cam, rect, b.pos), to_screen(&cam, rect, to)];
-                        let color=Color32::from_rgb(235,80,80);
-                        painter.extend(Shape::dashed_line(&pts, Stroke::new(1.0, color.gamma_multiply(0.7)), 6.0, 4.0));
-                        let distance=(to-b.pos).length();
-                        let text=if distance>=0.1*AU {format!("{:.2} AU",distance/AU)}
-                            else {format!("{:.2} LS",distance/LIGHT_SECOND)};
-                        let at=pts[0].lerp(pts[1],0.5);
-                        let galley=painter.layout_no_wrap(text,mono(10.0),color);
-                        let label_rect=Rect::from_center_size(at,galley.size());
-                        painter.rect_filled(label_rect.expand(4.0),2.0,BACKGROUND);
-                        painter.galley(label_rect.min,galley,color);
+                        draw_target_link(&painter,&cam,rect,b.pos,to);
                     }
                 }
             }
@@ -2182,7 +2234,7 @@ impl LuminalApp {
                     if b.vel.length() > 0.01 {b.vel.normalized()} else {Vec2::new(0.0,1.0)}
                 });
                 *heading = if let Some(manual)=self.manual_flight.filter(|m|m.body==b.id && b.autopilot.is_none()) {manual.direction()}
-                    else {coast_heading(*heading, b.thrust)};
+                    else {smooth_ship_heading(*heading,coast_heading(*heading,b.thrust),if view.paused {0.0} else {ui.input(|i|i.stable_dt) as f64})};
                 if b.kind==BodyKind::Ship {draw_burn_vector(&painter,p,*heading,b.thrust.length()/G0,1.0);}
                 draw_ship(&painter, p, b.vel, *heading, c, selected);
             }
@@ -2311,21 +2363,15 @@ impl LuminalApp {
         }
         if lines.is_empty() {p.text(rect.right_top()+EVec2::new(-9.0,25.0),egui::Align2::RIGHT_TOP,"NO RECENT ACTIVITY",mono(8.0),TEXT_MUTED);}
     }
-    /// Replace each bearing line's newest noisy measurement with a running average, so
-    /// bearing-only contacts drift rather than jump every sensor frame.
-    fn smooth_bearings(&mut self, view: &mut View) {
+    /// Ease the displayed angle every frame, rather than stepping once per report.
+    fn smooth_bearings(&mut self, view: &mut View, dt:f64) {
+        let alpha=if view.paused {0.0} else {1.0-(-dt.min(0.1)/0.35).exp()};
         for c in &mut view.contacts {
             for b in &mut c.bearings {
-                let key = (c.id, b.sensor);
-                let shown = match self.bearing_display.get(&key) {
-                    Some(&(at, _)) if at == b.emitted_at => None,
-                    Some(&(_, prev)) => Some(prev + BEARING_SMOOTHING * wrap_angle(b.bearing - prev)),
-                    None => Some(b.bearing),
-                };
-                if let Some(v) = shown {
-                    self.bearing_display.insert(key, (b.emitted_at, wrap_angle(v)));
-                }
-                b.bearing = self.bearing_display[&key].1;
+                let entry=self.bearing_display.entry((c.id,b.sensor)).or_insert((b.emitted_at,b.bearing));
+                entry.0=b.emitted_at;
+                entry.1=wrap_angle(entry.1+wrap_angle(b.bearing-entry.1)*alpha);
+                b.bearing=entry.1;
             }
         }
     }
@@ -2336,8 +2382,12 @@ impl LuminalApp {
         pts.extend(view.contacts.iter().filter_map(|c| c.track.as_ref().map(|t| t.pos)));
         if self.opening_fit {
             let own=view.bodies.iter().find(|b|self.selected==Some(Selection::Body(b.id)));
-            let target=view.contacts.iter().find(|c|self.inspected==Some(Selection::Contact(c.id))).and_then(|c|c.track.as_ref());
-            if let (Some(own),Some(target))=(own,target) {pts=vec![own.pos,target.pos];}
+            let target=match self.inspected {
+                Some(Selection::Body(id))=>view.bodies.iter().find(|b|b.id==id).map(|b|b.pos),
+                Some(Selection::Contact(id))=>view.contacts.iter().find(|c|c.id==id).and_then(|c|c.track.as_ref()).map(|t|t.pos),
+                None=>None,
+            };
+            if let (Some(own),Some(target))=(own,target) {pts=vec![own.pos,target];}
             else if let Some(own)=own
                 && let Some(b)=view.contacts.iter().find(|c|self.inspected==Some(Selection::Contact(c.id))).and_then(|c|c.bearings.first()) {
                     pts=vec![own.pos,own.pos+Vec2::new(b.bearing.cos(),b.bearing.sin())*AU];
@@ -2377,12 +2427,12 @@ fn contact_details(ui: &mut egui::Ui, view: &View, c: &ContactView) {
     }
     match &c.track {
         Some(t) => {
-            ui.label(format!("Estimated speed {:.1} km/s, thrust {:.1} g", t.vel.length(), t.accel.length() / G0));
+            ui.label(format!("Estimated speed {}, thrust {:.1} g", fmt_speed(t.vel.length()), t.accel.length() / G0));
             if let Some(own) = view.bodies.iter().find(|b| b.controllable && b.kind == BodyKind::Ship) {
                 let rel = t.pos-own.pos;
                 let vel = t.vel-own.vel;
                 let cpa_t = (-rel.dot(vel)/vel.dot(vel).max(1e-12)).max(0.0);
-                ui.label(format!("Range {} · closure {:.0} km/s",fmt_distance(rel.length()),-vel.dot(rel.normalized())));
+                ui.label(format!("Range {} · closure {}",fmt_distance(rel.length()),fmt_speed(-vel.dot(rel.normalized()))));
                 ui.label(format!("Coasting closest approach {} in {}",fmt_distance((rel+vel*cpa_t).length()),fmt_age(cpa_t)));
                 ui.weak("Closest approach assumes unchanged velocity; manoeuvres alter it.");
             }
@@ -2507,7 +2557,9 @@ fn draw_contact(
                 if fade <= 0.0 {
                     continue;
                 }
-                let o = to_screen(cam, rect, b.origin);
+                // Display follows the current receiver; historical origins remain in sensor fusion.
+                let origin=view.bodies.iter().find(|ship|ship.id==b.sensor).map_or(b.origin,|ship|ship.pos);
+                let o = to_screen(cam, rect, origin);
                 let reach = (b.max_range / cam.km_per_px) as f32;
                 let ray = |a: f64, f: f32| o + EVec2::new(a.cos() as f32, -a.sin() as f32) * reach * f;
                 let spread = (2.0 * b.sigma).min(0.5);
@@ -2610,14 +2662,14 @@ fn hover_details_for_target(view: &View, cam: &Camera, rect: Rect, pointer: Pos2
             let b=&view.bodies[index];
             let d=&b.damage.damage;
             vec![b.name.to_uppercase(),format!("{:?} · {}",b.kind,faction_name(b.faction)),
-                format!("SPEED {:.0} km/s · THRUST {:.0}g",b.vel.length(),b.thrust.length()/G0),
+                format!("SPEED {} · THRUST {:.0}g",fmt_speed(b.vel.length()),b.thrust.length()/G0),
                 format!("HULL {:.0}% · SCREEN {}",100.0*d.hull/d.hull_max,if !b.has_screen {"N/A"} else if b.screen_up {"UP"} else {"DOWN"})]
         },
         1=>{
             let c=&view.contacts[index];
             let t=c.track.as_ref().unwrap();
             vec![contact_label(c).to_uppercase(),format!("{} · {}",c.resolved_kind.map_or("UNKNOWN CLASS".into(),|k|format!("{k:?}").to_uppercase()),track_quality(c).0),
-                if c.detection>=sensors::DetectionLevel::Approximate {format!("EST SPEED {:.0} km/s",t.vel.length())} else {"SPEED UNKNOWN".into()},
+                if c.detection>=sensors::DetectionLevel::Approximate {format!("EST SPEED {}",fmt_speed(t.vel.length()))} else {"SPEED UNKNOWN".into()},
                 format!("SENSOR {} · AGE {:.0}s · PING {:.0}s",c.reporting_sensor.and_then(|id|view.bodies.iter().find(|b|b.id==id)).map_or("RELAY",|b|b.name.as_str()),(view.time-c.last_emitted_at).max(0.0),c.ping_remaining),
                 c.damage.as_ref().map_or("HULL / SYSTEMS UNKNOWN".into(),|r|format!("CONFIRMED HULL {:.0}%",100.0*r.damage.hull/r.damage.hull_max))]
         },
@@ -2818,6 +2870,25 @@ fn damaging_hit_blooms_are_larger_brighter_and_longer_lived() {
     assert!(hit_bloom_style(0.65,0.4).is_some());
     assert!(hit_bloom_style(1.0,0.8).is_some());
     assert!(hit_bloom_style(1.0,1.0).is_none());
+}
+
+fn smooth_ship_heading(previous:Vec2,target:Vec2,dt:f64)->Vec2 {
+    let angle=previous.y.atan2(previous.x);
+    let difference=wrap_angle(target.y.atan2(target.x)-angle);
+    let angle=angle+difference*(1.0-(-dt.min(0.1)/0.2).exp());
+    Vec2::new(angle.cos(),angle.sin())
+}
+
+#[test]
+fn heading_easing_is_frame_rate_independent_and_wraps_the_short_way() {
+    let start=Vec2::new((-179.0_f64).to_radians().cos(),(-179.0_f64).to_radians().sin());
+    let end=Vec2::new(179.0_f64.to_radians().cos(),179.0_f64.to_radians().sin());
+    let single=smooth_ship_heading(start,end,0.1);
+    let mut frames=start;
+    for _ in 0..6 {frames=smooth_ship_heading(frames,end,0.1/6.0);}
+    assert!((single-frames).length()<1e-10);
+    assert!(single.x< -0.99,"rotation must cross 180 degrees, not zero");
+    assert!((smooth_ship_heading(start,end,0.0)-start).length()<1e-10);
 }
 
 fn coast_heading(previous: Vec2, thrust: Vec2) -> Vec2 {

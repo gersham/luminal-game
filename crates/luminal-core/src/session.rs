@@ -703,7 +703,7 @@ impl LocalSession {
             pings: w.ping_emissions.iter().filter(|(id, front)| visible(w.bodies[id.0 as usize].faction)
                 && !w.hidden_ping_circles.contains(&(*id,front.t_emit.to_bits()))
                 && !matches!(w.bodies[id.0 as usize].kind, BodyKind::Station | BodyKind::Missile)).map(|(id, front)| OwnPing {
-                origin:front.origin,t_emit:front.t_emit,useful_range:crate::units::AU * if matches!(w.bodies[id.0 as usize].kind,BodyKind::Probe|BodyKind::Missile) { params::PROBE_SENSOR_FACTOR.value.sqrt() } else {1.0}
+                origin:front.origin,t_emit:front.t_emit,useful_range:crate::sensors::ping_range(crate::sensors::REFERENCE_EF) * w.bodies[id.0 as usize].operating_effectiveness(crate::damage::System::Active) * if matches!(w.bodies[id.0 as usize].kind,BodyKind::Probe|BodyKind::Missile) { params::PROBE_SENSOR_FACTOR.value.sqrt() } else {1.0}
             }).collect(),
             contacts,
             celestials,
@@ -784,6 +784,8 @@ mod tests {
         let mut s = running(0.0);
         s.command(Role::Faction(ESCORT), Command::Ping { body: BodyId(1) }).unwrap();
         let first = s.view(Role::Faction(ESCORT)).pings[0];
+        assert_eq!(first.useful_range,5.0*crate::units::AU);
+        assert!(first.useful_range>=Payload::Nuclear.engagement_range());
         assert!(s.view(Role::Faction(RAIDER)).pings.is_empty());
         s.world.advance_to(300.0);
         let pulses = s.view(Role::Faction(ESCORT)).pings;
@@ -792,13 +794,16 @@ mod tests {
         assert_eq!(pulses[0].origin, first.origin);
         s.command(Role::Faction(ESCORT), Command::Ping { body: BodyId(1) }).unwrap();
         assert_eq!(s.view(Role::Faction(ESCORT)).pings.len(), 2);
-        s.world.advance_to(1400.0);
+        s.world.advance_to(300.0+2.0*first.useful_range/crate::units::C+30.0);
         assert!(s.view(Role::Faction(ESCORT)).pings.is_empty());
     }
 
     #[test]
     fn hostile_ping_is_delayed_then_expires_without_exposing_its_wavefront() {
         let mut s=running(0.0);
+        // Isolate direction-only ping reception from passive and station reports.
+        s.world.bodies[1].sensors.passive=false;
+        for i in [0,3] {s.world.bodies[i].sensors=crate::sensors::SensorSuite {passive:false,active:false,direction_finding:false};}
         // Fixed geometry tests the light-delay boundary independently of random starts.
         let own=s.world.bodies[1].trajectory.state_at(0.0).unwrap().pos;
         s.world.bodies[2].trajectory=crate::kinematics::Trajectory::new(-3600.0,crate::kinematics::State {

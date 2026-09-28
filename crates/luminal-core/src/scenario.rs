@@ -2,7 +2,9 @@
 use crate::celestial::System;
 use crate::kinematics::{State, Vec2};
 use crate::params::{MAGAZINE_CRUISER, MAGAZINE_FRIGATE};
-use crate::units::{AU, G0};
+use crate::units::AU;
+#[cfg(test)]
+use crate::units::G0;
 use crate::world::{BodyId, BodyKind, BodySpec, FactionId, Objective, World};
 
 pub const ESCORT: FactionId = FactionId(0);
@@ -23,8 +25,8 @@ pub fn transport_intercept_debug()->World {
 
 pub fn transport_intercept_debug_seeded(seed: u64)->World {
     let mut world=transport_intercept_seeded(seed);
-    let contact=world.seed_debug_contact(BodyId(1),BodyId(2));
-    world.set_intercept(BodyId(1),crate::world::InterceptTarget::Contact(contact)).unwrap();
+    world.seed_debug_contact(BodyId(1),BodyId(2));
+    world.set_follow(BodyId(1),BodyId(0)).unwrap();
     world
 }
 
@@ -37,10 +39,34 @@ const PARKING_ORBIT_KM: f64 = 60_000.0;
 ///
 /// The frigate starts in a planetary parking orbit; the transport departs from
 /// beside the lunar station. Raider and departure region are independently
-/// randomized in heliocentric bands: raider 5–10 AU, departure 10–20 AU. The raider starts with circular
-/// orbital velocity and an inward approach burn. Geometry remains experimental.
+/// chosen with the departure 6–10 AU out and the raider at rest inside a 4 AU wide
+/// ellipse from Sol to 1 AU beyond it or within 5 AU of Sol, excluding the 1 AU region around Earth.
 pub fn transport_intercept() -> World {
     transport_intercept_seeded(42)
+}
+
+/// Private placement bounds; never exposed in the map view.
+#[derive(Clone,Debug)]
+struct RaiderSpawnRegion {
+    center:Vec2,
+    axis:Vec2,
+    half_length:f64,
+    half_width:f64,
+    exclusion_center:Vec2,
+    exclusion_radius:f64,
+}
+impl RaiderSpawnRegion {
+    #[cfg(test)]
+    fn point(&self,radius:f64,angle:f64)->Vec2 {
+        self.center+self.axis*(self.half_length*radius*angle.cos())
+            +Vec2::new(-self.axis.y,self.axis.x)*(self.half_width*radius*angle.sin())
+    }
+    fn contains(&self,pos:Vec2)->bool {
+        let d=pos-self.center;
+        let side=Vec2::new(-self.axis.y,self.axis.x);
+        let ellipse=(d.dot(self.axis)/self.half_length).powi(2)+(d.dot(side)/self.half_width).powi(2)<=1.0+1e-12;
+        (ellipse || pos.length()<=5.0*AU) && (pos-self.exclusion_center).length()>=self.exclusion_radius
+    }
 }
 
 pub fn transport_intercept_seeded(seed: u64) -> World {
@@ -77,20 +103,30 @@ pub fn transport_intercept_seeded(seed: u64) -> World {
         if system.bodies.iter().enumerate().all(|(i,b)|
             (pos-system.state(i,0.0).pos).length()>b.radius+0.03*AU) {break pos;}
     };
-    let cruiser_pos=outer_position(5.0,10.0);
-    let departure=outer_position(10.0,20.0);
-    let radial=cruiser_pos.normalized();
-    let cruiser_vel=Vec2::new(-radial.y,radial.x)*(system.bodies[0].gm/cruiser_pos.length()).sqrt();
-    let cruiser_heading=(station_pos-cruiser_pos).normalized();
+    let departure=outer_position(6.0,10.0);
+    let axis=departure.normalized();
+    let half_length=(departure.length()+AU)*0.5;
+    let raider_spawn=RaiderSpawnRegion {
+        center:axis*half_length,axis,half_length,half_width:2.0*AU,
+        exclusion_center:planet.pos,exclusion_radius:AU,
+    };
+    let cruiser_pos=loop {
+        // Uniform sampling of the union; overlap is not counted twice.
+        let along=-5.0*AU+(2.0*half_length+5.0*AU)*layout.uniform();
+        let across=(layout.uniform()*10.0-5.0)*AU;
+        let pos=axis*along+Vec2::new(-axis.y,axis.x)*across;
+        if raider_spawn.contains(pos) && system.bodies.iter().enumerate().all(|(i,b)|
+            (pos-system.state(i,0.0).pos).length()>b.radius+0.03*AU) {break pos;}
+    };
     let specs = vec![
         ship("Transport", ESCORT, transport_pos, transport_vel, Vec2::ZERO, 0.0),
         ship("Frigate", ESCORT, frigate_pos, frigate_vel, Vec2::ZERO, MAGAZINE_FRIGATE.value),
-        ship("Cruiser", RAIDER, cruiser_pos-planet.pos, cruiser_vel-planet.vel, cruiser_heading * (20.0 * G0), MAGAZINE_CRUISER.value),
+        ship("Cruiser", RAIDER, cruiser_pos-planet.pos, -planet.vel, Vec2::ZERO, MAGAZINE_CRUISER.value),
         BodySpec { name: "Lunar sensor station".into(), kind: BodyKind::Station, faction: ESCORT,
             state: State { pos: station_pos, vel: station_vel },
             thrust: Vec2::ZERO, magazine: 0 },
     ];
-    let mut world = World::new(system, specs, 7200.0, seed);
+    let mut world = World::new(system, specs, 12000.0, seed);
     world.bodies[0].baseline_emission_factor=crate::params::TRANSPORT_EMISSION_FACTOR.value;
     world.bodies[0].visibility_multiplier=2.0;
     world.bodies[1].baseline_emission_factor=crate::params::FRIGATE_EMISSION_FACTOR.value;
@@ -100,6 +136,7 @@ pub fn transport_intercept_seeded(seed: u64) -> World {
         center: departure,
         radius: 0.02 * AU,
         protect: BodyId(0),
+        player:Some(BodyId(1)),
         defeat: Some(BodyId(2)),
         defender: ESCORT,
         attacker: RAIDER,
@@ -172,14 +209,15 @@ mod tests {
     }
 
     #[test]
-    fn transport_starts_beside_station_and_raider_in_outer_band() {
+    fn transport_starts_beside_station_and_raider_is_at_rest() {
         let w=transport_intercept();
         let transport=w.bodies[0].trajectory.state_at(0.0).unwrap();
         let station=w.bodies[3].trajectory.state_at(0.0).unwrap();
         let raider=w.bodies[2].trajectory.state_at(0.0).unwrap();
         assert!(((transport.pos-station.pos).length()-1_000.0).abs()<50.0);
         assert!((transport.vel-station.vel).length()<0.05);
-        assert!((5.0..=10.0).contains(&(raider.pos.length()/AU)));
+        assert!(raider.vel.length()<1e-6);
+        assert_eq!(w.bodies[2].trajectory.last().thrust,Vec2::ZERO);
     }
 
     #[test]
@@ -188,8 +226,21 @@ mod tests {
             let w=transport_intercept_seeded(seed);
             let raider=w.bodies[2].trajectory.state_at(0.0).unwrap().pos;
             let departure=w.objective.as_ref().unwrap().center;
-            for (pos,band) in [(raider,5.0..=10.0),(departure,10.0..=20.0)] {
-                assert!(band.contains(&(pos.length()/AU)));
+            let axis=departure.normalized();
+            let half_length=(departure.length()+AU)*0.5;
+            let region=RaiderSpawnRegion {center:axis*half_length,axis,half_length,half_width:2.0*AU,
+                exclusion_center:w.system.state(1,0.0).pos,exclusion_radius:AU};
+            assert!(region.contains(raider));
+            assert!(region.contains(-axis*4.0*AU),"inner-system area extends behind Sol beyond the ellipse");
+            assert!(!region.contains(region.exclusion_center));
+            assert!(!region.contains(-axis*6.0*AU));
+            assert_eq!(region.half_width,2.0*AU);
+            assert!((region.point(1.0,std::f64::consts::PI)).length()<1e-5);
+            assert!((region.point(1.0,0.0).length()-departure.length()-AU).abs()<1e-5);
+            assert!(w.bodies[2].trajectory.state_at(0.0).unwrap().vel.length()<1e-6);
+            assert_eq!(w.bodies[2].trajectory.last().thrust,Vec2::ZERO);
+            assert!((6.0..=10.0).contains(&(departure.length()/AU)));
+            for pos in [raider,departure] {
                 for (i,b) in w.system.bodies.iter().enumerate() {
                     assert!((pos-w.system.state(i,0.0).pos).length()>b.radius+0.02*AU);
                 }
@@ -261,7 +312,9 @@ mod tests {
         assert_eq!(world.bodies[3].baseline_emission_factor,2.0);
         assert!(world.bodies[0].autopilot.is_some());
         world.advance_to(7.0*DAY);
-        assert_eq!(world.outcome.as_ref().map(|o| o.winner), Some(ESCORT));
+        assert!(world.outcome.is_none(),"transport arrival does not end the raider scenario");
+        let goal=world.objective.as_ref().unwrap();
+        assert!((world.bodies[0].trajectory.state_at(world.time()).unwrap().pos-goal.center).length()<goal.radius);
         assert!(!world.losses.iter().any(|l| l.body == BodyId(0)));
     }
 }

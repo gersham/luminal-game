@@ -137,9 +137,12 @@ present. Other platforms are autonomous. Probes are currently disabled. The luna
 station has passive, active, and direction-finding sensors, with autonomous active
 pings every 60 seconds and light-delayed reports to the escort.
 
-The raider starts at a seeded random orbital location 5–10 AU from Sol, with
-circular orbital velocity and an inward burn. The transport's exit point is
-independently randomized 10–20 AU from Sol. The raider reassesses its route from
+The transport's exit point is randomized 6–10 AU from Sol. The raider starts
+at rest in the Sol frame, uniformly placed in the union of the region within
+5 AU of Sol and an ellipse from Sol to 1 AU beyond the exit, 4 AU wide at its
+widest. An exclusion
+circle forbids starts within 1 AU of Earth's initial position. These placement
+boundaries are not shown on the map. The raider reassesses its route from
 received tracks: it engages an escort that can meet it before the transport,
 and pursues the transport when that route is clear. Known lunar-station sensor
 coverage influences its approach; it reduces emissions and skirts or waits
@@ -150,8 +153,8 @@ The escort wins when the transport escapes or the raider is destroyed; the
 raider wins if the transport is destroyed first.
 The transport has 25 g nominal acceleration, one quarter of a warship's 100 g.
 
-The playtest starts on **AUTO speed**, tracking your selected frigate, with a bearing-only
-enemy contact designated. Use the top-left controls to pause, change speed, fit
+The playtest starts on **AUTO speed**, tracking your frigate with the transport
+selected and a follow order to join it 1 LS alongside. Use the top-left controls to pause, change speed, fit
 the map, or restart. AUTO smoothly ranges from 5× at 1 LS through 10× at 10 LS,
 50× at 0.1 AU and 300× at 1 AU to 1000× at 2 AU. It uses the nearest received
 enemy track, allowing for uncertainty and two wall-seconds of projected closure.
@@ -190,7 +193,8 @@ also display their navigation progress there, with cancel/coast and stop control
 
 Yellow rear vectors show burn strength: 120g is four ship-icon lengths, fading
 out toward the tip. Automatic zoom waits ten seconds after manual zoom and eases
-changes over roughly ten seconds of real time.
+changes over roughly ten seconds of real time. Manual ping sweeps hold the
+current autozoom until the sweep finishes; manual zoom remains available.
 
 Shift+right-click a series of map positions to draw a flight curve. You can pause
 while plotting. The ship follows it as closely as acceleration and collision
@@ -199,7 +203,8 @@ thrust replaces the route; adding points preserves your weapon target.
 
 - **PING:** send one active sensor pulse. Returns arrive after the round-trip
   light delay. Successful returns grant Identity, including condition, for 60 seconds.
-  Reach is the EF-scaled Approximate envelope, reduced by damage and opposing ECM.
+  Base reach is 5 AU, reduced by damage and opposing ECM. Distant returns give
+  approximate positions; close returns resolve position.
 - **ACTIVE Auto/Off:** defaults Off. Auto repeats every 60 seconds until explicitly
   switched Off, even without contacts. Manual Ping is independent.
 - **ECM On/Off/Auto:** defaults Auto; emits while a resolved enemy ship is known.
@@ -230,7 +235,7 @@ thrust replaces the route; adding points preserves your weapon target.
 | LONG · LRM | Hold 0.7 AU: half the LRM engagement envelope |
 | MEDIUM · SRM | Hold 0.07 AU: half the SRM's 0.14 AU engagement envelope |
 | SHORT · BEAM | Hold 2 LS: inside the beam knife-fight envelope |
-| EVADE | Burn away from the contact |
+| EVADE | Maximum lateral burn against incoming missiles; coast when clear |
 
 LONG, MEDIUM and SHORT approach a fresh bearing-only contact until a range fix is
 available, then brake or withdraw to hold the requested separation. MATCH is the
@@ -261,12 +266,19 @@ but ×2 for the transport. Frigates use size 7; battleships 20; stations 20;
 other classes provisionally 10. Point-defence
 fire contributes. Boosted thrust can reach 120%.
 
-Multiply base sensing ranges by **target EF / 1.4**: passive Identity 0.01 AU,
-Resolved 0.1 AU, Approximate 2 AU, Bearing 10 AU; active ping Identity has a
-separate 1 AU baseline. EF 1.4 is a size-7, 50%-stealth frigate at full nominal
+Multiply base sensing ranges by **target EF**: passive Identity 0.1 AU,
+Resolved 1 AU, Approximate 5 AU, Bearing 20 AU; active ping detection has a
+separate 5 AU baseline, multiplied by the greater of 1 and target EF. EF 1.4 is a size-7, 50%-stealth frigate at full nominal
 thrust with raised, cold screens and ECM off. ECM and sensor damage still reduce
 effective ranges. Approximate contacts have a biased ellipse
-and estimated motion; resolved contacts gain class identity. Direction finding
+and estimated motion; resolved contacts gain class identity. Approximate passive
+and active positions share a fixed random x/y offset per contact. Their ellipse
+includes measurement and velocity uncertainty plus movement possible at 120g
+since the light left the target (including relay delay). Repeated reports cannot
+average away that offset. Resolved positions remove the ellipse and its offset.
+Missiles launched at an ellipse aim at its center; their own resolved seeker
+fix can correct the course only within acceleration and remaining correction
+budget. A missile that cannot reach the target misses. Direction finding
 requires operational DF and screens, thrust, or recent weapons on the target.
 ECM alone does not qualify. Missiles are invisible to direction finding, including
 their seeker pings. Map bearing spikes show only the command ship's measurements.
@@ -325,3 +337,16 @@ the current-playtest section in the mechanics document takes precedence.
 No open-source licence has been granted. The workspace is currently marked
 `UNLICENSED`; public visibility does not grant additional reuse or redistribution
 rights.
+
+Speeds above 0.01c display as fractions of light speed. All physical trajectories
+are limited to 0.99c, including coasting and weapon courses; continued thrust at
+the cap can turn the ship without accumulating excess momentum.
+Flyby burns directly toward the estimated target at full available thrust without
+approach braking. Evade prioritizes the earliest incoming missile's predicted
+close approach and burns laterally at maximum available thrust, continually
+reassessing threats until none remain, then coasting. It uses received tracks.
+Beam effects connect displayed shooter and target positions. Point-defense laser
+range and its probability curve are doubled (2 LS maximum, 0.012 LS half-chance).
+The escort scenario ends in defeat if the player's frigate is destroyed, and in
+victory if the raider is destroyed. Transport arrival or destruction alone does
+not end this scenario.
