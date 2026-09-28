@@ -251,6 +251,27 @@ mod tests {
     }
 
     #[test]
+    fn tracking_zoom_includes_targets_target_using_visible_positions() {
+        let app=LuminalApp::new();
+        let mut view=app.session.view(app.role);
+        let rect=Rect::from_min_size(Pos2::ZERO,EVec2::new(1000.0,600.0));
+        let own=view.bodies.iter().find(|b|b.controllable).unwrap().pos;
+        let contact=&mut view.contacts[0];
+        let mut track=test_track();track.pos=own+Vec2::new(LIGHT_SECOND,0.0);track.cov=[[0.0;2];2];
+        contact.track=Some(track);contact.stale=false;
+        let selected=InterceptTarget::Contact(contact.id);
+        let transport=view.bodies.iter_mut().find(|b|b.id==BodyId(0)).unwrap();
+        transport.pos=own+Vec2::new(-20.0*LIGHT_SECOND,30.0*LIGHT_SECOND);
+        let transport_pos=transport.pos;
+        let primary=tracking_zoom_scale(&view,own,rect,selected,None).unwrap();
+        let expanded=tracking_zoom_scale(&view,own,rect,selected,Some(InterceptTarget::Own(BodyId(0)))).unwrap();
+        assert!(expanded>primary);
+        let cam=Camera {center:own,km_per_px:expanded};
+        assert!(rect.shrink(50.0).contains(to_screen(&cam,rect,transport_pos)));
+        assert_eq!(tracking_zoom_scale(&view,own,rect,selected,Some(InterceptTarget::Contact(ContactId(999)))),Some(primary));
+    }
+
+    #[test]
     fn old_target_outages_expire_instead_of_claiming_current_disablement() {
         let app=LuminalApp::new();
         let mut view=app.session.view(Role::Faction(ESCORT));
@@ -300,7 +321,7 @@ mod tests {
         let mut view=app.session.view(Role::Faction(ESCORT));
         view.contacts.clear();
         view.combat=[CombatKind::Destroyed,CombatKind::MissileHit,CombatKind::MissileMiss,CombatKind::BeamPulse].into_iter().enumerate().map(|(i,kind)|
-            luminal_core::world::CombatEvent {subject_kind:Some(BodyKind::Missile),impact_strength:0.0,damage:None,contact:None,aim:None,pos:None,kind,own_body:Some(BodyId(1)),emitted_at:i as f64,received_at:i as f64}).collect();
+            luminal_core::world::CombatEvent {velocity:None,subject_kind:Some(BodyKind::Missile),impact_strength:0.0,damage:None,contact:None,aim:None,pos:None,kind,own_body:Some(BodyId(1)),emitted_at:i as f64,received_at:i as f64}).collect();
         let mut log=TacticalLog::default();
         log.observe(&view,Some(BodyId(1)),0.0);
         assert_eq!(log.lines.len(),3);
@@ -330,7 +351,7 @@ mod tests {
         let app=LuminalApp::new();let mut view=app.session.view(Role::Faction(ESCORT));
         view.bodies.clear();view.contacts.clear();
         view.combat=[Some(BodyKind::Ship),Some(BodyKind::Ship),Some(BodyKind::Missile),Some(BodyKind::Missile),None].into_iter().enumerate().map(|(i,subject_kind)|
-            luminal_core::world::CombatEvent {subject_kind,impact_strength:0.0,damage:None,
+            luminal_core::world::CombatEvent {velocity:None,subject_kind,impact_strength:0.0,damage:None,
                 contact:if i==1 {Some(ContactId(1))} else {None},own_body:if i==0 {Some(BodyId(1))} else {None},
                 aim:None,pos:None,kind:CombatKind::Destroyed,emitted_at:i as f64,received_at:10.0+i as f64}).collect();
         let mut log=TacticalLog::default();log.observe(&view,Some(BodyId(1)),0.0);
@@ -365,7 +386,7 @@ mod tests {
         let mut view=app.session.view(Role::Faction(ESCORT));
         let mut log=TacticalLog::default();
         log.observe(&view,Some(BodyId(1)),0.0);
-        view.combat=(1..=2).map(|i|luminal_core::world::CombatEvent {
+        view.combat=(1..=2).map(|i|luminal_core::world::CombatEvent {velocity:None,
             subject_kind:Some(BodyKind::Ship),
             impact_strength:0.65,
             damage:Some(if i==1 {"SCREEN +3.00 TJ"} else {"HULL -2.00 · PROP DAMAGED"}.into()),
@@ -1086,6 +1107,23 @@ fn fmt_time(t: f64) -> String {
 
 fn fmt_age(s: f64) -> String {
     if s < 120.0 { format!("{s:.0} s") } else if s < 7200.0 { format!("{:.1} min", s / 60.0) } else { format!("{:.1} h", s / 3600.0) }
+}
+
+/// Frame the selected contact and its selected opponent using received positions.
+fn tracking_zoom_scale(view:&View,origin:Vec2,rect:Rect,selected:InterceptTarget,secondary:Option<InterceptTarget>)->Option<f64> {
+    let point=|target|match target {
+        InterceptTarget::Own(id)=>view.bodies.iter().find(|b|b.id==id).map(|b|(b.pos,Vec2::ZERO)),
+        InterceptTarget::Contact(id)=>view.contacts.iter().find(|c|c.id==id && !c.stale)
+            .and_then(|c|c.track.as_ref()).map(|t|(t.pos,Vec2::new(
+                3.0*t.cov[0][0].max(0.0).sqrt(),3.0*t.cov[1][1].max(0.0).sqrt()))),
+    };
+    let primary=point(selected)?;
+    let desired=std::iter::once(primary).chain(secondary.and_then(point)).map(|(pos,uncertainty)| {
+        let delta=pos-origin;
+        ((delta.x.abs()+uncertainty.x)/(rect.width() as f64*0.35).max(1.0))
+            .max((delta.y.abs()+uncertainty.y)/(rect.height() as f64*0.30).max(1.0))
+    }).fold(0.0_f64,f64::max);
+    Some(desired.max(2.0*LIGHT_SECOND/(rect.width().min(rect.height()) as f64).max(1.0)).clamp(1e-3,1e8))
 }
 
 fn fmt_distance(km: f64) -> String {
@@ -1825,21 +1863,11 @@ impl LuminalApp {
         self.tracking_zoom_hold=(self.tracking_zoom_hold-dt).max(0.0);
         if !self.track_player || self.tracking_zoom_hold>0.0 {return;}
         let Some(ship)=view.bodies.iter().find(|b|b.controllable && b.kind==BodyKind::Ship) else {return;};
-        let target=match self.inspected {
-            Some(Selection::Contact(id))=>view.contacts.iter().find(|c|c.id==id).and_then(|c|c.track.as_ref()).map(|t| {
-                (t.pos,Vec2::new(3.0*t.cov[0][0].max(0.0).sqrt(),3.0*t.cov[1][1].max(0.0).sqrt()))
-            }),
-            Some(Selection::Body(id)) if id!=ship.id=>view.bodies.iter().find(|b|b.id==id).map(|b|(b.pos,Vec2::ZERO)),
-            _=>None,
-        };
-        let Some((target,uncertainty))=target else {return;};
-        let delta=target-ship.pos;
-        // Keep the player centred and the target plus its uncertainty comfortably
-        // inside the map, leaving room for HUD overlays and velocity tails.
-        let desired=((delta.x.abs()+uncertainty.x)/(rect.width() as f64*0.35).max(1.0))
-            .max((delta.y.abs()+uncertainty.y)/(rect.height() as f64*0.30).max(1.0))
-            .max(2.0*LIGHT_SECOND/(rect.width().min(rect.height()) as f64).max(1.0))
-            .clamp(1e-3,1e8);
+        let Some(selected)=self.inspected.map(|s|match s {
+            Selection::Body(id)=>InterceptTarget::Own(id),Selection::Contact(id)=>InterceptTarget::Contact(id),
+        }) else {return;};
+        let secondary=self.session.camera_target_of(self.role,selected);
+        let Some(desired)=tracking_zoom_scale(view,ship.pos,rect,selected,secondary) else {return;};
         let current=self.camera.km_per_px;
         // Hysteresis prevents sensor noise from making the camera breathe.
         if desired<=current && desired>=current*0.8 {return;}

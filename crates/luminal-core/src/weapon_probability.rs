@@ -172,7 +172,7 @@ impl World {
     #[test] fn interceptor_outcomes_report_hit_or_miss_before_disappearing() {
         for (chance,kind) in [(1.0,CombatKind::MissileHit),(0.0,CombatKind::MissileMiss)] {
             let specs=(0..2).map(|i|BodySpec {name:format!("Round {i}"),kind:BodyKind::Missile,
-                faction:FactionId(i),state:State {pos:Vec2::new(i as f64*100.0,0.0),vel:Vec2::ZERO},
+                faction:FactionId(i),state:State {pos:Vec2::new(i as f64*100.0,0.0),vel:Vec2::new(5.0,2.0)},
                 thrust:Vec2::ZERO,magazine:0}).collect();
             let mut world=World::new(crate::celestial::System {bodies:vec![]},specs,0.0,42);
             let aim=world.state(BodyId(1),0.0).unwrap();
@@ -181,6 +181,7 @@ impl World {
             let events=world.combat_events(None);
             let result=events.iter().find(|e|e.own_body==Some(BodyId(0)) && e.kind==kind).unwrap();
             assert_eq!(result.pos,Some(if chance==1.0 {aim.pos} else {Vec2::ZERO}));
+            assert_eq!(result.velocity,Some(Vec2::new(5.0,2.0)));
             assert!(world.bodies[0].trajectory.end().is_some());
             assert_eq!(world.bodies[1].trajectory.end().is_some(),chance==1.0);
         }

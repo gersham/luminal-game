@@ -1,17 +1,91 @@
 //! Deterministic doctrine consuming exactly the player's restricted view.
 //! No world, target identity, or spectator access is available here.
-use crate::session::{Command, InterceptTarget, Payload, View};
+use crate::session::{BodyView, ContactView, Command, InterceptTarget, Payload, View};
 use crate::params::*;
-use crate::units::AU;
-use crate::world::BodyKind;
+use crate::units::{AU,G0};
+use crate::world::{BodyKind,ShipClass};
 use std::collections::BTreeMap;
 
 #[derive(Default)]
 pub struct Doctrine {
-    targets: BTreeMap<crate::world::BodyId, crate::mind::ContactId>,
+    targets:BTreeMap<crate::world::BodyId,crate::mind::ContactId>,
     probe_at: BTreeMap<crate::world::BodyId, f64>,
     ping_at: BTreeMap<crate::world::BodyId, f64>,
     salvo_at: BTreeMap<crate::world::BodyId, f64>,
+}
+
+/// Earliest predicted encounter along an accelerating route to the transport.
+/// Only received positions/velocities are used; no hidden target IDs or orders.
+fn blocking_encounter(ship:&BodyView,transport:&ContactView,escort:&ContactView)->Option<f64> {
+    let destination=transport.track.as_ref()?;
+    let threat=escort.track.as_ref()?;
+    let relative=destination.pos-ship.pos;
+    let acceleration=SHIP_MAX_ACCEL_G.value*G0;
+    let closing=(ship.vel-destination.vel).dot(relative.normalized());
+    let eta=((closing*closing+2.0*acceleration*relative.length()).sqrt()-closing)/acceleration;
+    let eta=eta.max(1.0);
+    let burn=(relative+(destination.vel-ship.vel)*eta)*(2.0/(eta*eta));
+    let uncertainty=3.0*(threat.cov[0][0].max(0.0)+threat.cov[1][1].max(0.0)).sqrt();
+    let envelope=Payload::Nuclear.engagement_range()+uncertainty;
+    let separation=|t:f64|ship.pos+ship.vel*t+burn*(0.5*t*t)-(threat.pos+threat.vel*t);
+    let mut previous=separation(0.0);
+    for step in 1..=64 {
+        let t=eta*step as f64/64.0;
+        let current=separation(t);
+        let delta=current-previous;
+        let fraction=(-previous.dot(delta)/delta.dot(delta).max(1e-12)).clamp(0.0,1.0);
+        if (previous+delta*fraction).length()<=envelope {
+            return Some(eta*(step as f64-1.0+fraction)/64.0);
+        }
+        previous=current;
+    }
+    None
+}
+
+fn choose_target<'a>(view:&'a View,ship:&BodyView)->(Option<&'a ContactView>,bool) {
+    let contacts:Vec<_>=view.contacts.iter().filter(|c|!c.stale && c.track.is_some()
+        && !c.resolved_missile && !matches!(c.resolved_kind,Some(BodyKind::Station|BodyKind::Probe))).collect();
+    let nearest=||contacts.iter().copied().min_by(|a,b|
+        (a.track.as_ref().unwrap().pos-ship.pos).length().total_cmp(&(b.track.as_ref().unwrap().pos-ship.pos).length()));
+    if !view.objective.as_ref().is_some_and(|o|o.attacker==ship.faction) {return (nearest(),false);}
+    let transport=contacts.iter().copied().filter(|c|c.resolved_class==Some(ShipClass::Transport))
+        .min_by(|a,b|(a.track.as_ref().unwrap().pos-ship.pos).length().total_cmp(&(b.track.as_ref().unwrap().pos-ship.pos).length()))
+        .or_else(||contacts.iter().copied().filter(|c|c.resolved_class.is_none()).min_by(|a,b| {
+            let exit=view.objective.as_ref().unwrap().center;
+            (a.track.as_ref().unwrap().pos-exit).length().total_cmp(&(b.track.as_ref().unwrap().pos-exit).length())
+        }));
+    let Some(transport)=transport else {return (nearest(),true);};
+    let blocker=contacts.iter().copied().filter(|c|c.id!=transport.id && c.resolved_class!=Some(ShipClass::Transport))
+        .filter_map(|escort|blocking_encounter(ship,transport,escort).map(|at|(escort,at)))
+        .min_by(|a,b|a.1.total_cmp(&b.1));
+    if let Some((escort,_))=blocker {(Some(escort),true)} else {(Some(transport),false)}
+}
+
+/// Keep outside the station's ranging/ping footprint where practical. Direction
+/// finding can still see a burning ship farther out; this is risk reduction.
+fn station_detour(ship:&BodyView,site:&crate::world::SensorSite,destination:crate::kinematics::Vec2)->Option<crate::kinematics::Vec2> {
+    use crate::kinematics::Vec2;
+
+    let ef=ship.emissivity.value();
+    let passive=if site.sensors.passive {crate::sensors::detection_ranges(ef)[2]} else {0.0};
+    let active=if site.sensors.active {crate::sensors::ping_range(ef)} else {0.0};
+    // Active identity-quality fixes warrant a larger avoidance margin.
+    let radius=1.2*passive.max(3.0*active);
+    if radius<=0.0 {return None;}
+    let relative=ship.pos-site.pos;
+    let distance=relative.length();
+    let direction=if distance>1.0 {relative.normalized()} else {Vec2::new(1.0,0.0)};
+    if distance<radius {return Some(site.pos+direction*(radius*1.1));}
+    let route=destination-ship.pos;
+    let closest=(-relative.dot(route)/route.dot(route).max(1.0)).clamp(0.0,1.0);
+    if (relative+route*closest).length()>=radius {return None;}
+    if (destination-site.pos).length()<radius {return Some(site.pos+direction*(radius*1.1));}
+    let side=Vec2::new(-direction.y,direction.x);
+    let tangent=radius/distance;
+    let lateral=(1.0-tangent*tangent).max(0.0).sqrt();
+    let a=site.pos+(direction*tangent+side*lateral)*(radius*1.1);
+    let b=site.pos+(direction*tangent-side*lateral)*(radius*1.1);
+    Some(if (a-destination).length()<(b-destination).length() {a} else {b})
 }
 
 impl Doctrine {
@@ -22,18 +96,35 @@ impl Doctrine {
         // hidden ship names/loadouts to decide whether a frigate is present.
         let escort_known=view.contacts.iter().filter(|c|c.resolved_kind==Some(BodyKind::Ship)).count()>=2;
         for b in view.bodies.iter().filter(|b| b.kind == BodyKind::Ship && b.controllable && b.armed) {
-            let target = self.targets.get(&b.id).and_then(|id| view.contacts.iter().find(|c| c.id==*id && !c.stale && c.track.is_some() && !c.resolved_missile))
-                .or_else(|| view.contacts.iter().filter(|c| !c.stale && c.track.is_some() && !c.resolved_missile).min_by(|a,c| {
-                let score = |contact: &crate::session::ContactView| {
-                    let p = contact.track.as_ref().unwrap().pos;
-                    let objective = view.objective.as_ref();
-                    // Attack tracks nearest the escape objective; escorts screen their transport.
-                    if objective.is_some_and(|o| b.faction == o.attacker) {
-                        (p-objective.unwrap().center).length()
-                    } else { (p-b.pos).length() }
-                };
-                score(a).total_cmp(&score(c))
-            }));
+            let (target,engage)=choose_target(view,b);
+            let objective=view.objective.as_ref().filter(|o|o.attacker==b.faction);
+            let site=objective.and_then(|o|o.sensor_site.as_ref());
+            let search_destination=objective.map(|o|o.center);
+            let immediate_threat=engage && target.is_some_and(|c|
+                (c.track.as_ref().unwrap().pos-b.pos).length()<=Payload::Nuclear.engagement_range());
+            let detour=site.filter(|_|!immediate_threat).and_then(|site|station_detour(b,site,
+                target.and_then(|c|c.track.as_ref()).map_or(search_destination.unwrap_or(site.pos),|t|t.pos)));
+            if site.is_some() {
+                use crate::world::controls::{ControlledSystem,Mode};
+                for (system,current,mode) in [
+                    (ControlledSystem::Screens,b.controls.screens,if detour.is_some() {Mode::Off} else {Mode::Auto}),
+                    (ControlledSystem::Boost,b.controls.boost,if detour.is_some() {Mode::Off} else {Mode::Auto}),
+                    (ControlledSystem::Ecm,b.controls.ecm,if detour.is_some() {Mode::Off} else {Mode::Auto}),
+                    (ControlledSystem::Active,b.controls.active,Mode::Off),
+                ] {if current!=mode {out.push(Command::SetSystemMode {body:b.id,system,mode});}}
+                let drive=if detour.is_some() {20.0} else {SHIP_MAX_ACCEL_G.value};
+                if (b.drive_limit/G0-drive).abs()>0.01 {out.push(Command::SetDriveLimit {body:b.id,g:drive});}
+            }
+            if let Some(point)=detour {
+                out.push(Command::MoveTo {body:b.id,point});
+                if b.beam_auto || b.beam_target.is_some() {out.push(Command::EngageBeam {body:b.id,target:None});}
+                if b.missile_queued.iter().any(|n|*n>0) {out.push(Command::CancelLaunches {body:b.id});}
+                continue;
+            }
+            if target.is_none() && let Some(point)=search_destination {
+                out.push(Command::MoveTo {body:b.id,point});
+                continue;
+            }
             if target.is_none() && view.time >= *self.ping_at.get(&b.id).unwrap_or(&0.0) {
                 out.push(Command::Ping { body: b.id });
                 self.ping_at.insert(b.id,view.time+BOT_PING_S.value);
@@ -44,10 +135,18 @@ impl Doctrine {
                 self.probe_at.insert(b.id,view.time+PROBE_PING_INTERVAL_S.value);
             }
             let Some(c) = target else { continue };
-            self.targets.insert(b.id,c.id);
+            if self.targets.insert(b.id,c.id).is_some_and(|previous|previous!=c.id) {
+                if b.missile_queued.iter().any(|n|*n>0) {out.push(Command::CancelLaunches {body:b.id});}
+                self.salvo_at.remove(&b.id);
+            }
             let tr = c.track.as_ref().unwrap();
             let range = (tr.pos-b.pos).length();
-            out.push(Command::Flyby { body: b.id, target: InterceptTarget::Contact(c.id) });
+            if engage {
+                let payload=if b.magazine[Payload::Kinetic.index()]>0 {Payload::Kinetic}
+                    else if b.magazine[Payload::Nuclear.index()]>0 {Payload::Nuclear} else {Payload::Beam};
+                out.push(Command::KeepRange {body:b.id,target:InterceptTarget::Contact(c.id),
+                    range:crate::autopilot::weapon_standoff(payload)});
+            } else {out.push(Command::Flyby { body: b.id, target: InterceptTarget::Contact(c.id) });}
             // Let beam fire control judge useful long-range shots from the
             // received solution; do not force wasteful directed fire at 1 AU.
             if !b.beam_auto {out.push(Command::ArmBeams {body:b.id});}
@@ -93,10 +192,86 @@ mod tests {
     use crate::mind::{ContactId,Source};
     use crate::kinematics::Vec2;
 
+    fn encounter_view()->View {
+        let session=LocalSession::new(crate::scenario::transport_intercept());
+        let mut view=session.view(Role::Faction(crate::scenario::RAIDER));
+        view.objective.as_mut().unwrap().sensor_site=None;
+        view.objective.as_mut().unwrap().center=Vec2::new(10.0*AU,0.0);
+        let ship=view.bodies.iter_mut().find(|b|b.controllable).unwrap();
+        ship.pos=Vec2::ZERO;ship.vel=Vec2::ZERO;
+        view.contacts=(1..=2).map(|id|ContactView {detection:crate::sensors::DetectionLevel::Resolved,
+            ping_remaining:0.0,reporting_sensor:None,
+            resolved_class:Some(if id==1 {ShipClass::Transport} else {ShipClass::Frigate}),
+            resolved_interceptor:false,damage:None,id:ContactId(id),resolved_kind:Some(BodyKind::Ship),
+            resolved_missile:false,quality:"resolved",stale:false,
+            track:Some(TrackView {velocity_sigma:0.0,pos:Vec2::new(if id==1 {4.0*AU} else {2.0*AU},0.0),
+                vel:Vec2::ZERO,accel:Vec2::ZERO,cov:[[0.0;2];2],updated_at:0.0,updates:4}),
+            bearings:vec![],last_emitted_at:0.0,last_received_at:0.0,last_source:Source::Echo,
+            last_snr:1e6,last_range:None}).collect();
+        view
+    }
+
+    #[test]
+    fn raider_retargets_blocking_escort_then_returns_to_clear_transport_route() {
+        let mut view=encounter_view();
+        let mut ai=Doctrine::default();
+        assert!(ai.orders(&view).iter().any(|c|matches!(c,Command::KeepRange {target:InterceptTarget::Contact(ContactId(2)),..})));
+        view.contacts[1].track.as_mut().unwrap().pos=Vec2::new(0.0,4.0*AU);
+        assert!(ai.orders(&view).iter().any(|c|matches!(c,Command::Flyby {target:InterceptTarget::Contact(ContactId(1)),..})));
+        view.contacts[1].track.as_mut().unwrap().pos=Vec2::new(2.0*AU,0.0);
+        assert!(ai.orders(&view).iter().any(|c|matches!(c,Command::KeepRange {target:InterceptTarget::Contact(ContactId(2)),..})));
+        view.contacts[1].stale=true;
+        assert!(ai.orders(&view).iter().any(|c|matches!(c,Command::Flyby {target:InterceptTarget::Contact(ContactId(1)),..})));
+    }
+
+    #[test]
+    fn crossing_escort_motion_blocks_an_otherwise_clear_route() {
+        let mut view=encounter_view();
+        let eta=(2.0*4.0*AU/(SHIP_MAX_ACCEL_G.value*G0)).sqrt();
+        let escort=view.contacts[1].track.as_mut().unwrap();
+        escort.pos=Vec2::new(AU,4.0*AU);
+        escort.vel=Vec2::new(0.0,-8.0*AU/eta);
+        let ship=view.bodies.iter().find(|b|b.controllable).unwrap();
+        assert_eq!(choose_target(&view,ship).0.unwrap().id,ContactId(2));
+    }
+
+    #[test]
+    fn known_active_station_changes_approach_but_does_not_prevent_self_defence() {
+        let mut view=encounter_view();
+        view.contacts[1].track.as_mut().unwrap().pos=Vec2::new(0.0,4.0*AU);
+        view.objective.as_mut().unwrap().sensor_site=Some(crate::world::SensorSite {
+            pos:Vec2::new(3.0*AU,0.0),sensors:crate::sensors::SensorSuite::FULL});
+        let mut ai=Doctrine::default();
+        let cautious=ai.orders(&view);
+        assert!(cautious.iter().any(|c|matches!(c,Command::MoveTo {..})));
+        assert!(!cautious.iter().any(|c|matches!(c,Command::Ping {..}|Command::Launch {..})));
+        assert!(cautious.iter().any(|c|matches!(c,Command::SetSystemMode {
+            system:crate::world::controls::ControlledSystem::Screens,mode:crate::world::controls::Mode::Off,..})));
+        view.contacts[1].track.as_mut().unwrap().pos=Vec2::new(0.1*AU,0.0);
+        assert!(ai.orders(&view).iter().any(|c|matches!(c,Command::KeepRange {target:InterceptTarget::Contact(ContactId(2)),..})));
+        let ship=view.bodies.iter().find(|b|b.controllable).unwrap();
+        let mut site=view.objective.as_ref().unwrap().sensor_site.clone().unwrap();
+        site.sensors.passive=false;site.sensors.active=false;
+        assert!(station_detour(ship,&site,site.pos).is_none());
+        site.sensors.active=true;
+        assert!(station_detour(ship,&site,site.pos).is_some());
+    }
+
+    #[test]
+    fn no_track_raider_heads_for_the_known_exit() {
+        let mut view=encounter_view();
+        view.contacts.clear();
+        let exit=view.objective.as_ref().unwrap().center;
+        let orders=Doctrine::default().orders(&view);
+        assert!(orders.iter().any(|c|matches!(c,Command::MoveTo {point,..} if *point==exit)));
+        assert!(!orders.iter().any(|c|matches!(c,Command::Ping {..})));
+    }
+
     #[test]
     fn known_escort_reduces_salvos_and_preserves_close_range_reserve() {
         let session=LocalSession::new(crate::scenario::transport_intercept());
         let mut view=session.view(Role::Faction(crate::scenario::RAIDER));
+        view.objective.as_mut().unwrap().sensor_site=None;
         let ship=view.bodies.iter().find(|b|b.controllable).unwrap().clone();
         view.contacts=(1..=2).map(|id|ContactView {detection:crate::sensors::DetectionLevel::Resolved,ping_remaining:0.0,reporting_sensor:None,resolved_class:None,
             resolved_interceptor:false,

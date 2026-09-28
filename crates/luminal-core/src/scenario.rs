@@ -36,12 +36,9 @@ const PARKING_ORBIT_KM: f64 = 60_000.0;
 /// departure region, with a defending frigate.
 ///
 /// The frigate starts in a planetary parking orbit; the transport departs from
-/// beside the lunar station. The cruiser starts about 320 light-seconds away
-/// and is burning hard toward them, so it is visible; a cold approach would be a
-/// separate variant.
-///
-/// Objective: the transport must reach a departure region about 2.8 AU map-north
-/// of its starting position. PLACEHOLDER geometry, not balanced.
+/// beside the lunar station. Raider and departure region are independently
+/// randomized within a 5–10 AU heliocentric band. The raider starts with circular
+/// orbital velocity and an inward approach burn. Geometry remains experimental.
 pub fn transport_intercept() -> World {
     transport_intercept_seeded(42)
 }
@@ -72,14 +69,23 @@ pub fn transport_intercept_seeded(seed: u64) -> World {
     let station_vel=moon.vel+Vec2::new(0.0,station_speed);
     let transport_pos=station_pos+Vec2::new(1_000.0,0.0)-planet.pos;
     let transport_vel=station_vel-planet.vel;
-    let old_approach=Vec2::new(0.2*AU,-0.25*AU)-Vec2::new(PARKING_ORBIT_KM,0.0);
-    let previous_offset=transport_pos+old_approach*2.0;
-    let cruiser_offset=frigate_pos+(previous_offset-frigate_pos)*2.0;
-    let cruiser_heading=(-old_approach).normalized();
+    let mut layout=crate::rng::Rng::stream(seed,0x4c41594f5554);
+    let mut outer_position=||loop {
+        let radius=(5.0+5.0*layout.uniform())*AU;
+        let angle=std::f64::consts::TAU*layout.uniform();
+        let pos=Vec2::new(angle.cos(),angle.sin())*radius;
+        if system.bodies.iter().enumerate().all(|(i,b)|
+            (pos-system.state(i,0.0).pos).length()>b.radius+0.03*AU) {break pos;}
+    };
+    let cruiser_pos=outer_position();
+    let departure=outer_position();
+    let radial=cruiser_pos.normalized();
+    let cruiser_vel=Vec2::new(-radial.y,radial.x)*(system.bodies[0].gm/cruiser_pos.length()).sqrt();
+    let cruiser_heading=(station_pos-cruiser_pos).normalized();
     let specs = vec![
         ship("Transport", ESCORT, transport_pos, transport_vel, Vec2::ZERO, 0.0),
         ship("Frigate", ESCORT, frigate_pos, frigate_vel, Vec2::ZERO, MAGAZINE_FRIGATE.value),
-        ship("Cruiser", RAIDER, cruiser_offset, Vec2::new(-10.0, 15.0), cruiser_heading * (20.0 * G0), MAGAZINE_CRUISER.value),
+        ship("Cruiser", RAIDER, cruiser_pos-planet.pos, cruiser_vel-planet.vel, cruiser_heading * (20.0 * G0), MAGAZINE_CRUISER.value),
         BodySpec { name: "Lunar sensor station".into(), kind: BodyKind::Station, faction: ESCORT,
             state: State { pos: station_pos, vel: station_vel },
             thrust: Vec2::ZERO, magazine: 0 },
@@ -88,11 +94,10 @@ pub fn transport_intercept_seeded(seed: u64) -> World {
     world.bodies[0].baseline_emission_factor=crate::params::TRANSPORT_EMISSION_FACTOR.value;
     world.bodies[0].visibility_multiplier=2.0;
     world.bodies[1].baseline_emission_factor=crate::params::FRIGATE_EMISSION_FACTOR.value;
-    let transport_start=world.bodies[0].trajectory.state_at(0.0).unwrap().pos;
-    let departure_distance=(planet.pos+Vec2::new(2.5*AU,1.2*AU)-transport_start).length();
     world.objective = Some(Objective {
+        sensor_site:Some(crate::world::SensorSite {pos:station_pos,sensors:crate::sensors::SensorSuite::FULL}),
         name: "departure region".into(),
-        center: transport_start + Vec2::new(0.0,departure_distance),
+        center: departure,
         radius: 0.02 * AU,
         protect: BodyId(0),
         defeat: Some(BodyId(2)),
@@ -103,9 +108,7 @@ pub fn transport_intercept_seeded(seed: u64) -> World {
     world.bodies[0].ship_class=Some(crate::world::ShipClass::Transport);
     world.set_move(BodyId(0), destination).expect("escape destination is navigable");
     world.bodies[0].has_screen=false;
-    // Temporarily listen for bearings only; no station ranging or auto pings.
-    world.bodies[3].sensors.passive=false;
-    world.bodies[3].sensors.active=false;
+    world.bodies[3].sensors=crate::sensors::SensorSuite::FULL;
     // These combatants raised their screens before the scenario began.
     for id in [BodyId(1),BodyId(2)] {
         world.set_screen(id,true).expect("combatant has screens");
@@ -145,38 +148,43 @@ mod tests {
     }
 
     #[test]
-    fn station_has_direction_finding_only() {
+    fn station_has_full_sensors_and_autonomous_pings() {
         let mut w=transport_intercept();
         let suite=w.bodies[3].sensors;
-        assert!(suite.direction_finding && !suite.active && !suite.passive);
+        assert!(suite.direction_finding && suite.active && suite.passive);
         w.advance_to(180.0);
-        assert!(w.ping_emissions.iter().all(|(id,_)|*id!=BodyId(3)));
+        assert!(w.ping_emissions.iter().filter(|(id,_)|*id==BodyId(3)).count()>=3);
     }
 
     #[test]
-    fn transport_starts_beside_station_and_raider_starts_twice_as_far() {
+    fn transport_starts_beside_station_and_raider_in_outer_band() {
         let w=transport_intercept();
         let transport=w.bodies[0].trajectory.state_at(0.0).unwrap();
         let station=w.bodies[3].trajectory.state_at(0.0).unwrap();
         let raider=w.bodies[2].trajectory.state_at(0.0).unwrap();
         assert!(((transport.pos-station.pos).length()-1_000.0).abs()<50.0);
         assert!((transport.vel-station.vel).length()<0.05);
-        let old=Vec2::new(0.2*AU,-0.25*AU)-Vec2::new(PARKING_ORBIT_KM,0.0);
-        let frigate=w.bodies[1].trajectory.state_at(0.0).unwrap();
-        let previous=transport.pos+old*2.0;
-        assert!(((raider.pos-frigate.pos).length()/(previous-frigate.pos).length()-2.0).abs()<0.001);
-        assert!((raider.pos-transport.pos).normalized().dot(old.normalized())>0.999);
+        assert!((5.0..=10.0).contains(&(raider.pos.length()/AU)));
     }
 
     #[test]
-    fn departure_is_due_map_north_at_the_original_travel_distance() {
-        let world=transport_intercept();
-        let start=world.bodies[0].trajectory.state_at(0.0).unwrap().pos;
-        let delta=world.objective.as_ref().unwrap().center-start;
-        assert!(delta.x.abs()<1e-6);
-        assert!(delta.y>0.0,"positive world Y is up on the map");
-        let old=world.system.state(1,0.0).pos+Vec2::new(2.5*AU,1.2*AU);
-        assert!((delta.length()-(old-start).length()).abs()<1e-6);
+    fn outer_layout_is_seeded_independent_and_clear_of_planets() {
+        let positions=|seed| {
+            let w=transport_intercept_seeded(seed);
+            let raider=w.bodies[2].trajectory.state_at(0.0).unwrap().pos;
+            let departure=w.objective.as_ref().unwrap().center;
+            for pos in [raider,departure] {
+                assert!((5.0..=10.0).contains(&(pos.length()/AU)));
+                for (i,b) in w.system.bodies.iter().enumerate() {
+                    assert!((pos-w.system.state(i,0.0).pos).length()>b.radius+0.02*AU);
+                }
+            }
+            assert!((raider-departure).length()>1.0);
+            (raider,departure)
+        };
+        assert_eq!(positions(42),positions(42));
+        let first=positions(0);
+        for seed in 1..32 {let next=positions(seed);assert_ne!(next.0,first.0);assert_ne!(next.1,first.1);}
     }
 
     #[test]
@@ -237,7 +245,7 @@ mod tests {
         assert_eq!(world.bodies[1].baseline_emission_factor,0.5);
         assert_eq!(world.bodies[3].baseline_emission_factor,2.0);
         assert!(world.bodies[0].autopilot.is_some());
-        world.advance_to(DAY);
+        world.advance_to(3.0*DAY);
         assert_eq!(world.outcome.as_ref().map(|o| o.winner), Some(ESCORT));
         assert!(!world.losses.iter().any(|l| l.body == BodyId(0)));
     }

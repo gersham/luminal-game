@@ -3,8 +3,14 @@ use super::*;
 
 type MarkerKey = (bool,u32);
 #[derive(Clone,Copy)]
-struct Marker {pos:Vec2,color:Color32,interceptor:bool}
-struct Effect {marker:Marker,started:f64,hit:bool}
+struct Marker {pos:Vec2,velocity:Vec2,color:Color32,interceptor:bool}
+struct Effect {marker:Marker,started:f64,hit:bool,warp:f64}
+impl Effect {
+    fn position(&self,now:f64)->Vec2 {
+        if self.hit {self.marker.pos}
+        else {self.marker.pos+self.marker.velocity*((now-self.started).clamp(0.0,1.0)*self.warp)}
+    }
+}
 
 #[derive(Default)]
 pub(super) struct WeaponEffects {
@@ -27,9 +33,9 @@ impl WeaponEffects {
     pub(super) fn observe(&mut self,view:&View,faction:Option<FactionId>,now:f64) {
         self.effects.retain(|e|opacity(now-e.started)>0.0);
         let current:BTreeMap<_,_>=view.bodies.iter().filter(|b|b.kind==BodyKind::Missile)
-            .map(|b|((true,b.id.0),Marker {pos:b.pos,color:body_color(b,faction),interceptor:b.interceptor.is_some()}))
+            .map(|b|((true,b.id.0),Marker {pos:b.pos,velocity:b.vel,color:body_color(b,faction),interceptor:b.interceptor.is_some()}))
             .chain(view.contacts.iter().filter(|c|c.resolved_missile).filter_map(|c|c.track.as_ref().map(|t|
-                ((false,c.id.0),Marker {pos:t.pos,color:CONTACT,interceptor:c.resolved_interceptor}))))
+                ((false,c.id.0),Marker {pos:t.pos,velocity:t.vel,color:CONTACT,interceptor:c.resolved_interceptor}))))
             .collect();
         let mut ended=BTreeSet::new();
         for e in &view.combat {
@@ -40,15 +46,16 @@ impl WeaponEffects {
             if !self.initialized || self.seen.contains(&event_key(e)) {continue;}
             let previous=marker_key(e).and_then(|key|self.markers.get(&key).or_else(||current.get(&key))).copied();
             let Some(pos)=e.pos.or(previous.map(|m|m.pos)) else {continue;};
-            let marker=Marker {pos,..previous.unwrap_or(Marker {pos,color:CONTACT,interceptor:false})};
-            self.effects.push(Effect {marker,started:now,hit});
+            let marker=Marker {pos,velocity:e.velocity.or(previous.map(|m|m.velocity)).unwrap_or(Vec2::ZERO),
+                ..previous.unwrap_or(Marker {pos,velocity:Vec2::ZERO,color:CONTACT,interceptor:false})};
+            self.effects.push(Effect {marker,started:now,hit,warp:view.warp});
         }
         // Contacts may disappear without an observed outcome. Fade the last
         // received marker without inventing an explosion or revealing truth.
         if self.initialized {
             for (key,marker) in &self.markers {
                 if !current.contains_key(key) && !ended.contains(key) {
-                    self.effects.push(Effect {marker:*marker,started:now,hit:false});
+                    self.effects.push(Effect {marker:*marker,started:now,hit:false,warp:view.warp});
                 }
             }
         }
@@ -60,7 +67,7 @@ impl WeaponEffects {
     pub(super) fn draw(&self,painter:&egui::Painter,cam:&Camera,rect:Rect,now:f64) {
         for e in &self.effects {
             let alpha=opacity(now-e.started);
-            let p=to_screen(cam,rect,e.marker.pos);
+            let p=to_screen(cam,rect,e.position(now));
             if e.hit {
                 let radius=8.0+24.0*(1.0-alpha);
                 let color=Color32::from_rgb(255,45,45);
@@ -96,7 +103,7 @@ mod tests {
         view.combat.clear();
         let mut effects=WeaponEffects::default();
         effects.observe(&view,Some(ESCORT),0.0);
-        view.combat=vec![luminal_core::world::CombatEvent {
+        view.combat=vec![luminal_core::world::CombatEvent {velocity:Some(Vec2::new(2.0,3.0)),
             subject_kind:Some(BodyKind::Missile),impact_strength:0.0,damage:None,contact:None,
             aim:None,pos:Some(Vec2::ZERO),kind:CombatKind::MissileMiss,
             emitted_at:0.0,received_at:0.0,own_body:Some(BodyId(999)),
@@ -109,10 +116,12 @@ mod tests {
         effects.observe(&view,Some(ESCORT),10.5);
         assert_eq!(effects.effects.len(),1);
         assert_eq!(opacity(10.5-effects.effects[0].started),0.5);
+        assert_eq!(effects.effects[0].position(10.5),Vec2::new(1000.0,1500.0));
         effects.observe(&view,Some(ESCORT),11.0);
         assert!(effects.effects.is_empty());
         view.combat[0].kind=CombatKind::MissileHit;
         effects.observe(&view,Some(ESCORT),12.0);
         assert!(effects.effects[0].hit);
+        assert_eq!(effects.effects[0].position(12.5),Vec2::ZERO,"hit bloom stays at impact");
     }
 }

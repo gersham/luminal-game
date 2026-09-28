@@ -16,6 +16,8 @@ impl CombatKind {
 }
 #[derive(Clone, Debug)]
 pub struct CombatEvent {
+    /// Terminal motion from own telemetry; foreign events never expose true velocity.
+    pub velocity:Option<Vec2>,
     /// Known platform category, retained after its map object disappears.
     pub subject_kind:Option<BodyKind>,
     /// Coarse visible impact intensity, not enemy subsystem telemetry (0..1).
@@ -29,7 +31,7 @@ pub struct CombatEvent {
     /// Own identity only; foreign events never reveal body IDs.
     pub own_body: Option<BodyId>,
 }
-struct Flash { front: Front, kind: CombatKind, body: Option<BodyId>, owner: Option<FactionId>, pending: Vec<FactionId>, aim: Option<Vec2>, damage:Option<String>, impact_strength:f32 }
+struct Flash { velocity:Option<Vec2>, front: Front, kind: CombatKind, body: Option<BodyId>, owner: Option<FactionId>, pending: Vec<FactionId>, aim: Option<Vec2>, damage:Option<String>, impact_strength:f32 }
 
 pub(super) fn impact_strength(before:&crate::damage::Damage,after:&crate::damage::Damage)->f32 {
     use crate::damage::{Condition,System};
@@ -269,8 +271,9 @@ impl World {
                 _=>None,
             }.filter(|(fired,_,_)|(*fired-t).abs()<1e-6).map(|(_,_,aim)|aim)
         });
-        self.refinement.truth_events.push(CombatEvent { subject_kind:body.map(|id|self.bodies[id.0 as usize].kind),impact_strength,damage:damage.clone(),contact:None, emitted_at: t, received_at: t, pos:Some(pos), kind, own_body: body, aim });
-        self.refinement.flashes.push(Flash { impact_strength,damage,front: Front { origin: pos, t_emit: t }, kind, body, owner, pending, aim });
+        let velocity=body.and_then(|id|self.state(id,t)).map(|s|s.vel);
+        self.refinement.truth_events.push(CombatEvent { velocity, subject_kind:body.map(|id|self.bodies[id.0 as usize].kind),impact_strength,damage:damage.clone(),contact:None, emitted_at: t, received_at: t, pos:Some(pos), kind, own_body: body, aim });
+        self.refinement.flashes.push(Flash { velocity,impact_strength,damage,front: Front { origin: pos, t_emit: t }, kind, body, owner, pending, aim });
     }
     pub(super) fn delay_alert(&mut self, id: BodyId, t: f64, kind: AlertKind) {
         let b = &self.bodies[id.0 as usize];
@@ -320,7 +323,7 @@ impl World {
         let contact=if !own && pos.is_some() {flash.body.map(|body|self.contact_id(faction,body))} else {None};
         let classified=own || contact.is_some_and(|c|self.perceptions.get(&faction).and_then(|p|p.contacts.get(&c)).is_some_and(|c|c.resolved));
         let subject_kind=flash.body.filter(|_|classified).map(|id|self.bodies[id.0 as usize].kind);
-        Some(CombatEvent {subject_kind,impact_strength:flash.impact_strength,damage:if own {flash.damage.clone()} else {None},contact,emitted_at:flash.front.t_emit,received_at:arrival,pos,kind:flash.kind,
+        Some(CombatEvent {velocity:if own {flash.velocity} else {None},subject_kind,impact_strength:flash.impact_strength,damage:if own {flash.damage.clone()} else {None},contact,emitted_at:flash.front.t_emit,received_at:arrival,pos,kind:flash.kind,
             // A visible beam discharge carries its beam direction, not the
             // target's identity or true position. Anchor it at the observed flash.
             aim:if own {flash.aim} else if matches!(flash.kind,CombatKind::BeamPulse|CombatKind::PointDefence) {

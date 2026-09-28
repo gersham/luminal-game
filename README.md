@@ -32,6 +32,11 @@ targets. Emission footprints and point-defence rings are no longer drawn.
 Weapon circles use thin yellow dots. Ship forecasts fade toward their endpoints;
 red dashed target links show separation in LS or AU. Observed missile and
 interceptor hits bloom red, while misses fade out over one real-time second.
+Missed rounds keep coasting during the fade at their last received velocity and
+the animation's starting time warp. Autozoom includes your target's selected
+opponent as well as your own ship and target. The camera is allowed to know that
+target relationship for convenience; plotted positions still use your tactical
+picture, and the AI receives no extra targeting information.
 
 **Free flight:** Left/Right turn; Up/Down adjust throttle (0–100%). Any arrow
 cancels the current automatic manoeuvre or move-to order, retaining the weapon
@@ -128,8 +133,19 @@ Windows and macOS installation have not been validated.
 
 The scenario gives you control of the escort frigate. A transport heads for its
 departure region, an enemy warship threatens it, and an allied lunar station is
-present. Other platforms are autonomous. Probes are currently disabled, and the
-station currently has direction finding only.
+present. Other platforms are autonomous. Probes are currently disabled. The lunar
+station has passive, active, and direction-finding sensors, with autonomous active
+pings every 60 seconds and light-delayed reports to the escort.
+
+The raider starts at a seeded random orbital location 5–10 AU from Sol, with
+circular orbital velocity and an inward burn. The transport's exit point is
+independently randomized in the same band. The raider reassesses its route from
+received tracks: it engages an escort that can meet it before the transport,
+and pursues the transport when that route is clear. Known lunar-station sensor
+coverage influences its approach; it reduces emissions and skirts or waits
+outside that coverage when practical, but prioritizes fighting a nearby escort.
+The exit location is known to the raider from the start; without a usable target
+track, it heads to that exit to intercept the escaping transport.
 The escort wins when the transport escapes or the raider is destroyed; the
 raider wins if the transport is destroyed first.
 The transport has half the nominal acceleration of a warship.

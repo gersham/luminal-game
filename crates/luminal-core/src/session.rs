@@ -501,6 +501,38 @@ impl LocalSession {
         Ok(b.kind)
     }
 
+    /// Camera-only target relationship. This intentionally reveals selected
+    /// targeting intent, but returns identities only within the viewer's picture.
+    /// Position and uncertainty must still come from `view`, never world truth.
+    pub fn camera_target_of(&self,role:Role,selected:InterceptTarget)->Option<InterceptTarget> {
+        let w=&self.world;
+        let id=match selected {
+            InterceptTarget::Own(id)=>id,
+            InterceptTarget::Contact(contact)=>match role {
+                Role::Faction(f)=>w.body_for_contact(f,contact)?,
+                Role::Spectator=>return None,
+            },
+        };
+        let b=w.body(id)?;
+        let target=b.missile.map(|m|InterceptTarget::Contact(m.target))
+            .or(b.beam_target.map(InterceptTarget::Contact))
+            .or_else(||b.autopilot.and_then(|ap|match ap.order {
+                Order::Intercept(t)|Order::Flyby(t)|Order::KeepRange(t,_)|Order::Evade(t)=>Some(t),
+                _=>None,
+            }));
+        let target_id=if let Some(interceptor)=b.interceptor {interceptor.target} else {match target? {
+            InterceptTarget::Own(id)=>id,
+            InterceptTarget::Contact(c)=>w.body_for_contact(b.faction,c)?,
+        }};
+        let target=w.body(target_id)?;
+        match role {
+            Role::Spectator=>Some(InterceptTarget::Own(target_id)),
+            Role::Faction(f) if target.faction==f=>Some(InterceptTarget::Own(target_id)),
+            Role::Faction(f)=>w.contact_truth(f).into_iter()
+                .find_map(|(c,id)|(id==target_id).then_some(InterceptTarget::Contact(c))),
+        }
+    }
+
     pub fn view(&self, role: Role) -> View {
         let w = &self.world;
         let t = w.time();
@@ -699,6 +731,18 @@ mod tests {
     }
 
     #[test]
+    fn camera_maps_enemy_target_into_the_viewers_identity_space() {
+        let mut s=LocalSession::new(close_scenario());
+        s.world.advance_to(10.0);
+        let raider=s.world.contact_truth(ESCORT).into_iter().find_map(|(c,id)|(id==BodyId(2)).then_some(c)).unwrap();
+        let victim=s.world.contact_truth(RAIDER).into_iter().find_map(|(c,id)|(id==BodyId(1)).then_some(c)).unwrap();
+        s.world.bodies[2].beam_target=Some(victim);
+        assert_eq!(s.camera_target_of(Role::Faction(ESCORT),InterceptTarget::Contact(raider)),
+            Some(InterceptTarget::Own(BodyId(1))));
+        assert_eq!(s.camera_target_of(Role::Faction(ESCORT),InterceptTarget::Contact(ContactId(999))),None);
+    }
+
+    #[test]
     fn doctrine_engages_without_truth_and_is_warp_independent() {
         let run=|chunks:usize| {
             let mut s=running(0.0);
@@ -745,6 +789,11 @@ mod tests {
     #[test]
     fn hostile_ping_is_delayed_then_expires_without_exposing_its_wavefront() {
         let mut s=running(0.0);
+        // Fixed geometry tests the light-delay boundary independently of random starts.
+        let own=s.world.bodies[1].trajectory.state_at(0.0).unwrap().pos;
+        s.world.bodies[2].trajectory=crate::kinematics::Trajectory::new(-3600.0,crate::kinematics::State {
+            pos:own+Vec2::new(600.0*crate::units::LIGHT_SECOND,0.0),vel:Vec2::ZERO});
+        s.world.set_thrust(BodyId(2),Vec2::new(-20.0*crate::units::G0,0.0)).unwrap();
         s.command(Role::Faction(RAIDER),Command::Ping {body:BodyId(2)}).unwrap();
         s.world.advance_to(100.0);
         let v=s.view(Role::Faction(ESCORT));
@@ -801,8 +850,6 @@ mod tests {
     #[test]
     fn lunar_station_is_autonomous_and_reports_without_visible_pulses() {
         let mut s=LocalSession::new(close_scenario());
-        // Exercise the optional active station configuration, disabled in playtests.
-        s.world.bodies[3].sensors=crate::sensors::SensorSuite::FULL;
         // Keep this relay fixture clear of lunar occultation for any Sol phase.
         let station_pos=s.world.bodies[3].trajectory.state_at(0.0).unwrap().pos;
         s.world.bodies[1].trajectory=crate::kinematics::Trajectory::new(-2000.0,crate::kinematics::State {

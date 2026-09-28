@@ -283,9 +283,18 @@ pub struct Loss {
     pub cause: LossCause,
 }
 
+/// A sensor installation known from the scenario briefing.
+#[derive(Clone,Debug)]
+pub struct SensorSite {
+    /// Public installation location from the scenario briefing, not live telemetry.
+    pub pos:Vec2,
+    pub sensors:sensors::SensorSuite,
+}
+
 /// A scenario goal known to every side: `protect` must reach the region.
 #[derive(Clone, Debug)]
 pub struct Objective {
+    pub sensor_site:Option<SensorSite>,
     pub name: String,
     /// Fixed in the system frame, km.
     pub center: Vec2,
@@ -1805,6 +1814,7 @@ mod tests {
             ];
             let mut w = World::new(sun(), specs, 0.0, 1);
             w.objective = Some(Objective {
+                sensor_site:None,
                 name: "gate".into(),
                 center: base + Vec2::new(1e6, 0.0),
                 radius: 1e5,
