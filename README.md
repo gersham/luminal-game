@@ -638,3 +638,16 @@ Friendly SRMs visually leave their known launcher, cross the first light-second,
 and blend into their current flight position over one real second. This is a
 map animation only: simulation positions, hit checks and guidance are unchanged.
 Unseen enemy launch positions are never invented.
+
+Zoomed planets and moons use matching themed surface atlases, with illumination
+from their system's star: pale gold for Sol, orange for Vesper, warm gold for
+Kestrel and blue-white for Quiet Reach. Faint stellar shadow cones replace the
+old sensor-shadow overlay; sensor line-of-sight occlusion still applies.
+Cold ships (below 25% heat, no thrust) in full planetary or lunar umbra receive
+half EF until they leave shade, heat up or thrust. Partial shade does not grant
+this bonus. This halves emissivity, not detection range.
+
+Art provenance and layout: [celestial atlases](assets/celestials/README.md).
+Review-only [ship marker concepts](concepts/ship-icons/README.md) are not used by
+the game. Close-up screenshot fixtures accept `LUMINAL_CELESTIAL=<body index>`
+with `LUMINAL_SCREENSHOT=<file.ppm>`.

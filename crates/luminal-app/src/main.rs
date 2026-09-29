@@ -4,6 +4,7 @@ mod weapon_effects;
 mod jump_effects;
 mod theme;
 mod star_systems;
+mod celestial_art;
 mod startup;
 mod roster;
 mod ship_art;
@@ -921,6 +922,7 @@ struct LuminalApp {
     tactical_log:TacticalLog,
     weapon_effects:weapon_effects::WeaponEffects,
     jump_effects:jump_effects::JumpEffects,
+    celestial_art:celestial_art::CelestialArt,
 }
 
 /// Development hooks driven by environment variables, used for visual checks.
@@ -1094,6 +1096,7 @@ Shift + right click: extend route").monospace().size(9.0).color(TEXT_MUTED));
         ui.spacing_mut().item_spacing=EVec2::new(2.0,1.0);
         let thermal=ship.thermal;
         let ef=ship.emissivity;
+        let shaded=ship.thermal.heat_fraction()<0.25 && ship.thrust.length()<1e-9 && view.system.stellar_visibility(ship.pos,view.time,None)<=1e-6;
         let (r,_)=ui.allocate_exact_size(EVec2::new(ui.available_width(),157.0),Sense::hover());
         let cx=r.center().x;let center=Pos2::new(cx,r.top()+70.0);
         let radius=(r.width()*0.115).clamp(35.0,52.0);
@@ -1115,7 +1118,7 @@ Shift + right click: extend route").monospace().size(9.0).color(TEXT_MUTED));
         ui.painter().text(center-EVec2::new(0.0,2.0),egui::Align2::CENTER_CENTER,number,mono(radius*0.65),heat_color);
         ui.painter().text(center+EVec2::new(0.0,24.0),egui::Align2::CENTER_CENTER,unit,mono(11.0),heat_color);
         let flank=radius+22.0;let size=(r.width()*0.047).clamp(14.0,24.0);
-        for (x,align,label,value,color) in [(cx-flank,egui::Align2::RIGHT_CENTER,"EMISSIVITY",format!("{:.2}×",ef.value()),ACCENT),
+        for (x,align,label,value,color) in [(cx-flank,egui::Align2::RIGHT_CENTER,if shaded {"EF · SHADE ×0.5"} else {"EMISSIVITY"},format!("{:.2}×",ef.value()),ACCENT),
             (cx+flank,egui::Align2::LEFT_CENTER,self.theme.screens(),if ship.has_screen {format!("{:.0}%",ship.damage.screen_available*100.0)} else {"N/F".into()},ARMOUR)] {
             ui.painter().text(Pos2::new(x,r.top()+45.0),align,label,mono(8.0),TEXT_MUTED);
             ui.painter().text(Pos2::new(x,r.top()+72.0),align,value,mono(size),color);
@@ -1352,6 +1355,7 @@ Shift + right click: extend route").monospace().size(9.0).color(TEXT_MUTED));
             tactical_log:TacticalLog::default(),
             weapon_effects:weapon_effects::WeaponEffects::default(),
             jump_effects:jump_effects::JumpEffects::default(),
+            celestial_art:celestial_art::CelestialArt::default(),
             audio:audio::Audio::default(),
             manual_flight:None,manual_send_elapsed:0.0,
         }
@@ -1434,6 +1438,13 @@ Shift + right click: extend route").monospace().size(9.0).color(TEXT_MUTED));
                 self.selected = Some(Selection::Body(BodyId(2)));
             }
             _ => {}
+        }
+        if self.dev.screenshot.is_some() && let Some(index)=std::env::var("LUMINAL_CELESTIAL").ok().and_then(|v|v.parse::<usize>().ok()) {
+            let view=self.session.view(self.role);
+            if let Some(body)=view.celestials.get(index) {
+                self.camera=Camera {center:body.pos,km_per_px:body.radius/130.0};
+                self.track_player=false;self.fit_pending=false;self.opening_fit=false;
+            }
         }
         self
     }
@@ -2445,13 +2456,9 @@ impl LuminalApp {
         draw_range_rings(&painter, &cam, rect);
         draw_orbits(&painter, &cam, rect, view);
 
-        // Sensor shadows cast from the selected own ship.
-        if let Some(Selection::Body(id)) = self.selected
-            && let Some(b) = view.bodies.iter().find(|b| b.id == id)
-        {
-            for c in &view.celestials {
-                draw_shadow(&painter, &cam, rect, b.pos, c.pos, c.radius);
-            }
+        // Stellar shadows are cosmetic. Sensor occlusion remains in the core.
+        if let Some(star)=view.celestials.first() {
+            for c in view.celestials.iter().skip(1) {draw_shadow(&painter,&cam,rect,star.pos,star.radius,c.pos,c.radius);}
         }
 
         if let Some(o) = &view.objective {
@@ -2557,11 +2564,10 @@ impl LuminalApp {
             let p = to_screen(&cam, rect, c.pos);
             let min_px = if c.kind == CelestialKind::Star { 6.0 } else { 3.0 };
             let r = ((c.radius / cam.km_per_px) as f32).max(min_px);
-            let col = celestial_color(c.kind);
-            if c.kind == CelestialKind::Star {
-                painter.circle_filled(p, r * 2.2, col.gamma_multiply(0.08));
+            let col=if c.kind==CelestialKind::Star {self.theme.star_color()} else {celestial_color(c.kind)};
+            if rect.expand(r*2.2).contains(p) {
+                self.celestial_art.draw(ui.ctx(),&painter,view,i,self.theme,p,r,ui.input(|i|i.time));
             }
-            painter.circle_filled(p, r, col);
             if rect.contains(p) {
                 labels.add(p + EVec2::new(r + 4.0, -r - 2.0), c.name.clone(), col.gamma_multiply(0.8));
             } else {
@@ -3261,23 +3267,18 @@ fn draw_orbits(painter: &egui::Painter, cam: &Camera, rect: Rect, view: &View) {
 }
 
 /// The region a celestial body hides from an observer at `eye`.
-fn draw_shadow(painter: &egui::Painter, cam: &Camera, rect: Rect, eye: Vec2, center: Vec2, radius: f64) {
-    let d = center - eye;
-    let dist = d.length();
-    if dist <= radius {
-        return;
-    }
-    let half = (radius / dist).asin();
-    let base = d.y.atan2(d.x);
-    let reach = dist + (rect.width() + rect.height()) as f64 * cam.km_per_px * 2.0;
-    let tangent = (dist * dist - radius * radius).sqrt();
-    let edge = |a: f64, len: f64| eye + Vec2::new(a.cos(), a.sin()) * len;
-    let pts = [edge(base + half, tangent), edge(base + half, reach), edge(base - half, reach), edge(base - half, tangent)];
-    let screen: Vec<Pos2> = pts.iter().map(|&p| to_screen(cam, rect, p)).collect();
-    if (screen[1] - screen[2]).length() < 1.0 && (screen[0] - screen[3]).length() < 1.0 {
-        return;
-    }
-    painter.add(Shape::convex_polygon(screen, Color32::from_rgba_unmultiplied(0, 0, 0, 35), Stroke::NONE));
+fn draw_shadow(painter:&egui::Painter,cam:&Camera,rect:Rect,star:Vec2,star_radius:f64,center:Vec2,radius:f64) {
+    let delta=center-star;let distance=delta.length();
+    if distance<=star_radius+radius {return;}
+    let away=delta.normalized();let side=Vec2::new(-away.y,away.x);
+    let screen_reach=(rect.width()+rect.height()) as f64*cam.km_per_px*2.0;
+    let reach=if star_radius>radius {(radius*distance/(star_radius-radius)).min(screen_reach)} else {screen_reach};
+    let far_width=(radius-reach*(star_radius-radius)/distance).max(0.0);
+    let polygon=|reach:f64,width:f64|vec![to_screen(cam,rect,center+side*radius),to_screen(cam,rect,center+away*reach+side*width),
+        to_screen(cam,rect,center+away*reach-side*width),to_screen(cam,rect,center-side*radius)];
+    // Finite umbra, surrounded by a much fainter widening penumbra.
+    painter.add(Shape::convex_polygon(polygon(reach,radius+reach*(star_radius+radius)/distance),Color32::from_black_alpha(8),Stroke::NONE));
+    painter.add(Shape::convex_polygon(polygon(reach,far_width),Color32::from_black_alpha(24),Stroke::NONE));
 }
 
 fn edge_distance_label(name:&str,distance:f64)->String {

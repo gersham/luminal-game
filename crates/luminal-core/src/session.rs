@@ -612,7 +612,7 @@ impl LocalSession {
                         .filter_map(|c|w.beam_solution(BodyId(i as u32),*c).map(|s|(*c,s))).collect()
                 } else {BTreeMap::new()},ship_class:b.ship_class,heading:b.heading_at(t),spinal_ready_at:b.spinal_ready_at,
                     controls:b.controls,
-                    emissivity:b.emissivity_factors(t),
+                    emissivity:b.emissivity_in_system(t,&w.system),
                     damage:crate::damage::Report {damage:b.damage,installed:b.installed_systems(),observed_at:b.trajectory.start(),screen_available:b.screen_available()},
                     interceptor_battery:b.interceptor_battery,interceptor:b.interceptor.map(|i|(i.dv_left,i.expires)),
                     point_defence: b.point_defence.map(|mut pd| {pd.targets=[None;8];pd.rate_hz*=b.operating_effectiveness(crate::damage::System::PdLaser);pd}),

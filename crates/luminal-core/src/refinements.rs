@@ -564,7 +564,7 @@ impl World {
     pub(super) fn historical_signature(&self,id:BodyId,t:f64)->Option<sensors::EmissivityFactors> {
         let history=self.refinement.telemetry.get(&id)?;
         history.iter().rev().find(|(at,_)|*at<=t).or_else(||history.front().filter(|(at,_)|*at==0.0))
-            .map(|(_,b)|b.emissivity_factors(t))
+            .map(|(_,b)|b.emissivity_in_system(t,&self.system))
     }
     pub fn known_damage(&self,f:FactionId,c:ContactId)->Option<crate::damage::Report> {
         self.refinement.damage_reports.get(&(f,c)).copied()

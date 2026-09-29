@@ -239,6 +239,15 @@ impl Body {
             recent_beams:recent(self.last_beam.map(|(t,_,_)|t)) || recent(self.point_defence.and_then(|p|p.last_shot.map(|(t,_,_)|t))),
         }
     }
+    pub fn emissivity_in_system(&self,t:f64,system:&System)->sensors::EmissivityFactors {
+        let mut ef=self.emissivity_factors(t);
+        if self.kind==BodyKind::Ship && self.thermal.heat_fraction()<0.25 && ef.thrust_percent<=1e-9
+            && let Some(state)=self.trajectory.state_at(t)
+            && system.stellar_visibility(state.pos,t,None)<=1e-6 {
+            ef.visibility_multiplier*=0.5;
+        }
+        ef
+    }
     pub fn installed_systems(&self)->[bool;crate::damage::System::COUNT] {
         use crate::damage::System as S;
         std::array::from_fn(|i|match S::ALL[i] {
@@ -2433,6 +2442,30 @@ mod tests {
             snr: 1e9, source: Source::Echo,
         }, &w.system);
         (w, c)
+    }
+
+    #[test]
+    fn cold_coasting_ships_get_half_ef_only_in_full_stellar_shade() {
+        use crate::celestial::{Celestial,CelestialKind,Orbit};
+        for kind in [CelestialKind::Planet,CelestialKind::Moon] {
+            let system=System {bodies:vec![
+                Celestial {name:"Star".into(),kind:CelestialKind::Star,gm:0.0,radius:100.0,orbit:Orbit::Fixed(Vec2::ZERO)},
+                Celestial {name:"Shade".into(),kind,gm:0.0,radius:10.0,orbit:Orbit::Fixed(Vec2::new(1000.0,0.0))},
+            ]};
+            let mut w=World::new(system,vec![ship("Cold",0,Vec2::new(1020.0,0.0),Vec2::ZERO,Vec2::ZERO)],0.0,42);
+            let normal=w.bodies[0].emissivity_factors(0.0).value();
+            assert_eq!(w.system.stellar_visibility(Vec2::new(1020.0,0.0),0.0,None),0.0);
+            assert_eq!(w.historical_signature(BodyId(0),0.0).unwrap().value(),normal*0.5);
+            // A smaller apparent occulter produces partial light, not a full bonus.
+            assert!(w.system.stellar_visibility(Vec2::new(1200.0,0.0),0.0,None)>0.0);
+            let b=&mut w.bodies[0];
+            b.thermal.heat_j=0.3*SHIP_HEAT_LIMIT_J*b.thermal.capacity_scale;
+            assert_eq!(b.emissivity_in_system(0.0,&w.system).value(),b.emissivity_factors(0.0).value());
+            b.thermal.heat_j=0.0;b.trajectory.set_thrust(0.0,Vec2::new(G0,0.0)).unwrap();
+            assert_eq!(b.emissivity_in_system(0.0,&w.system).value(),b.emissivity_factors(0.0).value());
+            b.trajectory=crate::kinematics::Trajectory::new(0.0,State {pos:Vec2::new(980.0,0.0),vel:Vec2::ZERO});
+            assert_eq!(b.emissivity_in_system(0.0,&w.system).value(),normal);
+        }
     }
 
     #[test]

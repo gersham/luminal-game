@@ -151,6 +151,36 @@ impl System {
         best
     }
 
+    /// Visible stellar disc fraction, including finite-star umbra and penumbra.
+    /// Independent of sensor line-of-sight occlusion. `exclude` is the surface
+    /// being shaded, so planets and moons never eclipse themselves.
+    pub fn stellar_visibility(&self,point:Vec2,t:f64,exclude:Option<usize>)->f64 {
+        let Some((star_id,star))=self.bodies.iter().enumerate().find(|(_,b)|b.kind==CelestialKind::Star) else {return 1.0;};
+        let toward=self.state(star_id,t).pos-point;let distance=toward.length();
+        if distance<=star.radius {return 1.0;}
+        let a=(star.radius/distance).asin();
+        let mut visibility=1.0_f64;
+        for (i,b) in self.bodies.iter().enumerate() {
+            if i==star_id || Some(i)==exclude {continue;}
+            let delta=self.state(i,t).pos-point;let d=delta.length();
+            if d>=distance || delta.dot(toward)<=0.0 {continue;}
+            if d<=b.radius {return 0.0;}
+            let radius=(b.radius/d).asin();
+            let separation=(delta.dot(toward)/(d*distance)).clamp(-1.0,1.0).acos();
+            if separation>=a+radius {continue;}
+            let covered=if separation<=(a-radius).abs() {
+                if radius>=a {1.0} else {(radius/a).powi(2)}
+            } else {
+                let x=(separation*separation+a*a-radius*radius)/(2.0*separation*a);
+                let y=(separation*separation+radius*radius-a*a)/(2.0*separation*radius);
+                let lens=(-separation+a+radius)*(separation+a-radius)*(separation-a+radius)*(separation+a+radius);
+                (a*a*x.clamp(-1.0,1.0).acos()+radius*radius*y.clamp(-1.0,1.0).acos()-0.5*lens.max(0.0).sqrt())/(std::f64::consts::PI*a*a)
+            };
+            visibility=visibility.min((1.0-covered).clamp(0.0,1.0));
+        }
+        visibility
+    }
+
     /// The first body whose disc blocks a light path from `from` (emitted at `t_from`)
     /// to `to` (received at `t_to`). Each body's motion is linearised over the transit,
     /// which is accurate for light crossing a solar system in minutes.
