@@ -233,7 +233,7 @@ pub fn systematic_range(range: f64, snr: f64, source: crate::mind::Source) -> f6
 
 #[derive(Clone, Copy, Debug)]
 pub struct SeekerFix {
-    pub t: f64, pub pos: Vec2, pub vel: Vec2, pub samples: u32,
+    pub t: f64, pub pos: Vec2, pub vel: Vec2, pub accel: Vec2, pub samples: u32,
     history: [(f64,Vec2);32],
 }
 impl SeekerFix {
@@ -257,6 +257,7 @@ impl SeekerFix {
         let b=(p1-c*m3)*(1.0/m2);
         self.pos=origin+p0*(1.0/n as f64)-b*mean+c*(mean*mean-m2/n as f64);
         self.vel=b-c*(2.0*mean);
+        self.accel=c*2.0;
         self
     }
     pub fn update(previous: Option<Self>, t: f64, pos: Vec2, prior_vel: Vec2) -> Self {
@@ -269,7 +270,7 @@ impl SeekerFix {
         let denom=history[..n].iter().map(|(at,_)|(at-t-mean_t).powi(2)).sum::<f64>();
         let vel=if denom>1e-12 { history[..n].iter().fold(Vec2::ZERO,|sum,(at,p)|sum+(*p-pos-mean_p)*(at-t-mean_t))*(1.0/denom) } else {prior_vel};
         let fitted=pos+mean_p-vel*mean_t;
-        Self {t,pos:fitted,vel,samples,history}
+        Self {t,pos:fitted,vel,accel:Vec2::ZERO,samples,history}
     }
 }
 
@@ -336,6 +337,7 @@ mod tests {
         }
         let fit=fix.unwrap().accelerating();
         assert!((fit.vel-Vec2::new(127.0,5.0)).length()<1e-6);
+        assert!((fit.accel-Vec2::new(4.0,0.0)).length()<1e-6);
         assert!((fit.pos-Vec2::new(1e9+3.0*31.0+2.0*31.0*31.0,155.0)).length()<1e-6);
     }
     #[test]

@@ -572,3 +572,8 @@ ship is selected when there is no hostile target, without changing movement orde
 
 Each interceptor gets one burst against one missile and is spent on hit or miss.
 A defending ship may launch a fresh interceptor at a surviving missile.
+Interceptor guidance fits acceleration from received observations and leads the
+powered trajectory, including motion during light delay. It must still reach the
+100 km kill envelope with its limited correction fuel before rolling for a kill.
+See [the interceptor calibration](calibration/2026-09-28-interceptors/report.md)
+for accelerating-target tests and SRM salvo comparisons.

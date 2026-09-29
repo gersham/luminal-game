@@ -1,0 +1,4 @@
+class,seed,depth,time,winner,srm_launched,lrm_launched,srm_hits,lrm_hits,srm_hp,lrm_hp,srm_crit,lrm_crit,beam_hits,beam_hp,beam_finish,reached_beams,hull_a,hull_b,interceptors_used,interceptor_kills,pd_kills,loss_reason
+Cruiser,9000,200,17525,1,48,72,25,8,1565.7254421013229,187.5,3,1,319,3928.7013699788904,true,true,0.5561426170784278,0.7627075036336858,400,62,38,reactor
+Cruiser,9001,200,17455,0,48,72,24,7,1383.839169506336,75,5,0,141,2297.2936579819125,true,true,0.8903172391549986,0.6566633796310892,400,66,34,reactor
+Cruiser,9002,200,17770,1,48,72,23,6,1183.4021395165587,0,5,0,278,3245.673971764017,true,true,0.43130835282086843,0.9865293652349645,398,69,31,reactor

@@ -18,6 +18,20 @@ pub fn hit_probability(relative_speed:f64)->f64 {
 pub fn hit_probability_against(relative_speed:f64,payload:Option<Payload>)->f64 {
     hit_probability(relative_speed)*match payload {Some(Payload::Nuclear)=>0.75,Some(Payload::Kinetic)=>1.25,_=>1.0}
 }
+/// Solve the existing 0.1c interceptor departure against a received accelerating
+/// track. The shot still has to reach the physical kill envelope to succeed.
+pub fn flight_seconds(own:State,target:State,accel:Vec2)->Option<f64> {
+    let delta=target.pos-own.pos;let relative=target.vel-own.vel;
+    let miss=|t:f64| (delta+relative*t+accel*(0.5*t*t)).length()-0.1*C*t;
+    let mut lo=0.0;let mut hi=0.1;
+    while miss(hi)>0.0 {
+        lo=hi;hi*=1.1;
+        if hi>INTERCEPTOR_LIFETIME_S.value {return None;}
+    }
+    for _ in 0..48 {let mid=(lo+hi)*0.5;if miss(mid)>0.0 {lo=mid;} else {hi=mid;}}
+    Some(hi.max(delta.length()/C).max(0.1))
+}
+
 /// Outer kinematic envelope against a zero-relative-velocity target.
 pub fn nominal_range()->f64 {reach(INTERCEPTOR_LIFETIME_S.value).min(INTERCEPTOR_RANGE_LS.value*LIGHT_SECOND)}
 fn reach(t:f64)->f64 {
@@ -75,7 +89,7 @@ impl World {
             let key=(id,target);
             let previous=self.interceptor_solutions.get(&key).copied();
             if previous.is_none_or(|p|emitted>p.t) {
-                self.interceptor_solutions.insert(key,sensors::SeekerFix::update(previous,emitted,pos,Vec2::ZERO));
+                self.interceptor_solutions.insert(key,sensors::SeekerFix::update(previous,emitted,pos,Vec2::ZERO).accelerating());
             }
         }
         let mut status=if battery.rounds==0 {"Magazine empty"} else if t<battery.ready_at {"Reloading"} else {"No local missile contacts"};
@@ -351,6 +365,34 @@ mod tests {
         assert!(!w.bodies[2].alive_at(w.time()),"missed interceptors retire");
         assert!(w.bodies[2].interceptor.unwrap().dv_left>=0.0);
     }
+    #[test]
+    fn accelerating_srm_tracks_support_real_intercepts() {
+        for range in [0.03,0.14,0.25] {
+            let mut kills=0;
+            for seed in 0..64 {
+                let mut w=fixture(seed);
+                let origin=w.state(BodyId(0),0.0).unwrap().pos;
+                // A passive trajectory fixture avoids ship helm guidance overriding the burn.
+                w.bodies[1].kind=BodyKind::Probe;
+                w.bodies[1].trajectory=Trajectory::new(0.0,State {pos:origin+Vec2::new(range*AU,0.0),vel:Vec2::new(-0.03*C,3000.0)});
+                w.bodies[1].trajectory.set_thrust(0.0,Vec2::new(-2800.0*G0,1000.0*G0)).unwrap();
+                let mut fix=None;
+                // Thirty-two already received samples of a sustained SRM burn.
+                for tick in 90..122 {
+                    let emitted=tick as f64;
+                    let seen=w.state(BodyId(1),emitted).unwrap();
+                    fix=Some(sensors::SeekerFix::update(fix,emitted,seen.pos,seen.vel));
+                }
+                w.advance_to(122.0+range*AU/C);
+                let id=w.launch_interceptor(BodyId(0),BodyId(1),fix.unwrap());
+                w.advance_to(1500.0);
+                if w.losses.iter().any(|l|l.body==BodyId(1) && matches!(l.cause,LossCause::Interceptor {missile} if missile==id)) {kills+=1;}
+            }
+            println!("Accelerating target at {range} AU: {kills}/64 interceptions");
+            assert!(kills>=25,"guidance must reach a continuously accelerating SRM, not just advertise a good roll");
+        }
+    }
+
     #[test]
     fn physical_interceptors_can_kill_and_can_miss_at_low_closure() {
         let mut kills=0;

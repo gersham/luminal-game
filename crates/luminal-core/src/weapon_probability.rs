@@ -74,17 +74,21 @@ impl World {
     pub(super) fn start_probability_interceptor(&mut self,id:BodyId,fix:sensors::SeekerFix) {
         let defence=self.bodies[id.0 as usize].interceptor.unwrap();
         let own=self.state(id,self.time).unwrap();
-        let aim=State {pos:fix.pos+fix.vel*(self.time-fix.t),vel:fix.vel};
+        let fix=fix.accelerating();
+        self.bodies[id.0 as usize].interceptor.as_mut().unwrap().solution=fix;
+        let age=(self.time-fix.t).max(0.0);
+        let aim=State {pos:fix.pos+fix.vel*age+fix.accel*(0.5*age*age),vel:fix.vel+fix.accel*age};
         let range=(aim.pos-own.pos).length();
         let closing=(own.vel-aim.vel).dot((aim.pos-own.pos).normalized());
         let speed=0.1*C;
-        let seconds=(range/(speed+closing).max(speed*0.25)).max(range/C).max(0.1);
+        let seconds=interceptor::flight_seconds(own,aim,fix.accel)
+            .unwrap_or((range/(speed+closing).max(speed*0.25)).max(range/C).max(0.1));
         let payload=self.bodies[defence.target.0 as usize].missile.map(|m|m.payload);
         let chance=interceptor::hit_probability_against((aim.vel-own.vel).length(),payload);
         self.probability_flights.insert(id,Flight {due:self.time+seconds,start:self.time,target:defence.target,
             center_launch:false,last_course:self.time,closest:f64::INFINITY,correction_left:INTERCEPTOR_ACCEL_G.value*G0*INTERCEPTOR_BURN_S.value,
-            aim,quality:1.0,range,sigma:0.0,interceptor:true,chance,aim_accel:Vec2::ZERO});
-        self.debug_note("INTERCEPT_PLAN",format!("missile={id:?} target={:?} flight_s={seconds} chance={chance}",defence.target));
+            aim,quality:1.0,range,sigma:0.0,interceptor:true,chance,aim_accel:fix.accel});
+        self.debug_note("INTERCEPT_PLAN",format!("missile={id:?} target={:?} flight_s={seconds} chance={chance} aim={aim:?} acceleration={:?}",defence.target,fix.accel));
     }
 
     pub(super) fn guide_probability_weapon(&mut self,id:BodyId) {
@@ -161,7 +165,17 @@ impl World {
                     else if m.payload==Payload::Kinetic || ms.burn_left>1e-6 {Phase::Burn} else {Phase::Cruise};
             }
         } else if let Some((emitted,seen))=retarded_state(&self.bodies[flight.target.0 as usize].trajectory,me.pos,t) {
-            flight.aim=State {pos:seen.pos+seen.vel*(t-emitted),vel:seen.vel};
+            let prior=self.bodies[id.0 as usize].interceptor.unwrap().solution;
+            if emitted>prior.t+1e-6 {
+                // Acceleration comes from successive light-delayed velocity samples,
+                // never the target's current thrust or future trajectory.
+                let measured=(seen.vel-prior.vel)*(1.0/(emitted-prior.t));
+                flight.aim_accel=measured.normalized()*measured.length().min(6000.0*G0);
+                let solution=&mut self.bodies[id.0 as usize].interceptor.as_mut().unwrap().solution;
+                solution.t=emitted;solution.pos=seen.pos;solution.vel=seen.vel;
+            }
+            let age=(t-emitted).max(0.0);
+            flight.aim=State {pos:seen.pos+seen.vel*age+flight.aim_accel*(0.5*age*age),vel:seen.vel+flight.aim_accel*age};
         }
         // Sweep only continuous normal-space intervals: jumping targets leave
         // no physical trail between departure and arrival to collide with.
@@ -185,7 +199,7 @@ impl World {
             self.steer_powered_missile(id,flight,me,reactor_expires.unwrap());
             return;
         }
-        let horizon=remaining.min(missile::ACCEL_PERSIST_S);
+        let horizon=remaining;
         let destination=flight.aim.pos+flight.aim.vel*remaining+flight.aim_accel*(0.5*horizon*horizon);
         let velocity=(destination-me.pos)*(1.0/remaining);
         let mut velocity=velocity.normalized()*velocity.length().min(0.3*C);
@@ -262,7 +276,7 @@ impl World {
         let blocked=self.system.occluder(me.pos,t,target.pos,t).is_some();
         if flight.interceptor {
             let kill=!blocked && (target.pos-me.pos).length()<=INTERCEPTOR_KILL_RADIUS_KM.value && self.rng.uniform()<flight.chance;
-            self.debug_note("INTERCEPT",format!("missile={id:?} target={:?} model=probability chance={} kill={kill}",flight.target,flight.chance));
+            self.debug_note("INTERCEPT",format!("missile={id:?} target={:?} model=probability chance={} kill={kill} miss_km={} closest_km={}",flight.target,flight.chance,(target.pos-me.pos).length(),flight.closest));
             self.record_interception(id,flight.target,t,if kill {CombatKind::MissileHit} else {CombatKind::MissileMiss});
             self.destroy(id,t,LossCause::Expended);
             if kill {self.destroy(flight.target,t,LossCause::Interceptor {missile:id});}
@@ -576,6 +590,9 @@ impl World {
                 thrust:Vec2::ZERO,magazine:0}).collect();
             let mut w=World::new(crate::celestial::System {bodies:vec![]},specs,0.0,42);
             let aim=w.state(BodyId(1),0.0).unwrap();
+            w.bodies[0].interceptor=Some(interceptor::Interceptor {launcher:BodyId(0),target:BodyId(1),
+                expires:1.0,dv_left:0.0,last_update:0.0,last_range:1000.0,
+                solution:sensors::SeekerFix::update(None,0.0,aim.pos,aim.vel)});
             let flight=Flight {due:1.0,start:0.0,target:BodyId(1),center_launch:false,last_course:0.0,closest:f64::INFINITY,
                 correction_left:0.0,aim,quality:1.0,range:1000.0,sigma:0.0,interceptor:true,chance:1.0,aim_accel:Vec2::ZERO};
             w.probability_flights.insert(BodyId(0),flight);w.time=1.0;
