@@ -106,6 +106,7 @@ pub enum Order {
     /// Maximum-thrust encounter, then coast through without matching velocity.
     Flyby(InterceptTarget),
     KeepRange(InterceptTarget,f64),
+    CombatRange(InterceptTarget,bool), // true: standoff; false: close
     Evade(InterceptTarget),
     /// Fly to a point in minimal time and stop there. The point is `offset` from
     /// celestial `frame` and moves with it.
@@ -137,6 +138,7 @@ pub struct Body {
     pub withdrawing:bool,
     step_generation:u64,
     pub jump:Option<jump::JumpState>,
+    pub jump_ready_at:f64,
     pub controls:controls::Controls,
     pub last_missile_launch:Option<f64>,
     pub ship_class: Option<ShipClass>,
@@ -334,6 +336,7 @@ impl Body {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum OrderError {
     JumpUnavailable,
+    JumpRecovering,
     JumpBusy,
     PowerOrHeat,
     Destroyed,
@@ -575,7 +578,7 @@ impl World {
             .map(|spec| {
                 let trajectory = ballistic_history(&system, spec.state, spec.thrust, history_s);
                 Body {beam_mode:BeamMode::Damage,disrupted_until:0.0,display_class:None,withdrawing:false,
-                    jump:None,step_generation:0,
+                    jump:None,jump_ready_at:0.0,step_generation:0,
                     controls:controls::Controls::default(),last_missile_launch:None,
                     ship_class: (spec.kind==BodyKind::Ship).then_some(ShipClass::Frigate),
                     facing:0.0,turn_target:0.0,facing_at:0.0,spinal_ready_at:0.0,spinal_tracking:None,
@@ -809,6 +812,16 @@ impl World {
         self.set_ship_approach(id, target, false)
     }
 
+    pub fn set_combat_range(&mut self,id:BodyId,target:InterceptTarget,standoff:bool)->Result<(),OrderError> {
+        let b=self.live_body_mut(id)?;
+        let range=autopilot::combat_range(standoff,b.magazine[Payload::Nuclear.index()]>0);
+        self.set_tactical_range(id,target,Some(range))?;
+        self.bodies[id.0 as usize].autopilot.as_mut().unwrap().order=Order::CombatRange(target,standoff);
+        self.guide(id);
+        self.snapshot_platform(id,self.time);
+        Ok(())
+    }
+
     pub fn set_tactical_range(&mut self,id:BodyId,target:InterceptTarget,range:Option<f64>)->Result<(),OrderError> {
         self.ensure_not_jumping(id)?;
         let faction=self.live_body_mut(id)?.faction;
@@ -992,7 +1005,7 @@ impl World {
         let dv = payload.delta_v();
         let mid = BodyId(self.bodies.len() as u32);
         self.bodies.push(Body {beam_mode:BeamMode::Damage,disrupted_until:0.0,display_class:None,withdrawing:false,
-            jump:None,step_generation:0,
+            jump:None,jump_ready_at:0.0,step_generation:0,
             controls:controls::Controls::default(),last_missile_launch:None,
             ship_class: None,facing:0.0,turn_target:0.0,facing_at:0.0,spinal_ready_at:0.0,spinal_tracking:None,
             damage:crate::damage::Damage::default(),
@@ -1391,9 +1404,9 @@ impl World {
                 let settled = ((rel.length() - radius) / radius).abs() < 0.02 && thrust.length() < 0.01 * crate::units::G0;
                 (thrust, Some(if settled { AutopilotStatus::Holding } else { AutopilotStatus::Manoeuvring }))
             }
-            Some(Order::Intercept(target) | Order::Flyby(target) | Order::KeepRange(target,_)) => {
+            Some(Order::Intercept(target) | Order::Flyby(target) | Order::KeepRange(target,_) | Order::CombatRange(target,_)) => {
                 let flyby = matches!(b.autopilot.map(|a| a.order), Some(Order::Flyby(_)));
-                let keep=match b.autopilot.map(|a|a.order) {Some(Order::KeepRange(_,r))=>Some(r),_=>None};
+                let keep=match b.autopilot.map(|a|a.order) {Some(Order::KeepRange(_,r))=>Some(r),Some(Order::CombatRange(_,standoff))=>Some(autopilot::combat_range(standoff,b.magazine[Payload::Nuclear.index()]>0)),_=>None};
                 let known = match target {
                     InterceptTarget::Own(o) => self.known_body(b.faction,o).and_then(|known|
                         known.trajectory.state_at(t).map(|ts| (ts,known.trajectory.thrust_at(t).unwrap_or(Vec2::ZERO)))),
@@ -1413,7 +1426,7 @@ impl World {
                                 .filter(|c|t-c.last.decider_received_at<=TRACK_STALE_S.value)
                                 .map(|c|match c.last.measurement {Measurement::Bearing {bearing,..}|Measurement::BearingRange {bearing,..}=>bearing})
                         } else {None};
-                        if !flyby && let Some(bearing)=bearing {
+                        if !flyby && !matches!(b.autopilot.map(|a|a.order),Some(Order::CombatRange(..))) && let Some(bearing)=bearing {
                             let direction=Vec2::new(bearing.cos(),bearing.sin());
                             (direction*limit,Some(AutopilotStatus::Manoeuvring))
                         }
@@ -1421,7 +1434,7 @@ impl World {
                     },
                     Some((ts, ta)) => {
                         {
-                            let r = if flyby { autopilot::flyby(s, ts, ta, limit) } else if let Some(range)=keep {autopilot::keep_range(s,ts,ta-self.system.gravity(s.pos,t),range,limit)} else { autopilot::rendezvous(s, ts, ta-self.system.gravity(s.pos,t),limit) };
+                            let r = if flyby { autopilot::flyby(s, ts, ta, limit) } else if let Some(range)=keep {if matches!(b.autopilot.map(|a|a.order),Some(Order::CombatRange(..))) {autopilot::combat_approach(s,ts,ta-self.system.gravity(s.pos,t),range,limit)} else {autopilot::keep_range(s,ts,ta-self.system.gravity(s.pos,t),range,limit)}} else { autopilot::rendezvous(s, ts, ta-self.system.gravity(s.pos,t),limit) };
                             let holding = r.gap.abs() < keep.map_or(0.5*autopilot::STANDOFF_KM,|r|(r*0.01).max(500.0)) && r.rel_speed < 1.0;
                             let status = if holding && !flyby { AutopilotStatus::Holding } else { AutopilotStatus::Closing { eta: r.eta, range: r.gap } };
                             (r.thrust, Some(status))
@@ -2420,6 +2433,20 @@ mod tests {
             snr: 1e9, source: Source::Echo,
         }, &w.system);
         (w, c)
+    }
+
+    #[test]
+    fn standoff_adapts_to_last_lrm_without_replacing_the_order() {
+        let (mut w,c)=beam_trial();let id=BodyId(0);
+        w.bodies[0].trajectory=crate::kinematics::Trajectory::new(0.0,State {pos:Vec2::new(20.0*AU-20.0*LIGHT_SECOND,0.0),vel:Vec2::ZERO});
+        w.bodies[0].magazine[Payload::Nuclear.index()]=1;
+        w.set_combat_range(id,InterceptTarget::Contact(c),true).unwrap();
+        assert!(w.bodies[0].trajectory.last().thrust.x<0.0,"retreat beyond SRMs with LRMs");
+        w.bodies[0].magazine[Payload::Nuclear.index()]=0;w.guide(id);
+        assert!(w.bodies[0].trajectory.last().thrust.x>0.0,"approach to outside beams after LRMs");
+        assert!(matches!(w.bodies[0].autopilot.unwrap().order,Order::CombatRange(_,true)));
+        w.perceptions.get_mut(&FactionId(0)).unwrap().contacts.remove(&c);w.guide(id);
+        assert_eq!(w.bodies[0].trajectory.last().thrust,Vec2::ZERO);
     }
 
     #[test]

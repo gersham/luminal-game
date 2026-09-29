@@ -77,7 +77,7 @@ mod tests {
         w.bodies[1].damage.systems[Subsystem::Beam as usize]=Condition::Destroyed;
         let mut session=LocalSession::new(w);session.enable_bot(FactionId(1),true);
         session.command(Role::Spectator,Command::SetPaused(false)).unwrap();
-        session.tick(700.0);
+        session.tick(jump::SPOOL_SECONDS+100.0);
         let view=session.view(Role::Spectator);
         assert!(view.outcome.as_ref().is_some_and(|o|o.reason.contains("withdrew")),"{:?}",view.outcome);
         assert!(!view.bodies.iter().any(|b|b.id==BodyId(1)));
@@ -90,35 +90,35 @@ mod tests {
         assert!(w.jump_events(Some(FactionId(1))).iter().any(|e|e.kind==CombatKind::JumpSpool));
         w.advance_to(35.0);
         assert!(w.jump_events(Some(observer)).iter().any(|e|e.kind==CombatKind::JumpSpool && e.received_at>=30.0));
-        w.advance_to(610.0);
+        w.advance_to(jump::SPOOL_SECONDS+10.0);
         assert!(!w.jump_events(Some(observer)).iter().any(|e|matches!(e.kind,CombatKind::JumpDeparture|CombatKind::JumpArrival)));
         let own=w.jump_events(Some(FactionId(1)));
         let departure=own.iter().find(|e|e.kind==CombatKind::JumpDeparture).unwrap();
         let arrival=own.iter().find(|e|e.kind==CombatKind::JumpArrival).unwrap();
         assert_eq!(departure.pos,Some(Vec2::new(30.0*LIGHT_SECOND,0.0)));
         assert_eq!(arrival.pos,Some(Vec2::new(60.0*LIGHT_SECOND,0.0)));
-        w.advance_to(670.0);
+        w.advance_to(jump::SPOOL_SECONDS+70.0);
         let observed=w.jump_events(Some(observer));
-        assert!(observed.iter().any(|e|e.kind==CombatKind::JumpDeparture && e.received_at>=630.0));
-        assert!(observed.iter().any(|e|e.kind==CombatKind::JumpArrival && e.received_at>=660.0));
+        assert!(observed.iter().any(|e|e.kind==CombatKind::JumpDeparture && e.received_at>=jump::SPOOL_SECONDS+30.0));
+        assert!(observed.iter().any(|e|e.kind==CombatKind::JumpArrival && e.received_at>=jump::SPOOL_SECONDS+60.0));
     }
     #[test]
     fn withdrawal_is_vulnerable_for_full_spool_then_removes_without_destruction() {
         let mut w=fixture();w.withdraw(BodyId(1)).unwrap();
-        w.advance_to(599.0);assert!(w.bodies[1].alive_at(w.time()));assert!(w.outcome.is_none());
-        w.advance_to(600.0);assert!(!w.bodies[1].alive_at(w.time()));
+        w.advance_to(jump::SPOOL_SECONDS-1.0);assert!(w.bodies[1].alive_at(w.time()));assert!(w.outcome.is_none());
+        w.advance_to(jump::SPOOL_SECONDS);assert!(!w.bodies[1].alive_at(w.time()));
         assert_eq!(w.losses.last().unwrap().cause,LossCause::Withdrawn);
         assert!(w.jump_events(Some(FactionId(1))).iter().any(|e|e.kind==CombatKind::JumpDeparture));
         assert!(!w.jump_events(None).iter().any(|e|e.kind==CombatKind::JumpArrival));
         assert!(w.bodies[1].damage.hull>0.0);assert!(w.bodies[1].jump.is_none());
         assert!(w.combat_events(None).iter().all(|e|e.kind!=CombatKind::Destroyed));
         assert!(w.received_outcome(FactionId(0)).is_none(),"remote concession travels at c");
-        w.advance_to(640.0);
+        w.advance_to(jump::SPOOL_SECONDS+40.0);
         assert_eq!(w.received_outcome(FactionId(0)).unwrap().winner,FactionId(0));
         assert!(w.received_outcome(FactionId(0)).unwrap().reason.contains("withdrew"));
         let c=w.contact_id(FactionId(0),BodyId(1));assert!(w.contact_retired(FactionId(0),c));
         assert_eq!(w.start_jump(BodyId(1),Vec2::ZERO),Err(OrderError::Destroyed));
-        w.advance_to(2000.0);assert_eq!(w.losses.len(),1);
+        w.advance_to(jump::SPOOL_SECONDS+2000.0);assert_eq!(w.losses.len(),1);
     }
     #[test]
     fn cancel_or_damage_aborts_withdrawal_and_stale_timer_cannot_remove_ship() {
@@ -126,7 +126,7 @@ mod tests {
             let mut w=fixture();w.withdraw(BodyId(1)).unwrap();w.advance_to(100.0);
             if cancel {w.cancel_jump(BodyId(1)).unwrap();}
             else {w.bodies[1].damage.systems[Subsystem::Jump as usize]=Condition::Damaged;w.update_system_controls(BodyId(1));}
-            assert!(!w.bodies[1].withdrawing);w.advance_to(610.0);
+            assert!(!w.bodies[1].withdrawing);w.advance_to(jump::SPOOL_SECONDS+10.0);
             assert!(w.bodies[1].alive_at(w.time()));assert!(w.outcome.is_none());
         }
     }

@@ -15,8 +15,8 @@ headers (`alsa-lib` on Arch, `libasound2-dev` on Debian/Ubuntu).
 
 Destroyers, cruisers and battleships have a **JUMP DRIVE** helm button. Select it,
 then left-click any destination within 50 AU of Sol; the map switches to a crosshair.
-Escape or right-click cancels destination selection. A jump spools for 600 simulation
-seconds, with a blinking triangle and countdown. During spooling, thrust, evasion,
+Escape or right-click cancels destination selection. A jump spools for one simulation
+hour, with a blinking triangle and countdown. During spooling, thrust, evasion,
 screens, beam weapons and PD lasers are disabled. **CANCEL JUMP** aborts the spool;
 screens rebuild from zero under their existing control mode, and accumulated heat remains.
 Missiles and interceptor missiles remain usable during the spool. The jump drive
@@ -248,8 +248,8 @@ never override manual speed. Restart restores AUTO.
 | P | Active sensor ping |
 | E / R | Cycle ECM / Screens: Auto → On → Off |
 | A | Toggle automatic active pinging: Off / Auto |
-| 1 / 2 / 3 | SHORT / MEDIUM / LONG separation |
-| 0 | EVADE |
+| 1 / 2 / 3 | Close / Standoff / Flyby |
+| 0 | Alongside |
 | Drag with left or middle mouse button | Pan; cancels ship tracking |
 | Mouse wheel | Zoom |
 | Right-click a friendly | Escort: join 1 LS alongside, or screen up to 10 LS toward the nearest detected enemy |
@@ -306,19 +306,17 @@ thrust replaces the route; adding points preserves your weapon target.
 
 | Order | Behaviour |
 | --- | --- |
-| ALONGSIDE | Join at a fixed 1 LS offset and mirror observed motion; friendly or enemy |
-| INTERCEPT | Close and match velocity |
+| ALONGSIDE | Escort a friendly, screening detected enemies up to 10 LS; otherwise match alongside at 1 LS |
 | FLYBY | Accelerate for a high-speed pass without matching velocity |
-| LONG · LRM | Hold 0.7 AU: half the LRM engagement envelope |
-| MEDIUM · SRM | Hold 0.01 AU (about 5 LS): close-range shotgun combat |
-| SHORT · BEAM | Hold 2 LS: inside the beam knife-fight envelope |
-| EVADE | Maximum lateral burn against incoming missiles; coast when clear |
+| STANDOFF | Keep 15% beyond SRM range while LRMs remain; then 15% beyond beam range |
+| CLOSE | Brake into beam range (2 LS) and match motion |
 
-LONG, MEDIUM and SHORT approach a fresh bearing-only contact until a range fix is
-available, then brake or withdraw to hold the requested separation. INTERCEPT approaches a fresh bearing, then
-brakes and matches velocity once a ranged estimate is available. FLYBY requires
-a fresh ranged track. Stale evidence causes coasting. Ships still
-retain momentum with their engines off.
+Standoff updates automatically when the last LRM is fired. Close and Standoff
+use received range estimates, conservative braking and a continuous 3% station
+band to avoid chasing small sensor corrections. Without a usable position they
+coast. Automatic evasion remains a System Modes toggle and resumes the standing
+order afterward. Number keys 0/1/2/3 select Alongside/Close/Standoff/Flyby.
+Empty LRM and SRM magazines disappear from the fire-control list.
 
 ### Damage and information
 
@@ -588,12 +586,12 @@ magazines are now fitted; see the [follow-up validation and pacing proposals](ca
 
 Ships now evaluate whether they can still fight or repair an escape route.
 Losing AI prefers a jump withdrawal over destruction, or surrenders when it
-cannot recover an escape. **Withdraw (Jump)** concedes the objective only after
-the vulnerable ten-minute spool completes and removes the ship from the battle.
+cannot recover an escape. AI withdrawal concedes the objective only after
+the vulnerable one-hour spool completes and removes the ship from the battle.
 **Surrender** concedes immediately. Opponents receive these announcements and
 outcomes after light delay.
 
-Choose **Automatic / Fight / Escape** repair goals in the ship panel. Power and
+Cycle **Automatic / Fight / Escape** repair goals in the System Modes panel. Power and
 damage control remain first priorities, and changing goals preserves ongoing
 repair work. **Next Tactical Event** advances the normal simulation until a
 received tactical change, repair, jump or result, with a 24-hour limit.
@@ -620,3 +618,11 @@ Enemy contact notifications use a low, descending two-strike chime with priority
 over routine weapon sounds. Automatic tracking frames localized enemy ships as
 well as the inspected unit, including while inspecting the escorted charge.
 Bearing-only contacts cannot set a zoom distance. Manual pan/zoom overrides remain.
+
+Player ships can surrender but cannot withdraw from the battle by jump. Normal
+map jumps spool for one hour and require six hours of drive recovery after
+arrival. Cancelling a spool leaves screens empty but does not start recovery.
+The helm highlights jump selection, spooling and recovery. System Modes groups
+ECM, screens, evasion, active sensors, radiators and cycling repair priorities.
+When ship tracking is off, moving the pointer into the map's 24-pixel edge band
+scrolls the map; speed increases toward the edge and follows the current zoom.

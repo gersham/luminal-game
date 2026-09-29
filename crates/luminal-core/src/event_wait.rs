@@ -71,7 +71,7 @@ mod tests {
         s.command(role,Command::Jump {body:BodyId(0),destination:Vec2::new(crate::units::AU,0.0)}).unwrap();
         s.advance_to_next_event(role);s.tick(1.0);
         assert!(s.paused);assert!(!s.waiting_for_event());assert_eq!(s.warp,20.0);
-        assert!(s.world.time()>=600.0 && s.world.time()<=605.0,"stop on departure rather than skip whole jump");
+        assert!(s.world.time()>=crate::world::jump::SPOOL_SECONDS && s.world.time()<=crate::world::jump::SPOOL_SECONDS+5.0,"stop on departure rather than skip whole jump");
     }
     #[test]
     fn next_event_stops_when_repair_completes_not_on_every_progress_tick() {

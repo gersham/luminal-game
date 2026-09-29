@@ -35,5 +35,5 @@ impl Theme {
         else if p==Payload::Kinetic {match self {Self::Culture=>"SHARD SWARM",Self::GrimDark=>"FRAG TORPEDO",Self::Imperium=>"CANISTER MISSILE",Self::Luminal=>"FLECHETTE BUS"}}
         else {self.weapon(p)}
     }
-    pub fn range(self,mode:MovementMode)->String {match mode {MovementMode::Long=>format!("{} RANGE",self.weapon(Payload::Nuclear)),MovementMode::Medium=>format!("{} RANGE",self.weapon(Payload::Kinetic)),MovementMode::Short=>format!("{} RANGE",self.weapon(Payload::Beam)),_=>mode.label().into()}}
+    pub fn range(self,mode:MovementMode)->String {mode.label().into()}
 }

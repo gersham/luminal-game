@@ -135,6 +135,25 @@ pub fn rendezvous(ship: State, target: State, ff: Vec2, max_accel: f64) -> Appro
     approach(ship, target, ff, STANDOFF_KM, INTERCEPT_BRAKE_FRACTION * max_accel, max_accel)
 }
 
+/// Keep a margin outside the selected threat envelope, or well inside beams.
+pub fn combat_range(standoff:bool,has_lrm:bool)->f64 {
+    if !standoff {weapon_standoff(crate::missile::Payload::Beam)}
+    else if has_lrm {1.15*crate::missile::Payload::Kinetic.engagement_range()}
+    else {1.15*crate::params::SHIP_BEAM_AUTO_RANGE_LS.value*crate::units::LIGHT_SECOND}
+}
+/// A quiet station-keeping band prevents small track corrections from switching
+/// between inward and outward burns. Velocity matching and early braking remain.
+pub fn combat_approach(ship:State,target:State,ff:Vec2,range:f64,max_accel:f64)->Approach {
+    let actual=(target.pos-ship.pos).length();
+    let error=actual-range;
+    let band=range*0.03;
+    // Continuous soft deadband: no step in the commanded destination at its edge.
+    let quiet_error=error.signum()*(error.abs()-band).max(0.0);
+    let mut result=keep_range(ship,target,ff,actual-quiet_error,max_accel);
+    result.gap=quiet_error;
+    result
+}
+
 pub fn keep_range(ship:State,target:State,ff:Vec2,range:f64,max_accel:f64)->Approach {
     // Hostile acceleration is a delayed, filtered estimate. Two ships mirroring
     // it at unity gain can sustain alternating full burns forever at standoff.
@@ -539,4 +558,39 @@ mod tests {
         assert!(!a.active);
     }
 
+}
+
+#[cfg(test)]
+mod combat_range_tests {
+    use super::*;
+    use crate::units::{LIGHT_SECOND,G0};
+    #[test]
+    fn close_brakes_without_crossing_target_and_settles_quietly() {
+        let target=State {pos:Vec2::ZERO,vel:Vec2::ZERO};
+        let desired=combat_range(false,false);
+        for speed in [0.0,500.0,2000.0] {
+            let mut ship=State {pos:Vec2::new(-50.0*LIGHT_SECOND,0.0),vel:Vec2::new(speed,0.0)};
+            let mut nearest=f64::INFINITY;
+            for _ in 0..21600 {
+                let a=combat_approach(ship,target,Vec2::ZERO,desired,100.0*G0);
+                ship.vel=ship.vel+a.thrust;ship.pos=ship.pos+ship.vel;
+                nearest=nearest.min(ship.pos.length());
+            }
+            assert!(nearest>desired*0.9,"overshoot at {speed}: {nearest}");
+            assert!((ship.pos.length()-desired).abs()<desired*0.031);
+            assert!(ship.vel.length()<0.01);
+        }
+    }
+    #[test]
+    fn station_band_ignores_small_position_noise_but_brakes_relative_motion() {
+        let range=combat_range(true,false);
+        for fraction in [0.98,1.0,1.02] {
+            let ship=State {pos:Vec2::ZERO,vel:Vec2::ZERO};
+            let target=State {pos:Vec2::new(range*fraction,0.0),vel:Vec2::ZERO};
+            assert_eq!(combat_approach(ship,target,Vec2::ZERO,range,G0).thrust,Vec2::ZERO);
+            assert!(combat_approach(State {vel:Vec2::new(10.0,0.0),..ship},target,Vec2::ZERO,range,G0).thrust.x<0.0);
+        }
+        assert!(combat_range(true,true)>crate::missile::Payload::Kinetic.engagement_range());
+        assert!(range>crate::params::SHIP_BEAM_AUTO_RANGE_LS.value*LIGHT_SECOND);
+    }
 }

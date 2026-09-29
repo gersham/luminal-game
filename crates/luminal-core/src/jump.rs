@@ -1,7 +1,8 @@
 //! Jump is the sole FTL exception. Transit has no normal-space trajectory.
 use super::*;
 
-pub const SPOOL_SECONDS:f64=600.0;
+pub const SPOOL_SECONDS:f64=3600.0;
+pub const RECOVERY_SECONDS:f64=6.0*3600.0;
 pub const MAX_SOL_RADIUS_AU:f64=50.0;
 pub const SPEED_AU_PER_SECOND:f64=1.0;
 /// Sustained spool input is four times class-rated full-thrust heat.
@@ -37,6 +38,7 @@ impl World {
         let b=self.live_body_mut(id)?;
         if b.kind!=BodyKind::Ship || !b.ship_class.is_some_and(ShipClass::has_jump_drive) {return Err(OrderError::JumpUnavailable);}
         if b.operating_effectiveness(crate::damage::System::Jump)<=0.0 {return Err(OrderError::JumpUnavailable);}
+        if t<b.jump_ready_at {return Err(OrderError::JumpRecovering);}
         b.advance_thermal(t);
         b.jump=Some(JumpState::Spooling {destination,depart_at:t+SPOOL_SECONDS});
         b.commanded=Vec2::ZERO;b.autopilot=None;b.route=None;
@@ -92,6 +94,7 @@ impl World {
         b.advance_thermal(at);
         b.trajectory.jump_arrival(at,State {pos:destination,vel:velocity});
         b.jump=None;
+        b.jump_ready_at=at+RECOVERY_SECONDS;
         b.thermal.add_waste_heat(SHIP_HEAT_LIMIT_J*b.thermal.capacity_scale*ARRIVAL_HEAT_FRACTION);
         b.thermal.field=0.0;
         self.announce_ship_event(id,CombatKind::JumpArrival);
@@ -119,6 +122,16 @@ mod tests {
         let mut world=World::new(system,vec![BodySpec {name:"Jumper".into(),kind:BodyKind::Ship,faction:FactionId(0),state:State {pos:Vec2::new(AU,0.0),vel:Vec2::new(2.0,3.0)},thrust:Vec2::ZERO,magazine:4}],0.0,42);
         let b=&mut world.bodies[0];b.ship_class=Some(class);b.controllable=true;b.thermal.capacity_scale=class.scale();
         world
+    }
+    #[test]
+    fn recovery_blocks_spooling_until_expiry_and_cancel_does_not_spend_it() {
+        let mut w=fixture(ShipClass::Destroyer);let id=BodyId(0);let destination=Vec2::new(2.0*AU,0.0);
+        w.bodies[0].jump_ready_at=10.0;
+        assert_eq!(w.start_jump(id,destination),Err(OrderError::JumpRecovering));
+        assert!(w.bodies[0].jump.is_none());
+        w.advance_to(10.0);w.start_jump(id,destination).unwrap();
+        w.cancel_jump(id).unwrap();w.start_jump(id,destination).unwrap();
+        assert_eq!(w.bodies[0].jump_ready_at,10.0);
     }
     #[test]
     fn eligibility_and_radius_are_enforced_in_core() {
@@ -150,7 +163,7 @@ mod tests {
             w.update_system_controls(id);
             assert!(w.bodies[0].jump.is_none());
             assert_eq!(w.bodies[0].thermal.field,0.0);
-            w.advance_to(610.0);
+            w.advance_to(SPOOL_SECONDS+10.0);
             assert!(w.bodies[0].trajectory.jump_gaps().is_empty(),"stale departure must not execute");
             w.bodies[0].damage.systems[system as usize]=Condition::Intact;
             assert!(w.start_jump(id,Vec2::new(3.0*AU,0.0)).is_ok());
@@ -179,24 +192,26 @@ mod tests {
         assert_eq!(w.bodies[0].thermal.field,0.0);assert!(w.bodies[0].screen_up);
         w.advance_to(31.0);w.bodies[0].advance_thermal(31.0);
         assert!(w.bodies[0].thermal.field>0.0 && w.bodies[0].thermal.field<1.0);
-        w.advance_to(610.0);assert!(w.bodies[0].jump.is_none());assert!(w.bodies[0].trajectory.jump_gaps().is_empty());
+        w.advance_to(SPOOL_SECONDS+10.0);assert!(w.bodies[0].jump.is_none());assert!(w.bodies[0].trajectory.jump_gaps().is_empty());
     }
     #[test]
     fn exact_spool_transit_velocity_heat_and_history_survive_large_warp() {
         for class in [ShipClass::Destroyer,ShipClass::Cruiser,ShipClass::Battleship] {
             let mut w=fixture(class);let id=BodyId(0);let destination=Vec2::new(-4.0*AU,0.0);
             let velocity=w.state(id,0.0).unwrap().vel;
-            w.start_jump(id,destination).unwrap();w.advance_to(599.999);
+            w.start_jump(id,destination).unwrap();w.advance_to(SPOOL_SECONDS-0.001);
             assert!(matches!(w.bodies[0].jump,Some(JumpState::Spooling {..})));
-            w.advance_to(600.0);
+            w.advance_to(SPOOL_SECONDS);
             let Some(JumpState::Transit {origin,arrive_at,..})=w.bodies[0].jump else {panic!("expected transit")};
-            assert!((arrive_at-600.0-(destination-origin).length()/AU).abs()<1e-9);
-            assert!(w.state(id,600.0).is_none());assert_eq!(w.cancel_jump(id),Err(OrderError::JumpBusy));
+            assert!((arrive_at-SPOOL_SECONDS-(destination-origin).length()/AU).abs()<1e-9);
+            assert!(w.state(id,SPOOL_SECONDS).is_none());assert_eq!(w.cancel_jump(id),Err(OrderError::JumpBusy));
             w.advance_to(arrive_at);
             let state=w.state(id,arrive_at).unwrap();assert_eq!(state.pos,destination);assert_eq!(state.vel,velocity);
             assert!(w.bodies[0].thermal.heat_fraction()>=ARRIVAL_HEAT_FRACTION);
             assert!(w.losses.is_empty(),"jump path must not collide with Sol");
-            assert!(w.state(id,599.0).is_some());assert!(w.state(id,601.0).is_none());
+            assert_eq!(w.bodies[0].jump_ready_at,arrive_at+RECOVERY_SECONDS);
+            assert_eq!(w.start_jump(id,destination),Err(OrderError::JumpRecovering));
+            assert!(w.state(id,599.0).is_some());assert!(w.state(id,SPOOL_SECONDS+1.0).is_none());
             w.advance_to(arrive_at+1000.0);
             assert!(w.losses.is_empty());assert_eq!(w.state(id,w.time).unwrap().vel,velocity);
         }
@@ -205,10 +220,10 @@ mod tests {
     fn cancelled_spool_timer_cannot_fire_a_later_jump_early() {
         let mut w=fixture(ShipClass::Destroyer);let id=BodyId(0);
         w.start_jump(id,Vec2::new(3.0*AU,0.0)).unwrap();w.advance_to(100.0);w.cancel_jump(id).unwrap();
-        w.start_jump(id,Vec2::new(-3.0*AU,0.0)).unwrap();w.advance_to(600.0);
-        assert!(matches!(w.bodies[0].jump,Some(JumpState::Spooling {depart_at:700.0,..})));
+        w.start_jump(id,Vec2::new(-3.0*AU,0.0)).unwrap();w.advance_to(SPOOL_SECONDS);
+        assert!(matches!(w.bodies[0].jump,Some(JumpState::Spooling {depart_at,..}) if depart_at==SPOOL_SECONDS+100.0));
         assert!(w.bodies[0].trajectory.jump_gaps().is_empty());
-        w.advance_to(700.0);assert!(matches!(w.bodies[0].jump,Some(JumpState::Transit {..})));
+        w.advance_to(SPOOL_SECONDS+100.0);assert!(matches!(w.bodies[0].jump,Some(JumpState::Transit {..})));
     }
 
     #[test]
@@ -216,7 +231,7 @@ mod tests {
         let mut session=LocalSession::new(fixture(ShipClass::Destroyer));
         let role=Role::Faction(FactionId(0));let body=BodyId(0);
         session.command(role,Command::Jump {body,destination:Vec2::new(40.0*AU,0.0)}).unwrap();
-        session.command(role,Command::SetPaused(false)).unwrap();session.tick(601.0);
+        session.command(role,Command::SetPaused(false)).unwrap();session.tick(SPOOL_SECONDS+1.0);
         let view=session.view(role);
         assert!(matches!(view.bodies[0].jump,Some(JumpState::Transit {..})));
         assert_eq!(view.bodies[0].vel,Vec2::new(2.0,3.0));

@@ -337,6 +337,7 @@ impl World {
             Command::SetScreen { body, up } => self.set_screen(body, up),
             Command::SetSystemMode {body,system,mode}=>self.set_system_mode(body,system,mode),
             Command::Ping { body } => if self.ping(body) { Ok(()) } else { Err(OrderError::Destroyed) },
+            Command::CombatRange {body,target,standoff}=>self.set_combat_range(body,target,standoff),
             Command::KeepRange {body,target,range}=>self.set_tactical_range(body,target,Some(range)),
             Command::Evade {body,target}=>self.set_tactical_range(body,target,None),
             Command::SetWarp(_) | Command::SetPaused(_) => Ok(()),

@@ -30,7 +30,7 @@ impl JumpEffects {
         let mut spools=Vec::new();
         for b in &view.bodies {
             if let Some(JumpState::Spooling {depart_at,..})=b.jump {
-                spools.push((b.pos,1.0-((depart_at-view.time)/600.0).clamp(0.0,1.0) as f32));
+                spools.push((b.pos,1.0-((depart_at-view.time)/luminal_core::world::jump::SPOOL_SECONDS).clamp(0.0,1.0) as f32));
             }
         }
         // Arrival can be seen before departure because jump is FTL. Fold by
@@ -40,8 +40,8 @@ impl JumpEffects {
             if latest.get(&c).is_none_or(|old|e.emitted_at>=old.emitted_at) {latest.insert(c,e);}
         }}
         for (id,e) in latest {
-            if e.kind==CombatKind::JumpSpool && view.time-e.received_at<600.0 && let Some(pos)=view.contacts.iter().find(|c|c.id==id).and_then(|c|c.track.as_ref()).map(|t|t.pos) {
-                spools.push((pos,((view.time-e.received_at)/600.0).clamp(0.0,1.0) as f32));
+            if e.kind==CombatKind::JumpSpool && view.time-e.received_at<luminal_core::world::jump::SPOOL_SECONDS && let Some(pos)=view.contacts.iter().find(|c|c.id==id).and_then(|c|c.track.as_ref()).map(|t|t.pos) {
+                spools.push((pos,((view.time-e.received_at)/luminal_core::world::jump::SPOOL_SECONDS).clamp(0.0,1.0) as f32));
             }
         }
         for (pos,progress) in spools {

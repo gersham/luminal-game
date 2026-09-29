@@ -46,6 +46,7 @@ pub enum Command {
     /// Close at maximum thrust and fly through, retaining velocity.
     Flyby { body: BodyId, target: InterceptTarget },
     KeepRange {body:BodyId,target:InterceptTarget,range:f64},
+    CombatRange {body:BodyId,target:InterceptTarget,standoff:bool},
     Evade {body:BodyId,target:InterceptTarget},
     /// Fly to a point in minimal time (burn, flip, brake) and stop there.
     MoveTo { body: BodyId, point: Vec2 },
@@ -74,6 +75,7 @@ pub enum Command {
 #[derive(Clone, Debug, PartialEq)]
 pub enum Rejection {
     JumpUnavailable,
+    JumpRecovering,
     JumpBusy,
     PowerOrHeat,
     UnknownBody,
@@ -95,7 +97,7 @@ impl Command {
     pub fn body(&self) -> Option<BodyId> {
         match *self {
             Self::SetBeamMode {body,..} | Self::Withdraw {body} | Self::Surrender {body} | Self::SetRepairGoal {body,..} | Self::Jump {body,..} | Self::CancelJump {body} | Self::Alongside {body,..} | Self::Follow {body,..} | Self::SetThrust { body, .. } | Self::Orbit { body, .. } | Self::Intercept { body, .. }
-            | Self::AppendWaypoint {body,..} | Self::Flyby { body, .. } | Self::KeepRange {body,..} | Self::Evade {body,..} | Self::MoveTo { body, .. } | Self::AllStop { body }
+            | Self::AppendWaypoint {body,..} | Self::Flyby { body, .. } | Self::CombatRange {body,..} | Self::KeepRange {body,..} | Self::Evade {body,..} | Self::MoveTo { body, .. } | Self::AllStop { body }
             | Self::SetDriveLimit { body, .. } | Self::Launch { body, .. } | Self::FireBeam { body, .. }
             | Self::SetHeatDump {body,..} | Self::Ping { body } | Self::EngageBeam { body, .. } | Self::SetScreen { body, .. } | Self::SetSystemMode {body,..}
             | Self::CancelLaunches { body } | Self::DeployProbe {body,..} | Self::ArmBeams { body } => Some(body),
@@ -108,6 +110,7 @@ impl From<OrderError> for Rejection {
     fn from(e: OrderError) -> Self {
         match e {
             OrderError::JumpUnavailable=>Rejection::JumpUnavailable,
+            OrderError::JumpRecovering=>Rejection::JumpRecovering,
             OrderError::JumpBusy=>Rejection::JumpBusy,
             OrderError::PowerOrHeat => Rejection::PowerOrHeat,
             OrderError::Destroyed => Rejection::Destroyed,
@@ -129,6 +132,7 @@ pub struct BodyView {
     pub display_class:Option<String>,
     pub withdrawing:bool,
     pub jump:Option<crate::world::jump::JumpState>,
+    pub jump_ready_at:f64,
     pub ship_class:Option<crate::world::ShipClass>,
     pub heading:Vec2,
     pub spinal_ready_at:f64,
@@ -439,6 +443,7 @@ impl LocalSession {
     fn execute_command(&mut self, role: Role, cmd: Command) -> Result<(), Rejection> {
         if let Some(body) = cmd.body() {
             let kind = self.owned(role, body)?;
+            if matches!(cmd,Command::Withdraw {..}) && matches!(role,Role::Faction(_)) && (self.world.objective.as_ref().is_some_and(|o|o.player==Some(body)) || self.world.body(body).is_some_and(|b|b.controllable && !self.bots.contains_key(&b.faction))) {return Err(Rejection::InvalidTarget);}
             if let Command::SetThrust { thrust, .. } = &cmd {
                 let max_g = if kind == BodyKind::Ship { self.world.body(body).and_then(|b|b.ship_class).map_or(120.0,|c|c.max_g()) } else { params::PROBE_MAX_ACCEL_G.value };
                 if thrust.length() / G0 > max_g * (1.0 + 1e-9) { return Err(Rejection::ExceedsMaxAccel { requested_g: thrust.length()/G0, max_g }); }
@@ -459,6 +464,7 @@ impl LocalSession {
             Command::SetPaused(p) => {self.cancel_event_wait();self.paused = p;},
             Command::SetThrust { body, thrust } => {
                 let kind = self.owned(role, body)?;
+            if matches!(cmd,Command::Withdraw {..}) && matches!(role,Role::Faction(_)) && (self.world.objective.as_ref().is_some_and(|o|o.player==Some(body)) || self.world.body(body).is_some_and(|b|b.controllable && !self.bots.contains_key(&b.faction))) {return Err(Rejection::InvalidTarget);}
                 let max_g = match kind {
                     BodyKind::Ship => self.world.body(body).and_then(|b|b.ship_class).map_or(120.0,|c|c.max_g()),
                     BodyKind::Station => 0.0,
@@ -485,6 +491,7 @@ impl LocalSession {
                 self.owned(role, body)?;
                 self.world.set_flyby(body, target)?;
             }
+            Command::CombatRange {body,target,standoff}=>self.world.set_combat_range(body,target,standoff)?,
             Command::KeepRange {body,target,range}=>{self.owned(role,body)?;self.world.set_tactical_range(body,target,Some(range))?;}
             Command::Evade {body,target}=>{self.owned(role,body)?;self.world.set_tactical_range(body,target,None)?;}
             Command::AppendWaypoint {body,point}=>{self.owned(role,body)?;self.world.append_waypoint(body,point)?;}
@@ -565,7 +572,7 @@ impl LocalSession {
         let target=b.missile.map(|m|InterceptTarget::Contact(m.target))
             .or(b.beam_target.map(InterceptTarget::Contact))
             .or_else(||b.autopilot.and_then(|ap|match ap.order {
-                Order::Intercept(t)|Order::Flyby(t)|Order::KeepRange(t,_)|Order::Evade(t)=>Some(t),
+                Order::Intercept(t)|Order::Flyby(t)|Order::KeepRange(t,_)|Order::CombatRange(t,_)|Order::Evade(t)=>Some(t),
                 Order::Alongside {target,..}=>Some(InterceptTarget::Contact(target)),
                 Order::Follow {target,..}=>Some(InterceptTarget::Own(target)),
                 _=>None,
@@ -599,7 +606,7 @@ impl LocalSession {
                 let known;
                 let b = if let Role::Faction(f) = role { known = w.known_body(f, BodyId(i as u32))?; &known } else { b };
                 let s = b.trajectory.state_at(t).or_else(||b.jump.and_then(|jump|jump.display_state(t)))?;
-                Some(BodyView {withdrawing:b.withdrawing,jump:b.jump,beam_solutions:if b.controllable && b.kind==BodyKind::Ship {
+                Some(BodyView {withdrawing:b.withdrawing,jump:b.jump,jump_ready_at:b.jump_ready_at,beam_solutions:if b.controllable && b.kind==BodyKind::Ship {
                     w.received_picture(BodyId(i as u32)).into_iter().flat_map(|p|p.contacts.keys())
                         .filter_map(|c|w.beam_solution(BodyId(i as u32),*c).map(|s|(*c,s))).collect()
                 } else {BTreeMap::new()},ship_class:b.ship_class,heading:b.heading_at(t),spinal_ready_at:b.spinal_ready_at,
