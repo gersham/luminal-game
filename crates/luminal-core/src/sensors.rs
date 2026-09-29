@@ -57,7 +57,9 @@ pub fn ship_detection_ew(suite:SensorSuite,effectiveness:[f64;2],active:f64,ef:f
     let ping=if suite.active {active.max(0.0)} else {0.0};
     let locating=passive.max(ping);
     let resolution_factor=resolution_factor.clamp(0.5,1.0);
-    if locating>0.0 && range<=identity*locating*resolution_factor {Identity}
+    // At close combat range, an operational ranging sensor identifies the hull
+    // despite a cold signature or jamming. Longer-range identity still scales.
+    if locating>0.0 && range<=(identity*locating*resolution_factor).max(crate::missile::Payload::Kinetic.engagement_range()) {Identity}
     else if (passive>0.0 && range<=resolved*passive*resolution_factor)
         || (ping>0.0 && range<=ping_resolved_range(ef)*ping*resolution_factor) {Resolved}
     else if (passive>0.0 && range<=approximate*passive) || (ping>0.0 && range<=ping_range(ef)*ping*resolution_factor) {Approximate}
@@ -281,7 +283,7 @@ mod tests {
         for ef in [0.5,1.0,1.4,2.0] {
             for (range,expected) in [(0.1,Identity),(0.101,Resolved),(1.0,Resolved),
                 (1.001,Approximate),(5.0,Approximate),(5.001,Bearing),(20.0,Bearing),(20.001,None)] {
-                assert_eq!(ship_detection(SensorSuite::FULL,[1.0,1.0],0.0,ef,range*ef*au,true),expected);
+                assert_eq!(ship_detection(SensorSuite::FULL,[1.0,1.0],0.0,ef,range*ef*au,true),if range*ef<=0.14 {Identity} else {expected});
             }
         }
         for (range,expected) in [(0.099,Identity),(0.999,Resolved),(1.001,Resolved),(2.001,Approximate),(4.999,Approximate),(5.001,Bearing)] {
@@ -293,6 +295,17 @@ mod tests {
             assert_eq!(ship_detection_ew(SensorSuite::FULL,[1.0,1.0],1.0,ef,range*au,true,resolution_factor(100.0,50.0)),expected);
         }
     }
+    #[test]
+    fn operational_sensors_identify_cold_jamming_ships_inside_srm_range() {
+        use DetectionLevel::*;
+        let range=crate::missile::Payload::Kinetic.engagement_range();
+        for (passive,active) in [(0.8,0.0),(0.0,0.8),(0.5,0.0)] {
+            assert_eq!(ship_detection_ew(SensorSuite::FULL,[passive,0.0],active,0.35,range,false,0.5),Identity);
+            assert_ne!(ship_detection_ew(SensorSuite::FULL,[passive,0.0],active,0.35,range+1.0,false,0.5),Identity);
+        }
+        assert_eq!(ship_detection_ew(SensorSuite::FULL,[0.0,1.0],0.0,0.35,range,false,0.5),None);
+    }
+
     #[test] fn ef_ranges_activity_damage_and_ping_identity() {
         use DetectionLevel::*;
         let cold=EmissivityFactors {visibility_multiplier:1.0,thrust_percent:0.0,heat_multiplier:1.0,size:7.0,stealth:50.0,ecm_on:false,recent_missiles:false,recent_beams:false};

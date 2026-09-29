@@ -65,6 +65,8 @@ not instantaneous speeds; ordinary flight remains relativistic.
 SRMs and terminal LRMs are always resolved. An LRM acquired during boost stays
 tracked during cruise. Otherwise its cold cruise is difficult to acquire, so
 interceptors may have no target until a ping or terminal acquisition reveals it.
+Operational passive or active sensors identify ships inside the 0.14 AU SRM
+envelope regardless of cold signature or ECM; reports still obey light delay.
 Pings automatically resolve LRMs within their effective detection radius once
 the echo returns, and extend ship resolution from 1 AU to 2 AU at full sensor
 strength. A fresh resolved ship/station echo supplies missile fire control:
@@ -100,7 +102,8 @@ and 5% of emitted energy expected to couple, with transverse aim uncertainty
 no wider than twice the beam radius. Coupling tapers smoothly from 6 to 10 LS, reaching zero at 10 LS.
 Explicit directed fire beyond that wastes heat and power. Spinal mounts retain their separate 60 LS envelope. Emission footprints and point-defence rings are no longer drawn.
 Weapon circles use thin yellow dots. When their on-screen radius exceeds 320 px
-(and at least six label widths), small interior labels repeat every 30 degrees. Ship forecasts fade toward their endpoints;
+(and at least six label widths), small interior labels repeat every 30 degrees, curve along the circumference,
+face inward, and use 50% alpha. Ship forecasts fade toward their endpoints;
 red dashed target links show separation in LS or AU. Observed missile and
 interceptor hits bloom red, while misses fade out over one real-time second.
 Missed rounds keep coasting during the fade at their last received velocity and

@@ -2790,17 +2790,25 @@ fn draw_weapon_ranges(painter:&egui::Painter,cam:&Camera,rect:Rect,ship:&BodyVie
         let farthest=[clip.left_top(),clip.right_top(),clip.left_bottom(),clip.right_bottom()]
             .into_iter().map(|p|p.distance(center)).fold(0.0_f32,f32::max);
         if radius<nearest || radius>farthest {continue;}
-        let label=painter.layout_no_wrap(format!("{label} RANGE"),mono(9.0),color.gamma_multiply(0.55));
-        // Only annotate a zoomed-in boundary. The text must remain small relative
-        // to the radius, and its entire rectangle sits inside the circle.
-        if radius>=320.0_f32.max(label.size().x*6.0) {
+        let label_color=Color32::from_rgba_unmultiplied(color.r(),color.g(),color.b(),128);
+        let glyphs:Vec<_>=format!("{label} RANGE").chars().map(|c|
+            painter.layout_no_wrap(c.to_string(),mono(9.0),label_color)).collect();
+        let width:f32=glyphs.iter().map(|g|g.size().x).sum();
+        // Letter centers follow the arc. Counterclockwise reading keeps the
+        // tops inward, deliberately leaving labels on the far side upside down.
+        if radius>=320.0_f32.max(width*6.0) {
+            let text_radius=radius-14.0;
             for i in 0..12 {
-                let angle=std::f32::consts::TAU*i as f32/12.0;
-                let direction=EVec2::new(angle.cos(),angle.sin());
-                let inset=8.0+0.5*label.size().length();
-                let at=center+direction*(radius-inset)-label.size()*0.5;
-                if clip.intersects(Rect::from_min_size(at,label.size())) {
-                    painter.galley(at,label.clone(),color.gamma_multiply(0.55));
+                let anchor=std::f32::consts::TAU*i as f32/12.0;
+                let mut offset=-width*0.5;
+                for glyph in &glyphs {
+                    let angle=anchor-(offset+glyph.size().x*0.5)/text_radius;
+                    let at=center+EVec2::new(angle.cos(),angle.sin())*text_radius;
+                    if clip.expand(glyph.size().length()).contains(at) {
+                        painter.add(egui::epaint::TextShape::new(at-glyph.size()*0.5,glyph.clone(),label_color)
+                            .with_angle_and_anchor(angle-std::f32::consts::FRAC_PI_2,egui::Align2::CENTER_CENTER));
+                    }
+                    offset+=glyph.size().x;
                 }
             }
         }

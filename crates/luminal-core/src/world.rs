@@ -3383,7 +3383,7 @@ mod tests {
     fn one_ping_uses_resolution_tiers_within_its_detection_envelope() {
         use sensors::DetectionLevel as D;
         for seed in 0..4 {
-            for (range,level) in [(0.06*AU,D::Identity),(0.69*AU,D::Resolved),(0.71*AU,D::Resolved),(1.99*AU,D::Resolved),(2.01*AU,D::Approximate),(4.99*AU,D::Approximate),(5.01*AU,D::None)] {
+            for (range,level) in [(0.06*AU,D::Identity),(0.139*AU,D::Identity),(0.141*AU,D::Resolved),(0.69*AU,D::Resolved),(0.71*AU,D::Resolved),(1.99*AU,D::Resolved),(2.01*AU,D::Approximate),(4.99*AU,D::Approximate),(5.01*AU,D::None)] {
                 let base=Vec2::new(20.0*AU,0.0);
                 let mut w=World::new(sun(),vec![
                     ship("Pinger",0,base,Vec2::ZERO,Vec2::ZERO),
