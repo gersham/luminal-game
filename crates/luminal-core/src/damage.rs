@@ -87,7 +87,9 @@ impl Damage {
         let soaked=(points*0.5).min(self.armour);
         self.armour-=soaked;
         self.hull=(self.hull-(points-soaked)).max(0.0);
-        if points<self.hull_max*CRITICAL_MIN_HULL_FRACTION || rng.uniform()>=self.system_hit_chance() {return None;}
+        let scale=points/(self.hull_max.max(1e-9)*CRITICAL_MIN_HULL_FRACTION);
+        let chance=1.0-(1.0-self.system_hit_chance()).powf(scale);
+        if points<=0.0 || rng.uniform()>=chance {return None;}
         self.hit_system(installed,rng)
     }
     pub fn hit_system(&mut self,installed:&[bool;16],rng:&mut Rng)->Option<System> {
@@ -233,11 +235,16 @@ mod tests {
         assert!((3800..4200).contains(&hits),"{hits}/20000");
         assert_eq!(MISSILE_SCREEN_LEAK_CHANCE,0.35);
     }
-    #[test] fn grazing_hits_cannot_destroy_subsystems() {
-        let mut d=Damage {hull:8000.0,hull_max:8000.0,armour:6000.0,..Default::default()};
+    #[test] fn subthreshold_beams_can_damage_systems_but_grazes_are_rare() {
         let mut rng=Rng::new(91);
-        for _ in 0..10_000 {assert!(d.penetrate(1.05e11,&[true;16],&mut rng).is_none());}
-        assert!(d.systems.iter().all(|s|*s==Condition::Intact));
+        for (fraction,expected) in [(0.00001,0.000223),(0.005,0.105573),(0.01,0.2),(0.02,0.36)] {
+            let hits=(0..100_000).filter(|_| {
+                let mut d=Damage {hull:4000.0,hull_max:4000.0,armour:0.0,..Default::default()};
+                d.penetrate(fraction*4000.0*JOULES_PER_HP,&[true;16],&mut rng).is_some()
+            }).count();
+            assert!((hits as f64/100_000.0-expected).abs()<0.005,"{fraction}: {hits}");
+        }
+        assert!(Damage::default().penetrate(0.0,&[true;16],&mut rng).is_none());
     }
     #[test] fn propulsion_has_double_weight_and_power_has_normal_weight() {
         let mut rng=Rng::new(42);

@@ -76,6 +76,8 @@ pub enum Order {
     Route,
     /// Join a friendly at a fixed formation offset, then mirror its acceleration.
     Follow { target: BodyId, offset: Vec2 },
+    /// Match a sensor contact at a fixed one-light-second formation offset.
+    Alongside { target: ContactId, offset: Vec2 },
     /// Circular orbit of `radius` km about celestial body `celestial`, in `sense`
     /// (+1 counter-clockwise, −1 clockwise).
     Orbit { celestial: usize, radius: f64, sense: f64 },
@@ -714,6 +716,24 @@ impl World {
         Ok(())
     }
 
+    pub fn set_alongside(&mut self,id:BodyId,target:InterceptTarget)->Result<(),OrderError> {
+        let InterceptTarget::Contact(contact)=target else {
+            let InterceptTarget::Own(other)=target else {unreachable!()};
+            return self.set_follow(id,other);
+        };
+        self.live_body_mut(id)?;
+        let tr=self.received_picture(id).and_then(|p|p.contacts.get(&contact))
+            .and_then(|c|c.estimate(self.time,&self.system)).ok_or(OrderError::NoTrack)?.at(self.time,&self.system);
+        let own=self.state(id,self.time).ok_or(OrderError::Destroyed)?;
+        let heading=if tr.vel().length()>0.01 {tr.vel().normalized()} else {Vec2::new(0.0,1.0)};
+        let mut side=Vec2::new(-heading.y,heading.x);
+        if (own.pos-tr.pos()).dot(side)<0.0 {side = -side;}
+        let body=self.live_body_mut(id)?;
+        body.drive_limit=f64::INFINITY;
+        body.autopilot=Some(Autopilot {order:Order::Alongside {target:contact,offset:side*crate::units::LIGHT_SECOND},status:AutopilotStatus::Manoeuvring});
+        self.guide(id);Ok(())
+    }
+
     pub fn set_flyby(&mut self, id: BodyId, target: InterceptTarget) -> Result<(), OrderError> {
         self.set_ship_approach(id, target, false)
     }
@@ -1220,6 +1240,17 @@ impl World {
                     None=>(Vec2::ZERO,Some(AutopilotStatus::NoTrack)),
                 }
             },
+            Some(Order::Alongside {target,offset})=>{
+                match self.received_picture(id).and_then(|p|p.contacts.get(&target))
+                    .and_then(|c|c.estimate(t,&self.system)).map(|tr|tr.at(t,&self.system)) {
+                    Some(tr)=>{
+                        let approach=autopilot::move_to(s,State {pos:tr.pos()+offset,vel:tr.vel()},tr.accel()-self.system.gravity(s.pos,t),limit);
+                        let holding=approach.gap.abs()<0.01*crate::units::LIGHT_SECOND && approach.rel_speed<1.0;
+                        (approach.thrust,Some(if holding {AutopilotStatus::Holding} else {AutopilotStatus::Closing {eta:approach.eta,range:approach.gap}}))
+                    },
+                    None=>(Vec2::ZERO,Some(AutopilotStatus::NoTrack)),
+                }
+            },
             Some(Order::Route) if b.autopilot.is_some_and(|a|a.status==AutopilotStatus::Passed)=>
                 (Vec2::ZERO,Some(AutopilotStatus::Passed)),
             Some(Order::Route)=>{
@@ -1294,7 +1325,7 @@ impl World {
         };
         // Routine acceleration preserves thermal headroom for braking and defence.
         // Flyby and Evade deliberately use every currently available g.
-        if !automatic_evasion && !b.controls.transport_alerted && b.autopilot.is_some_and(|ap|!matches!(ap.order,Order::Flyby(_)|Order::Evade(_)|Order::Follow {..})) && desired.dot(s.vel)>0.0 {
+        if !automatic_evasion && !b.controls.transport_alerted && b.autopilot.is_some_and(|ap|!matches!(ap.order,Order::Flyby(_)|Order::Evade(_)|Order::Follow {..}|Order::Alongside {..})) && desired.dot(s.vel)>0.0 {
             let reserve=1.0-0.5*((b.thermal.heat_fraction()-0.5)/0.3).clamp(0.0,1.0);
             let cap=b.unheated_max_accel()*reserve;
             if desired.length()>cap {desired=desired.normalized()*cap;}
@@ -2198,6 +2229,27 @@ mod tests {
             snr: 1e9, source: Source::Echo,
         }, &w.system);
         (w, c)
+    }
+
+    #[test]
+    fn enemy_alongside_uses_sensor_estimate_and_coasts_without_track() {
+        let (mut w,c)=beam_trial();
+        let pos=w.state(BodyId(0),w.time).unwrap().pos+Vec2::new(0.0,LIGHT_SECOND);
+        w.bodies[0].trajectory=crate::kinematics::Trajectory::new(w.time,State {pos,vel:Vec2::ZERO});
+        w.set_alongside(BodyId(0),InterceptTarget::Contact(c)).unwrap();
+        let Order::Alongside {target,offset}=w.bodies[0].autopilot.unwrap().order else {panic!("alongside");};
+        assert_eq!(target,c);assert!((offset.length()-LIGHT_SECOND).abs()<1e-6);
+        let thrust=w.bodies[0].trajectory.last().thrust;
+        assert!(thrust.length()>0.0);
+        // Change hidden truth without changing the received track: helm must not notice.
+        w.bodies[1].trajectory=crate::kinematics::Trajectory::new(0.0,State {pos:Vec2::new(100.0*AU,0.0),vel:Vec2::ZERO});
+        w.guide(BodyId(0));
+        assert!((w.bodies[0].trajectory.last().thrust-thrust).length()<1e-9);
+        w.perceptions.get_mut(&FactionId(0)).unwrap().contacts.remove(&c);
+        w.guide(BodyId(0));
+        assert_eq!(w.bodies[0].trajectory.last().thrust,Vec2::ZERO);
+        assert_eq!(w.bodies[0].autopilot.unwrap().status,AutopilotStatus::NoTrack);
+        assert_eq!(w.set_alongside(BodyId(0),InterceptTarget::Contact(ContactId(999))),Err(OrderError::NoTrack));
     }
 
     #[test]

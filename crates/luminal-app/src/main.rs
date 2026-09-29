@@ -689,6 +689,24 @@ mod tests {
     }
 
     #[test]
+    fn targeting_is_sticky_and_never_replaces_movement() {
+        let mut app=LuminalApp::new();let view=app.session.view(Role::Faction(ESCORT));
+        let ship=view.bodies.iter().find(|b|b.id==BodyId(1)).unwrap();
+        let before=ship.autopilot;
+        let target=Selection::Contact(view.contacts[0].id);
+        app.select_object(target,&view);
+        assert!(app.session.view(Role::Faction(ESCORT)).bodies.iter().find(|b|b.id==ship.id).unwrap().autopilot==before);
+        let mut missing=view.clone();missing.contacts.clear();app.acquire_first_target(&missing);
+        assert!(app.inspected==Some(target));
+        app.move_to_ship(ship,InterceptTarget::Own(BodyId(0)));
+        assert!(app.inspected==Some(target));
+        assert!(app.movement_mode==MovementMode::Alongside);
+        app.select_object(Selection::Body(BodyId(0)),&view);
+        app.acquire_first_target(&view);
+        assert!(app.inspected==Some(Selection::Body(BodyId(0))));
+    }
+
+    #[test]
     fn inspecting_targets_and_automatic_ships_preserves_command_selection() {
         let mut app = LuminalApp::new();
         let view = app.session.view(Role::Faction(ESCORT));
@@ -700,7 +718,7 @@ mod tests {
         app.select_object(Selection::Body(BodyId(2)), &truth);
         assert!(app.selected == Some(Selection::Body(BodyId(1))));
         app.select_object(Selection::Body(BodyId(1)), &view);
-        assert!(app.inspected.is_none());
+        assert!(app.inspected==Some(Selection::Body(BodyId(1))));
     }
 }
 /// How far ahead to forecast committed motion, seconds.
@@ -750,6 +768,25 @@ impl ManualFlight {
     }
 }
 
+#[derive(Clone,Copy,PartialEq)]
+enum MovementMode {Alongside,Match,Flyby,Long,Medium,Short,Evade}
+impl MovementMode {
+    fn label(self)->&'static str {match self {Self::Alongside=>"ALONGSIDE",Self::Match=>"INTERCEPT",Self::Flyby=>"FLYBY",Self::Long=>"LRM RANGE",Self::Medium=>"SRM RANGE",Self::Short=>"BEAM RANGE",Self::Evade=>"EVADE"}}
+    fn help(self)->&'static str {match self {Self::Alongside=>"Join at 1 LS, match velocity and mirror observed burn",Self::Match=>"Close and brake to match velocity",Self::Flyby=>"Maximum thrust toward the ship; no braking",Self::Long=>"Approach or withdraw to LRM standoff",Self::Medium=>"Approach or withdraw to SRM standoff",Self::Short=>"Approach or withdraw to beam standoff",Self::Evade=>"Evade incoming missiles until clear"}}
+    fn command(self,body:BodyId,target:InterceptTarget)->Command {match self {
+        Self::Alongside=>Command::Alongside {body,target},Self::Match=>Command::Intercept {body,target},Self::Flyby=>Command::Flyby {body,target},Self::Evade=>Command::Evade {body,target},
+        mode=>Command::KeepRange {body,target,range:weapon_standoff(match mode {Self::Long=>Payload::Nuclear,Self::Medium=>Payload::Kinetic,_=>Payload::Beam})},
+    }}
+    fn of(order:Order)->Option<Self> {match order {
+        Order::Follow {..}|Order::Alongside {..}=>Some(Self::Alongside),Order::Intercept(_)=>Some(Self::Match),Order::Flyby(_)=>Some(Self::Flyby),Order::Evade(_)=>Some(Self::Evade),
+        Order::KeepRange(_,r)=>Some(if r==weapon_standoff(Payload::Nuclear) {Self::Long} else if r==weapon_standoff(Payload::Kinetic) {Self::Medium} else {Self::Short}),_=>None,
+    }}
+}
+fn movement_target(order:Order)->Option<InterceptTarget> {match order {
+    Order::Follow {target,..}=>Some(InterceptTarget::Own(target)),Order::Alongside {target,..}=>Some(InterceptTarget::Contact(target)),
+    Order::Intercept(t)|Order::Flyby(t)|Order::KeepRange(t,_)|Order::Evade(t)=>Some(t),_=>None,
+}}
+
 struct LuminalApp {
     manual_flight:Option<ManualFlight>,
     manual_send_elapsed:f64,
@@ -769,6 +806,8 @@ struct LuminalApp {
     opening_fit: bool,
     selected: Option<Selection>,
     inspected: Option<Selection>,
+    movement_mode: MovementMode,
+    target_chosen: bool,
     last_message: Option<String>,
     payload: Payload,
     dev: DevHooks,
@@ -838,102 +877,61 @@ impl LuminalApp {
             compact_status(ui,target.and_then(|c|c.damage.as_ref()),thrust,target.and_then(|c|c.resolved_class).map(|c|c.max_g()),true);
             compact_systems(ui,"target_deck",systems);
             let ui=&mut columns[4];
-            if let Some(ship)=own && self.navigation_orders(ui,view,ship) {return;}
-            sub_header(ui,"TARGET / ORDERS",None);
-            let mut selected=target.map(|c|c.id);
-            egui::ComboBox::from_id_salt("deck_target").width(ui.available_width()-10.0)
-                .selected_text(target.map(contact_label).unwrap_or("Designate target…".into()))
-                .show_ui(ui,|ui| {for c in &view.contacts {ui.selectable_value(&mut selected,Some(c.id),contact_label(c));}});
-            if let Some(id)=selected && selected!=target.map(|c|c.id) {self.select_object(Selection::Contact(id),view);}
-            let contact=selected.and_then(|id|view.contacts.iter().find(|c|c.id==id));
-            if let Some(c)=contact {
-                if let (Some(ship),Some(track))=(own,c.track.as_ref()) {
-                    ui.label(egui::RichText::new(fmt_distance((track.pos-ship.pos).length())).monospace().size(18.0).color(TEXT_HI));
-                    ui.label(egui::RichText::new(track_quality(c).0).monospace().size(10.0).color(track_quality(c).1));
-                    let sigma=sigma_major(track.cov);
-                    ui.small(format!("Uncertainty ±{}",fmt_distance(2.0*sigma)));
-                }
-                if let Some(ship)=own {
-                    let target=InterceptTarget::Contact(c.id);
-                    let long=weapon_standoff(Payload::Nuclear);
-                    let medium=weapon_standoff(Payload::Kinetic);
-                    let short=weapon_standoff(Payload::Beam);
-                    let buttons=[("MATCH",Command::Intercept {body:ship.id,target},Order::Intercept(target),false),
-                        ("FLYBY",Command::Flyby {body:ship.id,target},Order::Flyby(target),true),
-                        ("LONG · LRM",Command::KeepRange {body:ship.id,target,range:long},Order::KeepRange(target,long),false),
-                        ("MEDIUM · SRM",Command::KeepRange {body:ship.id,target,range:medium},Order::KeepRange(target,medium),false),
-                        ("SHORT · BEAM",Command::KeepRange {body:ship.id,target,range:short},Order::KeepRange(target,short),false),
-                        ("EVADE",Command::Evade {body:ship.id,target},Order::Evade(target),false)];
-                    for pair in buttons.chunks(2) {ui.horizontal(|ui| {
-                        let width=(ui.available_width()-ui.spacing().item_spacing.x)/2.0;
-                        for (label,command,order,needs_range) in pair {
-                            let enabled=!*needs_range || (c.track.is_some() && !c.stale);
-                            let button=tac_button(ui,label,EVec2::new(width,23.0),ACCENT,ship.autopilot.is_some_and(|a|a.order==*order),enabled);
-                            let button=if let Order::KeepRange(_,range)=order {button.on_hover_text(format!("Hold {} · approach or withdraw, then match velocity",fmt_distance(*range)))} else {button};
-                            if button.clicked() {self.command(command.clone());}
-                        }
-                    });}
-                    if c.track.is_none() {ui.small("EVADE: maximum lateral burn against incoming missiles, then coast");}
-                }
-            } else {ui.weak("Select a contact on the map");}
+            if let Some(ship)=own {self.movement_panel(ui,view,ship);}
         });
     }
 
-    fn navigation_orders(&mut self,ui:&mut egui::Ui,view:&View,ship:&BodyView)->bool {
-        let Some(ap)=ship.autopilot else {return false;};
-        if !matches!(ap.order,Order::Follow {..}|Order::Route|Order::MoveTo {..}) {return false;}
-        sub_header(ui,"NAVIGATION / ORDERS",None);
-        match ap.order {
-            Order::Follow {target,offset}=>{
-                ui.label(egui::RichText::new("FOLLOW · ALONGSIDE").color(ACCENT).strong());
-                let mut selected=target;
-                egui::ComboBox::from_id_salt("follow_target").width(ui.available_width()-10.0)
-                    .selected_text(view.bodies.iter().find(|b|b.id==target).map_or("Friendly unavailable",|b|b.name.as_str()))
-                    .show_ui(ui,|ui| {for b in view.bodies.iter().filter(|b|b.faction==ship.faction && b.id!=ship.id && b.kind!=BodyKind::Missile) {
-                        ui.selectable_value(&mut selected,b.id,&b.name);
-                    }});
-                if selected!=target {self.command(Command::Follow {body:ship.id,target:selected});}
-                if let Some(other)=view.bodies.iter().find(|b|b.id==target) {
-                    ui.label(format!("Separation {} / 1 LS",fmt_distance((other.pos-ship.pos).length())));
-                    ui.small(format!("Alongside error {}",fmt_distance((other.pos+offset-ship.pos).length())));
-                    ui.small(format!("Relative speed {}",fmt_speed((other.vel-ship.vel).length())));
-                    ui.small(format!("Friendly burn {:.1}g",other.thrust.length()/G0));
-                }
-            },
-            Order::Route=>{
-                ui.label(egui::RichText::new("WAYPOINT ROUTE").color(ACCENT).strong());
-                if let Some(route)=&ship.route {
-                    let next=(route.progress.floor() as usize+1).min(route.points.len()-1);
-                    let remaining=if ap.status==AutopilotStatus::Passed {0} else {route.points.len()-next};
-                    ui.label(format!("{remaining} points remaining"));
-                    if remaining>0 {ui.small(format!("Next point: {}",fmt_distance((route.points[next]-ship.pos).length())));}
-                }
-                ui.small("Shift+right-click to append points");
-                ui.small("Fly through; coast past the last point");
-            },
-            Order::MoveTo {frame,offset}=>{
-                ui.label(egui::RichText::new("FLY TO DESTINATION").color(ACCENT).strong());
-                let destination=view.celestials[frame].pos+offset;
-                ui.label(format!("{} remaining",fmt_distance((destination-ship.pos).length())));
-                ui.small(format!("Reference: {}",view.celestials[frame].name));
-                ui.small("Brake to rest at destination");
-            },
-            _=>unreachable!(),
-        }
-        if ship.controls.evading {ui.label(egui::RichText::new("AUTO EVADE · WILL RESUME ORDER").color(HEAT).strong());}
-        let status=match ap.status {
-            luminal_core::world::AutopilotStatus::Holding=>if matches!(ap.order,Order::Follow {..}) {"Alongside · matching burn".into()} else {"At destination · holding".into()},
-            luminal_core::world::AutopilotStatus::Closing {eta,..}=>format!("Closing · ETA {}",fmt_time(eta)),
-            luminal_core::world::AutopilotStatus::Passed=>"Route complete · coasting".into(),
-            AutopilotStatus::Manoeuvring=>"Manoeuvring".into(),
-            AutopilotStatus::NoTrack=>"Friendly unavailable · coasting".into(),
+    fn movement_panel(&mut self,ui:&mut egui::Ui,view:&View,ship:&BodyView) {
+        let order=ship.autopilot.map(|a|a.order);
+        let active=order.and_then(MovementMode::of);
+        let target=order.and_then(movement_target);
+        sub_header(ui,"HELM / MOVEMENT",Some(("RIGHT CLICK",ACCENT)));
+        let name=|t:InterceptTarget|match t {
+            InterceptTarget::Own(id)=>view.bodies.iter().find(|b|b.id==id).map_or("Unavailable ship".into(),|b|b.name.clone()),
+            InterceptTarget::Contact(id)=>view.contacts.iter().find(|c|c.id==id).map_or("Lost contact".into(),contact_label),
         };
-        ui.label(egui::RichText::new(status).monospace().color(ACCENT));
-        ui.horizontal(|ui| {
-            if ui.button("Cancel / coast").clicked() {self.command(Command::SetThrust {body:ship.id,thrust:Vec2::ZERO});}
-            if ui.button("All stop").clicked() {self.command(Command::AllStop {body:ship.id});}
+        let title=target.map(name).unwrap_or_else(||match order {
+            Some(Order::Route)=>"WAYPOINT ROUTE".into(),Some(Order::MoveTo {..})=>"MAP DESTINATION".into(),
+            Some(Order::Orbit {celestial,..})=>format!("ORBIT · {}",view.celestials[celestial].name),
+            _=>if ship.thrust.length()>0.001 {"MANUAL THRUST".into()} else {"COASTING".into()},
         });
-        true
+        egui::Frame::new().fill(Color32::from_rgb(12,23,35)).inner_margin(8.0).show(ui,|ui| {
+            ui.set_width(ui.available_width());
+            ui.label(egui::RichText::new(title).monospace().strong().size(14.0).color(TEXT_HI));
+            let status=if ship.controls.evading {"AUTO EVADE · RESUMES ORDER".into()} else {ship.autopilot.map_or("Right-click a ship or destination".into(),|ap|match ap.status {
+                AutopilotStatus::Closing {eta,..}=>format!("CLOSING · ETA {}",fmt_time(eta)),AutopilotStatus::Holding=>"ON STATION · MATCHING".into(),
+                AutopilotStatus::NoTrack=>"TRACK LOST · COASTING".into(),AutopilotStatus::Passed=>"COMPLETE · COASTING".into(),AutopilotStatus::Manoeuvring=>"MANOEUVRING".into(),
+            })};
+            ui.label(egui::RichText::new(status).monospace().size(9.0).color(ACCENT));
+            let pos=target.and_then(|t|match t {InterceptTarget::Own(id)=>view.bodies.iter().find(|b|b.id==id).map(|b|b.pos),InterceptTarget::Contact(id)=>view.contacts.iter().find(|c|c.id==id).and_then(|c|c.track.as_ref()).map(|t|t.pos)})
+                .or_else(||match order {Some(Order::MoveTo {frame,offset})=>Some(view.celestials[frame].pos+offset),_=>None});
+            if let Some(pos)=pos {ui.label(egui::RichText::new(format!("{}  SEPARATION",fmt_distance((pos-ship.pos).length()))).monospace().size(11.0).color(TEXT_MUTED));}
+            if let Some(route)=ship.route.as_ref().filter(|_|matches!(order,Some(Order::Route))) {ui.small(format!("{} waypoints remaining",route.points.len().saturating_sub(route.progress.floor() as usize+1)));}
+        });
+        ui.add_space(5.0);
+        let modes=[MovementMode::Alongside,MovementMode::Match,MovementMode::Flyby,MovementMode::Evade,MovementMode::Long,MovementMode::Medium,MovementMode::Short];
+        for pair in modes.chunks(2) {ui.horizontal(|ui| {
+            let width=(ui.available_width()-ui.spacing().item_spacing.x)/2.0;
+            for &mode in pair {
+                let selected=active==Some(mode);
+                if tac_button(ui,mode.label(),EVec2::new(width,27.0),ACCENT,selected,ship.damage.operating_effectiveness(System::Propulsion)>0.0).on_hover_text(mode.help()).clicked() {
+                    self.movement_mode=mode;
+                    if let Some(target)=target {self.command(mode.command(ship.id,target));}
+                }
+            }
+            if pair.len()==1 && tac_button(ui,"COAST",EVec2::new(width,27.0),ACCENT,order.is_none() && ship.thrust.length()<0.001,true).clicked() {self.command(Command::SetThrust {body:ship.id,thrust:Vec2::ZERO});}
+        });}
+        ui.add_space(4.0);
+        ui.label(egui::RichText::new(active.unwrap_or(self.movement_mode).help()).size(10.0).color(TEXT_MUTED));
+        ui.label(egui::RichText::new("Left click: target   Right click: move
+Shift + right click: extend route").monospace().size(9.0).color(TEXT_MUTED));
+    }
+
+    fn move_to_ship(&mut self,ship:&BodyView,target:InterceptTarget) {
+        let mode=if matches!(target,InterceptTarget::Own(_)) {MovementMode::Alongside}
+            else {ship.autopilot.and_then(|a|MovementMode::of(a.order)).unwrap_or(self.movement_mode)};
+        self.movement_mode=mode;
+        self.command(mode.command(ship.id,target));
     }
 
     fn central_controls(&mut self,ui:&mut egui::Ui,ship:Option<&BodyView>,view:&View) {
@@ -1097,7 +1095,7 @@ impl LuminalApp {
     }
 
     fn acquire_first_target(&mut self,view:&View) {
-        if self.own_faction().is_some() && !matches!(self.inspected,Some(Selection::Contact(id)) if view.contacts.iter().any(|c|c.id==id))
+        if self.own_faction().is_some() && !self.target_chosen && !matches!(self.inspected,Some(Selection::Contact(_)))
             && let Some(contact)=view.contacts.iter().find(|c|!c.stale && c.detection>=sensors::DetectionLevel::Resolved && c.resolved_kind==Some(BodyKind::Ship)) {
             // Acquiring a weapon target must not replace follow/route/movement orders.
             self.inspected=Some(Selection::Contact(contact.id));
@@ -1105,19 +1103,10 @@ impl LuminalApp {
     }
 
     fn select_object(&mut self, selection: Selection, view: &View) {
-        if let Selection::Body(id) = selection
-            && view.bodies.iter().any(|b| b.id == id && b.controllable && b.kind == BodyKind::Ship
-                && (self.role == Role::Spectator || self.own_faction() == Some(b.faction)))
-        {
-            self.selected = Some(selection);
-            self.inspected = None;
-        } else {
-            self.inspected = Some(selection);
-            if let Selection::Contact(contact)=selection
-                && let Some(ship)=view.bodies.iter().find(|b|b.controllable && self.selected==Some(Selection::Body(b.id))) {
-                self.command(Command::Intercept {body:ship.id,target:InterceptTarget::Contact(contact)});
-            }
-        }
+        if let Selection::Body(id)=selection && view.bodies.iter().any(|b|b.id==id && b.controllable && b.kind==BodyKind::Ship
+            && (self.role==Role::Spectator || self.own_faction()==Some(b.faction))) {self.selected=Some(selection);}
+        self.inspected=Some(selection);
+        self.target_chosen=true;
     }
 
     fn new() -> Self {
@@ -1149,6 +1138,8 @@ impl LuminalApp {
             opening_fit: true,
             selected: Some(Selection::Body(BodyId(1))),
             inspected: Some(Selection::Body(BodyId(0))),
+            movement_mode: MovementMode::Flyby,
+            target_chosen: false,
             last_message: log_error,
             payload: Payload::Kinetic,
             dev: DevHooks { screenshot: std::env::var_os("LUMINAL_SCREENSHOT").map(Into::into), frames: 0 },
@@ -1265,7 +1256,7 @@ impl LuminalApp {
         let note=match &cmd {
             Command::AppendWaypoint {..}=>Some(("helm","ROUTE POINT ADDED".into())),
             Command::Launch {payload,..}=>Some(("launch",format!("MISSILE QUEUED · {}",payload_label(*payload)))),
-            Command::Follow {..}=>Some(("helm","FOLLOW · 1 LS ALONGSIDE".into())),
+            Command::Alongside {..}|Command::Follow {..}=>Some(("helm","FOLLOW · 1 LS ALONGSIDE".into())),
             Command::Intercept {..}=>Some(("helm","MATCH ORDERED".into())),
             Command::Flyby {..}=>Some(("helm","FLYBY ORDERED".into())),
             Command::KeepRange {range,..}=>Some(("helm",format!("HOLD {}",fmt_distance(*range)))),
@@ -1456,12 +1447,13 @@ fn tactical_shortcut(key:egui::Key,ship:&BodyView,target:Option<&ContactView>)->
         return Some(Command::SetSystemMode {body:ship.id,system,mode});
     }
     if key==Key::P {return Some(Command::Ping {body:ship.id});}
+    if matches!(key,Key::Num0|Key::Num1|Key::Num2|Key::Num3) {
+        let target=ship.autopilot.and_then(|a|movement_target(a.order))?;
+        let mode=match key {Key::Num0=>MovementMode::Evade,Key::Num1=>MovementMode::Short,Key::Num2=>MovementMode::Medium,_=>MovementMode::Long};
+        return Some(mode.command(ship.id,target));
+    }
     let contact=target?;
-    let target=InterceptTarget::Contact(contact.id);
     match key {
-        Key::Num1|Key::Num2|Key::Num3=>Some(Command::KeepRange {body:ship.id,target,
-            range:weapon_standoff(match key {Key::Num1=>Payload::Beam,Key::Num2=>Payload::Kinetic,_=>Payload::Nuclear})}),
-        Key::Num0=>Some(Command::Evade {body:ship.id,target}),
         Key::L|Key::S=>{
             let payload=if key==Key::L {Payload::Nuclear} else {Payload::Kinetic};
             let available=ship.magazine[payload.index()].saturating_sub(ship.missile_queued[payload.index()]);
@@ -2055,6 +2047,7 @@ impl LuminalApp {
         }
         if let Some(ap) = b.autopilot {
             let what = match ap.order {
+                Order::Alongside {target,..}=>format!("alongside {target} · 1 LS"),
                 Order::Follow {target,..}=>format!("follow {} · 1 LS alongside",view.bodies.iter().find(|b|b.id==target).map_or("?",|b|b.name.as_str())),
                 Order::Route=>format!("fly-through route · {} points remaining",b.route.as_ref().map_or(0,|r|r.points.len().saturating_sub(r.progress.floor() as usize+1))),
                 Order::Orbit { celestial, radius, .. } => {
@@ -2386,6 +2379,9 @@ impl LuminalApp {
                     painter.line_segment([pt - EVec2::new(8.0, 0.0), pt + EVec2::new(8.0, 0.0)], Stroke::new(1.0, c));
                     painter.line_segment([pt - EVec2::new(0.0, 8.0), pt + EVec2::new(0.0, 8.0)], Stroke::new(1.0, c));
                 }
+                Order::Alongside {target,..}=>{
+                    if let Some(pos)=view.contacts.iter().find(|c|c.id==target).and_then(|c|c.track.as_ref()).map(|t|t.pos) {draw_target_link(&painter,&cam,rect,b.pos,pos);}
+                }
                 Order::Follow {target:target_id,..} => {
                     if let Some(target)=view.bodies.iter().find(|b|b.id==target_id) {
                         draw_target_link(&painter,&cam,rect,b.pos,target.pos);
@@ -2519,8 +2515,7 @@ impl LuminalApp {
             if ui.input(|i|i.modifiers.shift) {
                 self.command(Command::AppendWaypoint {body:id,point:to_world(&cam,rect,click)});
             } else if let Some(target) = own.or(contact) {
-                if let InterceptTarget::Contact(c)=target {self.select_object(Selection::Contact(c),view);}
-                else if let InterceptTarget::Own(target)=target {self.command(Command::Follow {body:id,target});}
+                self.move_to_ship(b,target);
             } else if let Some(celestial) = celestial {
                 self.command(Command::Orbit { body: id, celestial });
             } else {

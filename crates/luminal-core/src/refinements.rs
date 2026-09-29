@@ -294,6 +294,7 @@ impl World {
             Command::DeployProbe {body,direction} => self.deploy_probe(body,direction).map(|_|()),
             Command::SetThrust { body, thrust } => self.set_thrust(body, thrust),
             Command::Orbit { body, celestial } => self.set_orbit(body, celestial),
+            Command::Alongside {body,target}=>self.set_alongside(body,target),
             Command::Follow {body,target}=>self.set_follow(body,target),
             Command::Intercept { body, target } => self.set_intercept(body, target),
             Command::Flyby { body, target } => self.set_flyby(body, target),

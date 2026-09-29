@@ -181,7 +181,9 @@ never override manual speed. Restart restores AUTO.
 | Mouse wheel | Zoom |
 | Right-click a friendly | Join 1 LS alongside at maximum burn, then match its motion and burn |
 | Shift+right-click map | Append a point to your ship's fly-through curve |
-| Click a contact | Designate it; defaults to MATCH manoeuvre |
+| Left-click an object | Set a persistent target; leaves movement unchanged |
+| Right-click an enemy ship | Move toward that ship using the current helm mode |
+| Right-click empty space / celestial | Fly to the point / orbit the body |
 | Hover an object | Inspect details |
 
 The bottom deck contains weapon controls, your ship's condition, a central
@@ -190,8 +192,11 @@ Ping/EF/system-control stack, the target's last observed condition, and manoeuvr
 Right-click a friendly to join a formation 1 LS to the nearer side of its current
 course. This restores full drive authority for the approach, then matches its
 reported burn while correcting formation drift. The orders panel shows the
-friendly, separation, relative speed and follow status. Routes and destinations
-also display their navigation progress there, with cancel/coast and stop controls.
+movement destination, separation and status. The helm modes are mutually exclusive;
+selecting a mode updates the current movement order without changing the weapon
+target. ALONGSIDE also works on enemies using the received sensor estimate,
+coasting if the track is lost. Routes and destinations display navigation progress.
+COAST cancels the order. Selecting another weapon target never redirects the helm.
 
 Yellow rear vectors show burn strength: 120g is four ship-icon lengths, fading
 out toward the tip. Automatic zoom waits ten seconds after manual zoom and eases
@@ -228,7 +233,8 @@ thrust replaces the route; adding points preserves your weapon target.
 
 | Order | Behaviour |
 | --- | --- |
-| MATCH | Come alongside and match velocity |
+| ALONGSIDE | Join at a fixed 1 LS offset and mirror observed motion; friendly or enemy |
+| INTERCEPT | Close and match velocity |
 | FLYBY | Accelerate for a high-speed pass without matching velocity |
 | LONG · LRM | Hold 0.7 AU: half the LRM engagement envelope |
 | MEDIUM · SRM | Hold 0.01 AU (about 5 LS): close-range shotgun combat |
@@ -236,8 +242,7 @@ thrust replaces the route; adding points preserves your weapon target.
 | EVADE | Maximum lateral burn against incoming missiles; coast when clear |
 
 LONG, MEDIUM and SHORT approach a fresh bearing-only contact until a range fix is
-available, then brake or withdraw to hold the requested separation. MATCH is the
-default on target selection and restart: it approaches a fresh bearing, then
+available, then brake or withdraw to hold the requested separation. INTERCEPT approaches a fresh bearing, then
 brakes and matches velocity once a ranged estimate is available. FLYBY requires
 a fresh ranged track. Stale evidence causes coasting. Ships still
 retain momentum with their engines off.
@@ -287,9 +292,11 @@ Learned class identity remains; condition reports become historical.
 Damaged power disables propulsion, active sensors, screens and weapons. Passive
 sensors, direction finding and the ship mind have backup power; crew and damage
 control remain operational. Destroyed power or an exhausted hull destroys a ship.
-Subsystem criticals require penetrating energy worth at least 1% of maximum hull
-HP before armour shares the damage. A grazing hit still ablates armour/hull but
-cannot roll a reactor casualty. Missile screen punctures pass 25% of their energy
+Subsystem critical probability scales smoothly with penetrating energy before
+armour shares the damage: `1 - (1 - base_chance)^(damage / 1% maximum hull)`.
+Base chance is 20%, rising to 40% below half hull and 80% below quarter hull.
+At healthy hull, a 0.5% penetration has a 10.6% chance; 1% has 20%, and 2% has 36%.
+Tiny grazes have correspondingly tiny chances; zero penetration has none. Missile screen punctures pass 25% of their energy
 on a 35% roll; only a sufficiently damaging puncture guarantees a component shock.
 
 Damage control repairs one damaged system per **twenty effective minutes**, with

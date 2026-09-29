@@ -34,6 +34,7 @@ pub enum Command {
     /// Close on a target, match velocity and hold station.
     Intercept { body: BodyId, target: InterceptTarget },
     Follow { body: BodyId, target: BodyId },
+    Alongside { body: BodyId, target: InterceptTarget },
     /// Close at maximum thrust and fly through, retaining velocity.
     Flyby { body: BodyId, target: InterceptTarget },
     KeepRange {body:BodyId,target:InterceptTarget,range:f64},
@@ -83,7 +84,7 @@ pub enum Rejection {
 impl Command {
     pub fn body(&self) -> Option<BodyId> {
         match *self {
-            Self::Follow {body,..} | Self::SetThrust { body, .. } | Self::Orbit { body, .. } | Self::Intercept { body, .. }
+            Self::Alongside {body,..} | Self::Follow {body,..} | Self::SetThrust { body, .. } | Self::Orbit { body, .. } | Self::Intercept { body, .. }
             | Self::AppendWaypoint {body,..} | Self::Flyby { body, .. } | Self::KeepRange {body,..} | Self::Evade {body,..} | Self::MoveTo { body, .. } | Self::AllStop { body }
             | Self::SetDriveLimit { body, .. } | Self::Launch { body, .. } | Self::FireBeam { body, .. }
             | Self::SetHeatDump {body,..} | Self::Ping { body } | Self::EngageBeam { body, .. } | Self::SetScreen { body, .. } | Self::SetSystemMode {body,..}
@@ -441,6 +442,7 @@ impl LocalSession {
                 self.owned(role, body)?;
                 self.world.set_orbit(body, celestial)?;
             }
+            Command::Alongside {body,target}=>{self.owned(role,body)?;self.world.set_alongside(body,target)?;}
             Command::Follow {body,target}=>{self.owned(role,body)?;self.world.set_follow(body,target)?;}
             Command::Intercept { body, target } => {
                 self.owned(role, body)?;
@@ -531,6 +533,8 @@ impl LocalSession {
             .or(b.beam_target.map(InterceptTarget::Contact))
             .or_else(||b.autopilot.and_then(|ap|match ap.order {
                 Order::Intercept(t)|Order::Flyby(t)|Order::KeepRange(t,_)|Order::Evade(t)=>Some(t),
+                Order::Alongside {target,..}=>Some(InterceptTarget::Contact(target)),
+                Order::Follow {target,..}=>Some(InterceptTarget::Own(target)),
                 _=>None,
             }));
         let target_id=if let Some(interceptor)=b.interceptor {interceptor.target} else {match target? {
