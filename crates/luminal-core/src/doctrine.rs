@@ -8,6 +8,7 @@ use std::collections::BTreeMap;
 
 #[derive(Default)]
 pub struct Doctrine {
+    retreating:std::collections::BTreeSet<crate::world::BodyId>,
     targets:BTreeMap<crate::world::BodyId,crate::mind::ContactId>,
     probe_at: BTreeMap<crate::world::BodyId, f64>,
     ping_at: BTreeMap<crate::world::BodyId, f64>,
@@ -94,6 +95,37 @@ impl Doctrine {
         // hidden ship names/loadouts to decide whether a frigate is present.
         let escort_known=view.contacts.iter().filter(|c|c.resolved_kind==Some(BodyKind::Ship)).count()>=2;
         for b in view.bodies.iter().filter(|b| b.kind == BodyKind::Ship && b.controllable && b.armed) {
+            use crate::damage::{RepairGoal,System as S};
+            let class=b.ship_class.unwrap_or(ShipClass::Frigate);
+            let damage=&b.damage.damage;
+            if b.jump.is_some() {continue;}
+            let can_fight=crate::world::endgame::can_fight_again(class,damage,b.magazine);
+            let fraction=damage.hull/damage.hull_max.max(1.0);
+            let stranded=!crate::world::endgame::recoverable(damage,S::Propulsion)
+                && !view.contacts.iter().filter(|c|!c.resolved_missile).any(|c|c.track.as_ref().is_some_and(|tr|
+                    (tr.pos-b.pos).length()<=SHIP_BEAM_AUTO_RANGE_LS.value*crate::units::LIGHT_SECOND));
+            if !can_fight || stranded || fraction<0.45 || damage.state(S::Power)==crate::damage::Condition::Damaged {
+                self.retreating.insert(b.id);
+            }
+            if self.retreating.contains(&b.id) {
+                if damage.repair_goal!=RepairGoal::Escape {out.push(Command::SetRepairGoal {body:b.id,goal:RepairGoal::Escape});}
+                if class.has_jump_drive() && b.damage.operating_effectiveness(S::Jump)>0.0 {
+                    out.push(Command::Withdraw {body:b.id});
+                } else if class.has_jump_drive() && crate::world::endgame::recoverable(damage,S::Jump)
+                    && damage.hull/damage.hull_max.max(1.0)>=0.2 {
+                    // Repair escape capability while opening range using received positions.
+                    let away=view.contacts.iter().filter_map(|c|c.track.as_ref()).min_by(|a,c|
+                        (a.pos-b.pos).length().total_cmp(&(c.pos-b.pos).length())).map_or(crate::kinematics::Vec2::new(1.0,0.0),|tr|(b.pos-tr.pos).normalized());
+                    out.push(Command::MoveTo {body:b.id,point:b.pos+away*AU});
+                    if b.thermal.heat_fraction()>1.0 && !b.thermal.dumping {out.push(Command::SetHeatDump {body:b.id,enabled:true});}
+                    else if b.thermal.dumping && b.thermal.heat_fraction()<0.25 {out.push(Command::SetHeatDump {body:b.id,enabled:false});}
+                } else {out.push(Command::Surrender {body:b.id});}
+                continue;
+            }
+            let goal=if b.damage.operating_effectiveness(S::Propulsion)==0.0 {RepairGoal::Automatic} else {RepairGoal::Fight};
+            if damage.repair_goal!=goal {out.push(Command::SetRepairGoal {body:b.id,goal});}
+            if b.thermal.heat_fraction()>1.0 && !b.thermal.dumping {out.push(Command::SetHeatDump {body:b.id,enabled:true});}
+            else if b.thermal.dumping && b.thermal.heat_fraction()<0.25 {out.push(Command::SetHeatDump {body:b.id,enabled:false});}
             let (target,engage)=choose_target(view,b);
             let objective=view.objective.as_ref().filter(|o|o.attacker==b.faction);
             let site=objective.and_then(|o|o.sensor_site.as_ref());
@@ -142,8 +174,8 @@ impl Doctrine {
                 self.ping_at.insert(b.id,view.time+BOT_PING_S.value);
             }
             if engage {
-                let payload=if b.magazine[Payload::Kinetic.index()]>0 {Payload::Kinetic}
-                    else if b.magazine[Payload::Nuclear.index()]>0 {Payload::Nuclear} else {Payload::Beam};
+                let payload=if b.magazine[Payload::Kinetic.index()]>0 && crate::world::endgame::recoverable(damage,S::SrmLauncher) {Payload::Kinetic}
+                    else if b.magazine[Payload::Nuclear.index()]>0 && crate::world::endgame::recoverable(damage,S::Launcher) {Payload::Nuclear} else {Payload::Beam};
                 out.push(Command::KeepRange {body:b.id,target:InterceptTarget::Contact(c.id),
                     range:crate::autopilot::weapon_standoff(payload)});
             } else {out.push(Command::Flyby { body: b.id, target: InterceptTarget::Contact(c.id) });}
@@ -298,5 +330,42 @@ mod tests {
         view.time+=10.0;
         for c in &mut view.contacts {c.track.as_mut().unwrap().pos=ship.pos+Vec2::new(3.0*AU,0.0);}
         assert_eq!(launches(ai.orders(&view)),0,"no routine long-range expenditure");
+    }
+}
+
+#[cfg(test)]
+mod survival_tests {
+    use super::*;
+    use crate::damage::{Condition,RepairGoal,System};
+    use crate::session::{LocalSession,Role};
+    fn view(class:ShipClass)->View {LocalSession::new(crate::scenario::transport_intercept_class(42,class)).view(Role::Faction(crate::scenario::RAIDER))}
+    #[test]
+    fn incapable_ships_escape_if_possible_or_surrender_instead_of_chasing() {
+        for class in [ShipClass::Frigate,ShipClass::Destroyer] {
+            let mut v=view(class);let b=v.bodies.iter_mut().find(|b|b.armed && b.controllable).unwrap();let id=b.id;
+            b.magazine=[0,0];b.damage.damage.systems[System::Beam as usize]=Condition::Destroyed;
+            let orders=Doctrine::default().orders(&v);
+            assert!(orders.iter().any(|o|if class.has_jump_drive() {matches!(o,Command::Withdraw {body} if *body==id)} else {matches!(o,Command::Surrender {body} if *body==id)}));
+            assert!(!orders.iter().any(|o|matches!(o,Command::KeepRange {..}|Command::Launch {..})));
+        }
+    }
+    #[test]
+    fn damaged_escape_system_is_repaired_and_irrecoverable_escape_surrenders() {
+        let mut v=view(ShipClass::Destroyer);let b=v.bodies.iter_mut().find(|b|b.armed && b.controllable).unwrap();
+        b.damage.damage.systems[System::Power as usize]=Condition::Damaged;
+        let orders=Doctrine::default().orders(&v);
+        assert!(orders.iter().any(|o|matches!(o,Command::SetRepairGoal {goal:RepairGoal::Escape,..})));
+        assert!(orders.iter().any(|o|matches!(o,Command::MoveTo {..})));
+        assert!(!orders.iter().any(|o|matches!(o,Command::Withdraw {..}|Command::Surrender {..})));
+        v.bodies.iter_mut().find(|b|b.armed && b.controllable).unwrap().damage.damage.systems[System::Repair as usize]=Condition::Destroyed;
+        assert!(Doctrine::default().orders(&v).iter().any(|o|matches!(o,Command::Surrender {..})));
+    }
+    #[test]
+    fn healthy_ships_still_fight_and_spooling_ships_receive_no_new_helm_orders() {
+        let mut v=view(ShipClass::Destroyer);
+        assert!(!Doctrine::default().orders(&v).iter().any(|o|matches!(o,Command::Withdraw {..}|Command::Surrender {..})));
+        let b=v.bodies.iter_mut().find(|b|b.armed && b.controllable).unwrap();
+        b.jump=Some(crate::world::jump::JumpState::Spooling {destination:crate::kinematics::Vec2::ZERO,depart_at:600.0});
+        assert!(Doctrine::default().orders(&v).is_empty());
     }
 }

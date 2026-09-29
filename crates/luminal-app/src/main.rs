@@ -1,6 +1,7 @@
 //! Luminal desktop client. Talks to the simulation only through `session`.
 mod audio;
 mod weapon_effects;
+mod jump_effects;
 
 use luminal_core::world::jump::{JumpState, MAX_SOL_RADIUS_AU};
 use eframe::egui::{self, Color32, Pos2, Rect, Sense, Shape, Stroke, StrokeKind, Vec2 as EVec2};
@@ -69,6 +70,11 @@ impl TacticalLog {
                         else if let Some(contact)=event.contact {view.contacts.iter().find(|c|c.id==contact).map(contact_label).unwrap_or_else(||format!("T{}",contact.0))}
                         else {"SHIP".into()};
                     self.push(format!("ship-destroyed-{:?}",key(event)),format!("{name} · DESTROYED"),DANGER,event.received_at);
+                },
+                CombatKind::WithdrawalStarted|CombatKind::WithdrawalCancelled|CombatKind::Withdrawn|CombatKind::Surrendered=>{
+                    let name=event.own_body.and_then(|id|view.bodies.iter().find(|b|b.id==id)).map(|b|b.name.clone())
+                        .or_else(||event.contact.map(|c|format!("T{}",c.0))).unwrap_or_else(||"SHIP".into());
+                    self.push(format!("exit-{:?}",key(event)),format!("{name} · {}",event.kind.label().to_uppercase()),ACCENT,event.received_at);
                 },
                 CombatKind::Impact=>{
                     let source=if event.own_body==selected && selected.is_some() {"OWN SHIP".into()}
@@ -661,7 +667,7 @@ mod tests {
             let view=app.session.view(app.role);
             let mut output=ctx.run_ui(egui::RawInput {screen_rect:Some(Rect::from_min_size(Pos2::ZERO,EVec2::new(900.0,700.0))),events,..Default::default()},|ui| {
                 if map {app.map(ui,&view,None);} else {
-                    let ship=view.bodies.iter().find(|b|b.controllable).unwrap();app.movement_panel(ui,&view,ship);
+                    let ship=view.bodies.iter().find(|b|b.controllable).unwrap();app.repair_controls(ui,ship);app.movement_panel(ui,&view,ship);
                 }
             });
             output.textures_delta.clear();output
@@ -694,6 +700,20 @@ mod tests {
         let cancel=text_position(&output,"CANCEL JUMP").unwrap();click(&mut app,&ctx,false,cancel);
         let view=app.session.view(app.role);let ship=view.bodies.iter().find(|b|b.controllable).unwrap();
         assert!(ship.jump.is_none());assert_eq!(ship.thermal.field,0.0);
+        let output=frame(&mut app,&ctx,false,vec![]);
+        click(&mut app,&ctx,false,text_position(&output,"Escape").unwrap());
+        assert_eq!(app.session.view(app.role).bodies.iter().find(|b|b.controllable).unwrap().damage.damage.repair_goal,luminal_core::damage::RepairGoal::Escape);
+        let output=frame(&mut app,&ctx,false,vec![]);
+        click(&mut app,&ctx,false,text_position(&output,"WITHDRAW (JUMP)").unwrap());
+        assert!(app.session.view(app.role).bodies.iter().find(|b|b.controllable).unwrap().withdrawing);
+        let output=frame(&mut app,&ctx,false,vec![]);
+        assert!(text_position(&output,"Withdrawing — spooling for jump").is_some());
+        click(&mut app,&ctx,false,text_position(&output,"CANCEL JUMP").unwrap());
+        let output=frame(&mut app,&ctx,false,vec![]);
+        click(&mut app,&ctx,false,text_position(&output,"SURRENDER").unwrap());
+        let output=frame(&mut app,&ctx,false,vec![]);
+        click(&mut app,&ctx,false,text_position(&output,"Confirm surrender").unwrap());
+        assert!(app.session.view(app.role).outcome.unwrap().reason.contains("surrendered"));
     }
 
     #[test] fn manual_turns_and_throttle_are_bounded_and_frame_independent() {
@@ -872,6 +892,7 @@ struct LuminalApp {
     chosen_class:luminal_core::world::ShipClass,
     tactical_log:TacticalLog,
     weapon_effects:weapon_effects::WeaponEffects,
+    jump_effects:jump_effects::JumpEffects,
 }
 
 /// Development hooks driven by environment variables, used for visual checks.
@@ -886,6 +907,7 @@ struct DevHooks {
 impl LuminalApp {
     fn free_flight_input(&mut self,held:[bool;4],pressed:[bool;4],released:bool,dt:f64) {
         if !held.iter().any(|v|*v) && !pressed.iter().any(|v|*v) && !released {return;}
+        if self.session.waiting_for_event() {self.command(Command::SetPaused(true));}
         let view=self.session.view(self.role);
         let Some(ship)=view.bodies.iter().find(|b|b.controllable && b.kind==BodyKind::Ship) else {return;};
         if ship.jump.is_some() {return;}
@@ -921,6 +943,7 @@ impl LuminalApp {
             sub_header(ui,"OWN SHIP",own.and_then(|b|if b.damage.damage.lifeless() {Some(("LIFELESS HULK",TEXT_MUTED))} else if b.damage.damage.state(System::Mind)==Condition::Destroyed {Some(("MIND OFFLINE",TEXT_MUTED))} else {None}));
             compact_status(ui,own.map(|b|&b.damage),own.map(|b|b.thrust.length()/G0),own.and_then(|b|b.ship_class).map(|c|c.max_g()),false);
             compact_systems(ui,"own_deck",own.map(|b|b.damage));
+            if let Some(ship)=own {self.repair_controls(ui,ship);}
             self.central_controls(&mut columns[2],own,view);
             let ui=&mut columns[3];
             let systems=target.and_then(|c|target_system_report(c,view));
@@ -935,12 +958,35 @@ impl LuminalApp {
         });
     }
 
+    fn repair_controls(&mut self,ui:&mut egui::Ui,ship:&BodyView) {
+        use luminal_core::damage::RepairGoal;
+        ui.horizontal(|ui| {
+            ui.small("REPAIR");
+            for goal in [RepairGoal::Automatic,RepairGoal::Fight,RepairGoal::Escape] {
+                if ui.selectable_label(ship.damage.damage.repair_goal==goal,goal.label()).clicked() {self.command(Command::SetRepairGoal {body:ship.id,goal});}
+            }
+        });
+        if let Some(target)=ship.damage.damage.repair_target {
+            let rate=ship.damage.damage.system_repair_rate();
+            if rate>0.0 {ui.small(format!("Repairing {} · {}",target.name(),fmt_time((luminal_core::damage::SYSTEM_REPAIR_SECONDS-ship.damage.damage.repair_progress).max(0.0)/rate)));}
+            else {ui.small("Repairs unavailable");}
+        }
+    }
     fn movement_panel(&mut self,ui:&mut egui::Ui,view:&View,ship:&BodyView) {
+        if ship.jump.is_none() {
+            ui.horizontal(|ui| {
+                if ship.ship_class.is_some_and(|c|c.has_jump_drive()) && ui.add_enabled(ship.damage.operating_effectiveness(System::Jump)>0.0,egui::Button::new("WITHDRAW (JUMP)")).on_hover_text("Concede the objective and leave combat after the vulnerable ten-minute jump spool. Cancel before departure to stay.").clicked() {self.command(Command::Withdraw {body:ship.id});}
+                ui.menu_button("SURRENDER",|ui| {
+                    ui.label("Concede this battle and remove your ship from combat.");
+                    if ui.button("Confirm surrender").clicked() {self.command(Command::Surrender {body:ship.id});ui.close();}
+                });
+            });
+        }
         if let Some(jump)=ship.jump {
             sub_header(ui,"HELM / JUMP DRIVE",None);
             match jump {
                 JumpState::Spooling {depart_at,..}=>{
-                    ui.label(egui::RichText::new("Spooling for jump").strong().color(ACCENT));
+                    ui.label(egui::RichText::new(if ship.withdrawing {"Withdrawing — spooling for jump"} else {"Spooling for jump"}).strong().color(ACCENT));
                     ui.label(format!("{} remaining",fmt_time((depart_at-view.time).max(0.0))));
                     ui.small("Thrust, evasion, screens, beams and PD lasers offline.");
                     if ui.button("CANCEL JUMP").clicked() {self.command(Command::CancelJump {body:ship.id});}
@@ -1232,6 +1278,7 @@ Shift + right click: extend route").monospace().size(9.0).color(TEXT_MUTED));
             chosen_class:chosen,
             tactical_log:TacticalLog::default(),
             weapon_effects:weapon_effects::WeaponEffects::default(),
+            jump_effects:jump_effects::JumpEffects::default(),
             audio:audio::Audio::default(),
             manual_flight:None,manual_send_elapsed:0.0,
         }
@@ -1255,7 +1302,10 @@ Shift + right click: extend route").monospace().size(9.0).color(TEXT_MUTED));
 
     fn with_env_setup(mut self) -> Self {
         // Screenshot pre-runs should exercise the same hostile AI as live play.
-        if self.dev.screenshot.is_some() {self.session.enable_bot(RAIDER,true);}
+        if self.dev.screenshot.is_some() {
+            self.session.enable_bot(RAIDER,true);
+            self.jump_effects.observe(&self.session.view(self.role),0.0);
+        }
         // `LUMINAL_ORDERS=orbit:<body>:<celestial>;intercept:<body>:own:<body>;intercept:<body>:contact:<n>;move:<body>:objective;launch:<body>:<contact>:<payload>`
         // `LUMINAL_ORDERS_AT=<sim seconds>` runs the scenario that far before issuing them.
         let orders_at = std::env::var("LUMINAL_ORDERS_AT").ok().and_then(|v| v.parse::<f64>().ok()).unwrap_or(0.0);
@@ -1270,6 +1320,8 @@ Shift + right click: extend route").monospace().size(9.0).color(TEXT_MUTED));
                 let Some(body) = num(1).map(BodyId) else { continue };
                 let Some(faction) = view.bodies.iter().find(|b| b.id == body).map(|b| b.faction) else { continue };
                 let cmd = match (f[0], f.get(2).copied()) {
+                    ("jump", _) => f.get(2).and_then(|x|x.parse::<f64>().ok()).zip(f.get(3).and_then(|y|y.parse::<f64>().ok())).map(|(x,y)|Command::Jump {body,destination:Vec2::new(x*AU,y*AU)}),
+                    ("withdraw", _) => Some(Command::Withdraw {body}),
                     ("orbit", _) => num(2).map(|c| Command::Orbit { body, celestial: c as usize }),
                     ("beam", _) => num(2).map(|c| Command::FireBeam { body, target: ContactId(c) }),
                     ("ping", _) => Some(Command::Ping { body }),
@@ -1335,6 +1387,7 @@ Shift + right click: extend route").monospace().size(9.0).color(TEXT_MUTED));
     }
 
     fn command(&mut self, cmd: Command) {
+        if cmd.body().is_some() && self.session.waiting_for_event() {let _=self.session.command(self.role,Command::SetPaused(true));}
         if matches!(cmd,Command::SetWarp(_)) {self.auto_speed=false;}
         let note=match &cmd {
             Command::AppendWaypoint {..}=>Some(("helm","ROUTE POINT ADDED".into())),
@@ -1660,10 +1713,11 @@ impl eframe::App for LuminalApp {
         };
 
         self.update_tactical_log(&view,ui.input(|i|i.time));
+        self.jump_effects.observe(&view,ui.input(|i|i.time));
         self.weapon_effects.observe(&view,self.own_faction(),ui.input(|i|i.time));
         self.audio.observe(&view,match self.selected {Some(Selection::Body(id))=>Some(id),_=>None});
         if ui.input(|i|i.pointer.button_clicked(egui::PointerButton::Primary)) {self.audio.play(audio::Cue::Click);}
-        let deck_height=(ui.available_height()*0.26).clamp(268.0,280.0);
+        let deck_height=(ui.available_height()*0.26).clamp(292.0,308.0);
         let frame=panel_frame().inner_margin(egui::Margin {left:0,right:0,top:5,bottom:4});
         egui::Panel::bottom("command_deck").exact_size(deck_height).resizable(false).frame(frame).show(ui, |ui| {
             panel_style(ui);
@@ -1722,6 +1776,11 @@ impl LuminalApp {
             }});
         }
         ui.label(egui::RichText::new(format!("{} · {:.1}×",if self.auto_speed {"AUTO"} else {"MANUAL"},view.warp)).monospace().size(10.0).color(ACCENT));
+        if ui.button(if self.session.waiting_for_event() {"STOP ADVANCING"} else {"NEXT TACTICAL EVENT"}).on_hover_text("Advance until a received threat, combat report, repair, jump, useful beam range or mission outcome; pauses automatically. Maximum 24 simulated hours.").clicked() {
+            self.auto_speed=false;
+            if self.session.waiting_for_event() {self.command(Command::SetPaused(true));}
+            else {self.session.advance_to_next_event(self.role);}
+        }
         if tac_button(ui,"TRACK OWN SHIP",EVec2::new(206.0,23.0),ACCENT,self.track_player,true).clicked() {
             self.track_player = !self.track_player;self.fit_pending=false;
         }
@@ -2345,10 +2404,12 @@ impl LuminalApp {
 
         // Ping is a property of the fused contact, not a second plotted estimate.
 
+        self.jump_effects.draw(&painter,&cam,rect,view,ui.input(|i|i.time));
+
         // Observed combat flashes only: enemy effects arrive after light travel.
         for e in &view.combat {
             use luminal_core::world::CombatKind;
-            if matches!(e.kind,CombatKind::Destroyed|CombatKind::Expended|CombatKind::Impact|CombatKind::MissileHit|CombatKind::MissileMiss|CombatKind::NuclearBurst) {continue;}
+            if matches!(e.kind,CombatKind::JumpSpool|CombatKind::JumpCancelled|CombatKind::JumpDeparture|CombatKind::JumpArrival|CombatKind::WithdrawalStarted|CombatKind::WithdrawalCancelled|CombatKind::Withdrawn|CombatKind::Surrendered|CombatKind::Destroyed|CombatKind::Expended|CombatKind::Impact|CombatKind::MissileHit|CombatKind::MissileMiss|CombatKind::NuclearBurst) {continue;}
             let age=(view.time-e.received_at).max(0.0);
             let Some(pos)=e.pos else {continue};
             let p=to_screen(&cam,rect,pos);
@@ -2860,6 +2921,11 @@ fn draw_contact(
                 painter.extend(fading_path(&fp,color.gamma_multiply(0.24),8.0));
             }
             let p = to_screen(cam, rect, t.pos);
+            if let Some(depart)=view.withdrawals.get(&c.id) {
+                if (view.time*2.0) as u64%2==0 {painter.add(Shape::closed_line(vec![p+EVec2::new(0.0,-24.0),p+EVec2::new(22.0,17.0),p+EVec2::new(-22.0,17.0)],Stroke::new(2.0,WARM)));}
+                let text=if *depart>view.time {format!("WITHDRAWING · {}",fmt_time(*depart-view.time))} else {"WITHDRAWAL · AWAITING CONFIRMATION".into()};
+                painter.text(p+EVec2::new(0.0,-29.0),egui::Align2::CENTER_BOTTOM,text,egui::FontId::monospace(10.0),WARM);
+            }
             if c.resolved_interceptor {
                 painter.circle_filled(p,2.0,color);
             } else if c.resolved_missile {
@@ -3921,5 +3987,29 @@ fn system_legend(ui: &mut egui::Ui) {
     for (chip, label) in [(Chip::Intact, "INTACT"), (Chip::Damaged, "DAMAGED"), (Chip::Destroyed, "DESTROYED"), (Chip::Unknown, "UNKNOWN"), (Chip::Absent, "NOT FITTED")] {
         paint_chip(&p, Rect::from_min_size(Pos2::new(x, y - 3.5), EVec2::new(9.0, 7.0)), "", chip);
         x = p.text(Pos2::new(x + 12.0, y), egui::Align2::LEFT_CENTER, label, mono(8.0), TEXT_MUTED).right() + 7.0;
+    }
+}
+
+#[cfg(test)]
+mod event_wait_ui_tests {
+    use super::*;
+    fn frame(app:&mut LuminalApp,ctx:&egui::Context,events:Vec<egui::Event>)->egui::FullOutput {
+        let view=app.session.view(app.role);
+        let mut output=ctx.run_ui(egui::RawInput {screen_rect:Some(Rect::from_min_size(Pos2::ZERO,EVec2::new(400.0,800.0))),events,..Default::default()},|ui| {app.time_bar(ui,&view);});
+        output.textures_delta.clear();output
+    }
+    fn button(output:&egui::FullOutput,label:&str)->Pos2 {
+        output.shapes.iter().find_map(|s|match &s.shape {Shape::Text(t) if t.galley.text()==label=>Some(t.pos+EVec2::new(5.0,5.0)),_=>None}).expect(label)
+    }
+    fn click(app:&mut LuminalApp,ctx:&egui::Context,pos:Pos2) {
+        for pressed in [true,false] {frame(app,ctx,vec![egui::Event::PointerMoved(pos),egui::Event::PointerButton {pos,button:egui::PointerButton::Primary,pressed,modifiers:Default::default()}]);}
+    }
+    #[test]
+    fn next_event_button_starts_and_stops_wait_without_auto_warp_override() {
+        let mut app=LuminalApp::new_with_class(luminal_core::world::ShipClass::Destroyer);let ctx=egui::Context::default();
+        let output=frame(&mut app,&ctx,vec![]);click(&mut app,&ctx,button(&output,"NEXT TACTICAL EVENT"));
+        assert!(app.session.waiting_for_event());assert!(!app.auto_speed);
+        let output=frame(&mut app,&ctx,vec![]);click(&mut app,&ctx,button(&output,"STOP ADVANCING"));
+        assert!(!app.session.waiting_for_event());assert!(app.session.view(app.role).paused);
     }
 }

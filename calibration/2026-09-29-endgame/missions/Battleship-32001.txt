@@ -1,0 +1,97 @@
+T+     60 min
+  SHIP Transport hull=100.0/100 armour=100.0 screens=0% heat=0.0PJ SRM=0 LRM=0
+  SHIP Battleship hull=8000.0/8000 armour=6000.0 screens=100% heat=405.4PJ SRM=48 LRM=48
+  SHIP Raider Battleship hull=8000.0/8000 armour=6000.0 screens=100% heat=405.3PJ SRM=48 LRM=48
+  FactionId(0) C1 = Raider Battleship err   12.996 ls  2σ  164.395 ls  light age  2850 s
+  FactionId(1) C1 = Transport err   11.492 ls  2σ  161.097 ls  light age  2850 s
+  FactionId(1) C2 = Battleship err   12.985 ls  2σ  160.020 ls  light age  2850 s
+  FactionId(1) C3 = Lunar sensor station err    7.103 ls  2σ  133.699 ls  light age  2851 s
+T+    120 min
+  SHIP Transport hull=100.0/100 armour=100.0 screens=0% heat=23.8PJ SRM=0 LRM=0
+  SHIP Battleship hull=8000.0/8000 armour=6000.0 screens=100% heat=651.3PJ SRM=48 LRM=48
+  SHIP Raider Battleship hull=8000.0/8000 armour=6000.0 screens=100% heat=497.5PJ SRM=48 LRM=48
+  FactionId(0) C1 = Raider Battleship err    7.217 ls  2σ   78.328 ls  light age  2803 s
+  FactionId(1) C1 = Transport err   13.265 ls  2σ  152.093 ls  light age  2813 s
+  FactionId(1) C2 = Battleship err   17.976 ls  2σ  163.327 ls  light age  2804 s
+  FactionId(1) C3 = Lunar sensor station err    7.103 ls  2σ  153.806 ls  light age  2820 s
+T+    180 min
+  SHIP Transport hull=100.0/100 armour=100.0 screens=0% heat=64.5PJ SRM=0 LRM=0
+  SHIP Battleship hull=8000.0/8000 armour=6000.0 screens=100% heat=792.1PJ SRM=48 LRM=48
+  SHIP Raider Battleship hull=8000.0/8000 armour=6000.0 screens=100% heat=502.8PJ SRM=48 LRM=48
+  FactionId(0) C1 = Raider Battleship err    6.898 ls  2σ  119.628 ls  light age  2715 s
+  FactionId(1) C1 = Transport err    0.000 ls  2σ   10.884 ls  light age  2745 s
+  FactionId(1) C2 = Battleship err    8.693 ls  2σ  120.390 ls  light age  2719 s
+  FactionId(1) C3 = Lunar sensor station err    7.103 ls  2σ  153.800 ls  light age  2773 s
+T+    240 min
+  SHIP Transport hull=100.0/100 armour=100.0 screens=0% heat=89.1PJ SRM=0 LRM=0
+  SHIP Battleship hull=8000.0/8000 armour=6000.0 screens=100% heat=446.6PJ SRM=48 LRM=48
+  SHIP Raider Battleship hull=8000.0/8000 armour=6000.0 screens=100% heat=503.2PJ SRM=48 LRM=48
+  FactionId(0) C1 = Raider Battleship err    6.638 ls  2σ  120.990 ls  light age  2592 s
+  FactionId(1) C1 = Transport err    0.000 ls  2σ    9.881 ls  light age  2640 s
+  FactionId(1) C2 = Battleship err    5.315 ls  2σ    9.467 ls  light age  2595 s
+  FactionId(1) C3 = Lunar sensor station err    7.103 ls  2σ  145.761 ls  light age  2708 s
+T+    300 min
+  SHIP Transport hull=100.0/100 armour=100.0 screens=0% heat=102.5PJ SRM=0 LRM=0
+  SHIP Battleship hull=8000.0/8000 armour=6000.0 screens=100% heat=676.3PJ SRM=48 LRM=48
+  SHIP Raider Battleship hull=8000.0/8000 armour=6000.0 screens=100% heat=503.2PJ SRM=48 LRM=48
+  FactionId(0) C1 = Raider Battleship err    6.779 ls  2σ  106.746 ls  light age  2431 s
+  FactionId(1) C1 = Transport err    0.025 ls  2σ    8.603 ls  light age  2496 s
+  FactionId(1) C2 = Battleship err    8.105 ls  2σ   80.582 ls  light age  2437 s
+T+    360 min
+  SHIP Transport hull=100.0/100 armour=100.0 screens=0% heat=103.5PJ SRM=0 LRM=0
+  SHIP Battleship hull=8000.0/8000 armour=6000.0 screens=100% heat=461.5PJ SRM=48 LRM=48
+  SHIP Raider Battleship hull=8000.0/8000 armour=6000.0 screens=100% heat=614.0PJ SRM=48 LRM=48
+  FactionId(0) C1 = Raider Battleship err    7.348 ls  2σ   90.728 ls  light age  2229 s
+  FactionId(1) C1 = Transport err    0.013 ls  2σ    7.162 ls  light age  2318 s
+  FactionId(1) C2 = Battleship err    7.565 ls  2σ  102.148 ls  light age  2242 s
+  FactionId(1) C3 = Lunar sensor station err    7.103 ls  2σ  112.856 ls  light age  2535 s
+T+    420 min
+  SHIP Transport hull=100.0/100 armour=100.0 screens=0% heat=103.6PJ SRM=0 LRM=0
+  SHIP Battleship hull=8000.0/8000 armour=6000.0 screens=100% heat=485.0PJ SRM=48 LRM=48
+  SHIP Raider Battleship hull=8000.0/8000 armour=6000.0 screens=100% heat=566.5PJ SRM=48 LRM=48
+  FactionId(0) C1 = Raider Battleship err    6.905 ls  2σ   63.542 ls  light age  2009 s
+  FactionId(1) C1 = Transport err    0.001 ls  2σ    5.814 ls  light age  2130 s
+  FactionId(1) C2 = Battleship err    9.682 ls  2σ   40.839 ls  light age  2038 s
+  FactionId(1) C3 = Lunar sensor station err    7.103 ls  2σ  119.687 ls  light age  2453 s
+T+    480 min
+  SHIP Transport hull=100.0/100 armour=100.0 screens=0% heat=103.6PJ SRM=0 LRM=0
+  SHIP Battleship hull=8000.0/8000 armour=6000.0 screens=100% heat=699.6PJ SRM=48 LRM=48
+  SHIP Raider Battleship hull=8000.0/8000 armour=6000.0 screens=100% heat=749.0PJ SRM=48 LRM=48
+  FactionId(0) C1 = Raider Battleship err    6.976 ls  2σ   51.274 ls  light age  1778 s
+  FactionId(1) C1 = Transport err    0.000 ls  2σ    4.566 ls  light age  1931 s
+  FactionId(1) C2 = Battleship err    0.000 ls  2σ    3.936 ls  light age  1822 s
+  FactionId(1) C3 = Lunar sensor station err    7.103 ls  2σ  111.906 ls  light age  2380 s
+T+    540 min
+  SHIP Transport hull=100.0/100 armour=100.0 screens=0% heat=103.6PJ SRM=0 LRM=0
+  SHIP Battleship hull=8000.0/8000 armour=6000.0 screens=100% heat=226.1PJ SRM=48 LRM=48
+  SHIP Raider Battleship hull=8000.0/8000 armour=6000.0 screens=100% heat=316.4PJ SRM=48 LRM=48
+  FactionId(0) C1 = Raider Battleship err    0.989 ls  2σ    2.623 ls  light age  1546 s
+  FactionId(1) C1 = Transport err    0.000 ls  2σ    3.490 ls  light age  1731 s
+  FactionId(1) C2 = Battleship err    0.799 ls  2σ    2.857 ls  light age  1600 s
+  FactionId(1) C3 = Lunar sensor station err    7.103 ls  2σ  107.682 ls  light age  2326 s
+T+    600 min
+  SHIP Transport hull=100.0/100 armour=100.0 screens=0% heat=103.6PJ SRM=0 LRM=0
+  SHIP Battleship hull=8000.0/8000 armour=6000.0 screens=100% heat=520.9PJ SRM=48 LRM=48
+  SHIP Raider Battleship hull=8000.0/8000 armour=6000.0 screens=100% heat=597.3PJ SRM=48 LRM=48
+  FactionId(0) C1 = Raider Battleship err    6.811 ls  2σ   26.653 ls  light age  1316 s
+  FactionId(1) C1 = Transport err    0.000 ls  2σ    2.583 ls  light age  1532 s
+  FactionId(1) C2 = Battleship err    0.002 ls  2σ    2.054 ls  light age  1377 s
+  FactionId(1) C3 = Lunar sensor station err    7.103 ls  2σ  104.602 ls  light age  2290 s
+T+    660 min
+  SHIP Transport hull=100.0/100 armour=100.0 screens=0% heat=103.6PJ SRM=0 LRM=0
+  SHIP Battleship hull=8000.0/8000 armour=6000.0 screens=100% heat=721.4PJ SRM=48 LRM=48
+  SHIP Raider Battleship hull=8000.0/8000 armour=6000.0 screens=100% heat=767.7PJ SRM=48 LRM=48
+  FactionId(0) C1 = Raider Battleship err    0.000 ls  2σ    1.103 ls  light age  1089 s
+  FactionId(1) C1 = Transport err    0.000 ls  2σ    1.856 ls  light age  1339 s
+  FactionId(1) C2 = Battleship err    0.000 ls  2σ    1.273 ls  light age  1154 s
+  FactionId(1) C3 = Lunar sensor station err    7.103 ls  2σ  103.175 ls  light age  2274 s
+T+    720 min
+  SHIP Transport hull=100.0/100 armour=100.0 screens=0% heat=103.6PJ SRM=0 LRM=0
+  SHIP Battleship hull=8000.0/8000 armour=6000.0 screens=100% heat=245.7PJ SRM=48 LRM=48
+  SHIP Raider Battleship hull=8000.0/8000 armour=6000.0 screens=100% heat=562.2PJ SRM=48 LRM=48
+  FactionId(0) C1 = Raider Battleship err    0.024 ls  2σ    0.625 ls  light age   864 s
+  FactionId(1) C1 = Transport err    0.000 ls  2σ    1.286 ls  light age  1153 s
+  FactionId(1) C2 = Battleship err    0.143 ls  2σ    0.737 ls  light age   924 s
+  FactionId(1) C3 = Lunar sensor station err    7.103 ls  2σ  103.337 ls  light age  2277 s
+
+simulated 12.00 h in 5.94 s wall (7271× real time)

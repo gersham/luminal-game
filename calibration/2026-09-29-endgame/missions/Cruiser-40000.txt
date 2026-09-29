@@ -1,0 +1,307 @@
+T+     60 min
+  SHIP Transport hull=100.0/100 armour=100.0 screens=0% heat=0.0PJ SRM=0 LRM=0
+  SHIP Cruiser hull=4000.0/4000 armour=2000.0 screens=100% heat=137.2PJ SRM=24 LRM=36
+  SHIP Raider Cruiser hull=4000.0/4000 armour=2000.0 screens=100% heat=202.6PJ SRM=24 LRM=36
+  FactionId(0) C1 = Raider Cruiser err    8.549 ls  2σ  181.906 ls  light age  2223 s
+  FactionId(1) C1 = Transport err    4.114 ls  2σ   86.713 ls  light age  2212 s
+  FactionId(1) C3 = Cruiser   err    3.630 ls  2σ  142.698 ls  light age  2213 s
+T+    120 min
+  SHIP Transport hull=100.0/100 armour=100.0 screens=0% heat=24.9PJ SRM=0 LRM=0
+  SHIP Cruiser hull=4000.0/4000 armour=2000.0 screens=100% heat=285.9PJ SRM=24 LRM=36
+  SHIP Raider Cruiser hull=4000.0/4000 armour=2000.0 screens=100% heat=248.7PJ SRM=24 LRM=36
+  FactionId(0) C1 = Raider Cruiser err    3.750 ls  2σ   44.036 ls  light age  2170 s
+  FactionId(1) C1 = Transport err    4.219 ls  2σ   90.906 ls  light age  2169 s
+  FactionId(1) C2 = Lunar sensor station err    5.741 ls  2σ   93.181 ls  light age  2170 s
+  FactionId(1) C3 = Cruiser   err   13.213 ls  2σ  106.690 ls  light age  2161 s
+T+    180 min
+  SHIP Transport hull=100.0/100 armour=100.0 screens=0% heat=65.1PJ SRM=0 LRM=0
+  SHIP Cruiser hull=4000.0/4000 armour=2000.0 screens=100% heat=376.1PJ SRM=24 LRM=36
+  SHIP Raider Cruiser hull=4000.0/4000 armour=2000.0 screens=100% heat=251.4PJ SRM=24 LRM=36
+  FactionId(0) C1 = Raider Cruiser err    3.657 ls  2σ   65.491 ls  light age  2060 s
+  FactionId(1) C1 = Transport err    0.000 ls  2σ    5.652 ls  light age  2100 s
+  FactionId(1) C2 = Lunar sensor station err    5.741 ls  2σ   87.545 ls  light age  2103 s
+  FactionId(1) C3 = Cruiser   err    4.415 ls  2σ   73.110 ls  light age  2054 s
+T+    240 min
+  SHIP Transport hull=100.0/100 armour=100.0 screens=0% heat=89.5PJ SRM=0 LRM=0
+  SHIP Cruiser hull=4000.0/4000 armour=2000.0 screens=100% heat=162.1PJ SRM=24 LRM=36
+  SHIP Raider Cruiser hull=4000.0/4000 armour=2000.0 screens=100% heat=251.6PJ SRM=24 LRM=36
+  FactionId(0) C1 = Raider Cruiser err    3.305 ls  2σ   69.260 ls  light age  1897 s
+  FactionId(1) C1 = Transport err    0.000 ls  2σ    5.047 ls  light age  2006 s
+  FactionId(1) C2 = Lunar sensor station err    5.741 ls  2σ   80.347 ls  light age  2014 s
+  FactionId(1) C3 = Cruiser   err    1.593 ls  2σ    4.366 ls  light age  1892 s
+T+    300 min
+  SHIP Transport hull=100.0/100 armour=100.0 screens=0% heat=102.6PJ SRM=0 LRM=0
+  SHIP Cruiser hull=4000.0/4000 armour=2000.0 screens=100% heat=301.0PJ SRM=24 LRM=36
+  SHIP Raider Cruiser hull=4000.0/4000 armour=2000.0 screens=100% heat=301.5PJ SRM=24 LRM=36
+  FactionId(0) C1 = Raider Cruiser err    6.991 ls  2σ   54.865 ls  light age  1683 s
+  FactionId(1) C1 = Transport err    0.029 ls  2σ    4.375 ls  light age  1895 s
+  FactionId(1) C2 = Lunar sensor station err    5.741 ls  2σ   72.540 ls  light age  1905 s
+  FactionId(1) C3 = Cruiser   err    5.217 ls  2σ   39.803 ls  light age  1686 s
+T+    360 min
+  SHIP Transport hull=100.0/100 armour=100.0 screens=0% heat=103.5PJ SRM=0 LRM=0
+  SHIP Cruiser hull=4000.0/4000 armour=2000.0 screens=100% heat=385.3PJ SRM=24 LRM=36
+  SHIP Raider Cruiser hull=4000.0/4000 armour=2000.0 screens=100% heat=385.5PJ SRM=24 LRM=36
+  FactionId(0) C1 = Raider Cruiser err    7.410 ls  2σ   33.016 ls  light age  1439 s
+  FactionId(1) C1 = Transport err    0.004 ls  2σ    3.881 ls  light age  1806 s
+  FactionId(1) C2 = Lunar sensor station err    5.741 ls  2σ   66.143 ls  light age  1818 s
+  FactionId(1) C3 = Cruiser   err    3.918 ls  2σ   47.620 ls  light age  1467 s
+T+    420 min
+  SHIP Transport hull=100.0/100 armour=100.0 screens=0% heat=103.6PJ SRM=0 LRM=0
+  SHIP Cruiser hull=4000.0/4000 armour=2000.0 screens=100% heat=185.4PJ SRM=24 LRM=36
+  SHIP Raider Cruiser hull=4000.0/4000 armour=2000.0 screens=100% heat=185.9PJ SRM=24 LRM=36
+  FactionId(0) C1 = Raider Cruiser err    3.094 ls  2σ    3.189 ls  light age  1203 s
+  FactionId(1) C1 = Transport err    0.000 ls  2σ    3.570 ls  light age  1748 s
+  FactionId(1) C2 = Lunar sensor station err    5.741 ls  2σ   61.664 ls  light age  1755 s
+  FactionId(1) C3 = Cruiser   err    3.662 ls  2σ   14.117 ls  light age  1241 s
+T+    480 min
+  SHIP Transport hull=100.0/100 armour=100.0 screens=0% heat=103.6PJ SRM=0 LRM=0
+  SHIP Cruiser hull=4000.0/4000 armour=2000.0 screens=100% heat=315.1PJ SRM=24 LRM=36
+  SHIP Raider Cruiser hull=4000.0/4000 armour=2000.0 screens=100% heat=315.4PJ SRM=24 LRM=36
+  FactionId(0) C1 = Raider Cruiser err    0.006 ls  2σ    1.034 ls  light age   967 s
+  FactionId(1) C1 = Transport err    0.000 ls  2σ    3.443 ls  light age  1726 s
+  FactionId(1) C2 = Lunar sensor station err    5.741 ls  2σ   59.078 ls  light age  1718 s
+  FactionId(1) C3 = Cruiser   err    0.000 ls  2σ    0.940 ls  light age  1016 s
+T+    540 min
+  SHIP Transport hull=100.0/100 armour=100.0 screens=0% heat=103.6PJ SRM=0 LRM=0
+  SHIP Cruiser hull=4000.0/4000 armour=2000.0 screens=100% heat=393.8PJ SRM=24 LRM=36
+  SHIP Raider Cruiser hull=4000.0/4000 armour=2000.0 screens=100% heat=331.9PJ SRM=24 LRM=36
+  FactionId(0) C1 = Raider Cruiser err    0.000 ls  2σ    0.425 ls  light age   735 s
+  FactionId(1) C1 = Transport err    0.039 ls  2σ    3.549 ls  light age  1745 s
+  FactionId(1) C2 = Lunar sensor station err    5.741 ls  2σ   26.963 ls  light age  1711 s
+  FactionId(1) C3 = Cruiser   err    0.000 ls  2σ    0.499 ls  light age   785 s
+T+    600 min
+  SHIP Transport hull=100.0/100 armour=100.0 screens=0% heat=103.6PJ SRM=0 LRM=0
+  SHIP Cruiser hull=4000.0/4000 armour=2000.0 screens=100% heat=207.1PJ SRM=24 LRM=0
+  SHIP Raider Cruiser hull=4000.0/4000 armour=2000.0 screens=100% heat=257.8PJ SRM=24 LRM=0
+  FactionId(0) C1 = Raider Cruiser err    0.001 ls  2σ    0.173 ls  light age   510 s
+  FactionId(0) C2 = Raider Cruiser M1 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C3 = Raider Cruiser M2 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C4 = Raider Cruiser M3 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C5 = Raider Cruiser M4 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C6 = Raider Cruiser M5 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C7 = Raider Cruiser M6 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C8 = Raider Cruiser M7 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C9 = Raider Cruiser M8 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C10 = Raider Cruiser M9 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C11 = Raider Cruiser M10 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C12 = Raider Cruiser M11 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C13 = Raider Cruiser M12 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C14 = Raider Cruiser M13 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C15 = Raider Cruiser M14 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C16 = Raider Cruiser M15 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C17 = Raider Cruiser M16 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C18 = Raider Cruiser M17 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C19 = Raider Cruiser M18 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C20 = Raider Cruiser M19 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C21 = Raider Cruiser M20 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C22 = Raider Cruiser M21 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C23 = Raider Cruiser M22 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C24 = Raider Cruiser M23 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C25 = Raider Cruiser M24 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C26 = Raider Cruiser M25 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C27 = Raider Cruiser M26 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C28 = Raider Cruiser M27 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C29 = Raider Cruiser M28 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C30 = Raider Cruiser M29 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C31 = Raider Cruiser M30 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C32 = Raider Cruiser M31 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C33 = Raider Cruiser M32 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C34 = Raider Cruiser M33 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C35 = Raider Cruiser M34 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C36 = Raider Cruiser M35 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C37 = Raider Cruiser M36 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C1 = Transport err    0.001 ls  2σ    3.850 ls  light age  1800 s
+  FactionId(1) C2 = Lunar sensor station err    5.741 ls  2σ   27.014 ls  light age  1724 s
+  FactionId(1) C3 = Cruiser   err    0.000 ls  2σ    0.206 ls  light age   550 s
+  FactionId(1) C4 = Cruiser M1 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C5 = Cruiser M2 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C6 = Cruiser M3 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C7 = Cruiser M4 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C8 = Cruiser M5 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C9 = Cruiser M6 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C10 = Cruiser M7 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C11 = Cruiser M8 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C12 = Cruiser M9 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C13 = Cruiser M10 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C14 = Cruiser M11 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C15 = Cruiser M12 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C16 = Cruiser M13 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C17 = Cruiser M14 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C18 = Cruiser M15 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C19 = Cruiser M16 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C20 = Cruiser M17 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C21 = Cruiser M18 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C22 = Cruiser M19 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C23 = Cruiser M20 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C24 = Cruiser M21 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C25 = Cruiser M22 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C26 = Cruiser M23 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C27 = Cruiser M24 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C28 = Cruiser M25 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C29 = Cruiser M26 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C30 = Cruiser M27 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C31 = Cruiser M28 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C32 = Cruiser M29 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C33 = Cruiser M30 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C34 = Cruiser M31 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C35 = Cruiser M32 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C36 = Cruiser M33 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C37 = Cruiser M34 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C38 = Cruiser M35 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C39 = Cruiser M36 err    0.000 ls  2σ    0.000 ls  light age     0 s
+T+    660 min
+  SHIP Transport hull=100.0/100 armour=100.0 screens=0% heat=103.6PJ SRM=0 LRM=0
+  SHIP Cruiser hull=3944.3/4000 armour=1936.3 screens=2% heat=330.1PJ SRM=24 LRM=0
+  SHIP Raider Cruiser hull=4000.0/4000 armour=1981.2 screens=44% heat=252.3PJ SRM=24 LRM=0
+  LOST Cruiser M5 at 37298 s: point-defence missile
+  LOST Cruiser M3 at 37298 s: point-defence missile
+  LOST Cruiser M1 at 37299 s: point-defence missile
+  LOST Cruiser M11 at 37383 s: point-defence missile
+  LOST Cruiser M9 at 37383 s: point-defence missile
+  LOST Cruiser M12 at 37383 s: point-defence missile
+  LOST Cruiser M7 at 37384 s: point-defence missile
+  LOST Raider Cruiser M1 at 37420 s: point-defence missile
+  LOST Raider Cruiser M3 at 37421 s: point-defence missile
+  LOST Raider Cruiser M4 at 37421 s: point-defence missile
+  LOST Raider Cruiser M6 at 37422 s: point-defence missile
+  LOST Cruiser M16 at 37467 s: point-defence missile
+  LOST Cruiser M15 at 37468 s: point-defence missile
+  LOST Cruiser M14 at 37469 s: point-defence missile
+  LOST Cruiser M4 at 37521 s: point-defence laser
+  LOST Cruiser M8 at 37553 s: point-defence missile
+  LOST Cruiser M21 at 37553 s: point-defence missile
+  LOST Cruiser M19 at 37554 s: point-defence missile
+  LOST Raider Cruiser M2 at 37572 s: point-defence missile
+  LOST Raider Cruiser M5 at 37573 s: point-defence missile
+  LOST Cruiser M10 at 37598 s: point-defence missile
+  LOST Cruiser M17 at 37638 s: point-defence missile
+  LOST Cruiser M27 at 37638 s: point-defence missile
+  LOST Cruiser M18 at 37638 s: point-defence missile
+  LOST Cruiser M13 at 37638 s: point-defence missile
+  LOST Cruiser M25 at 37639 s: point-defence missile
+  LOST Raider Cruiser M12 at 37672 s: point-defence missile
+  LOST Cruiser M35 at 37723 s: point-defence missile
+  LOST Cruiser M20 at 37724 s: point-defence missile
+  LOST Cruiser M24 at 37769 s: point-defence missile
+  LOST Cruiser M29 at 37808 s: point-defence missile
+  LOST Cruiser M26 at 37809 s: point-defence missile
+  LOST Raider Cruiser M10 at 37824 s: point-defence missile
+  LOST Cruiser M28 at 37853 s: point-defence missile
+  LOST Cruiser M30 at 37854 s: point-defence missile
+  LOST Raider Cruiser M9 at 37861 s: point-defence missile
+  LOST Raider Cruiser M7 at 37867 s: point-defence laser
+  LOST Cruiser M36 at 37894 s: point-defence missile
+  LOST Raider Cruiser M13 at 37921 s: point-defence missile
+  LOST Cruiser M34 at 37939 s: point-defence missile
+  LOST Cruiser M31 at 37943 s: point-defence laser
+  LOST Raider Cruiser M17 at 38074 s: point-defence missile
+  LOST Raider Cruiser M15 at 38112 s: point-defence missile
+  LOST Raider Cruiser M18 at 38112 s: point-defence missile
+  LOST Raider Cruiser M19 at 38172 s: point-defence missile
+  LOST Raider Cruiser M23 at 38173 s: point-defence missile
+  LOST Raider Cruiser M24 at 38363 s: point-defence missile
+  LOST Raider Cruiser M20 at 38364 s: point-defence laser
+  LOST Raider Cruiser M27 at 38423 s: point-defence missile
+  LOST Raider Cruiser M28 at 38424 s: point-defence missile
+  LOST Raider Cruiser M29 at 38575 s: point-defence missile
+  LOST Raider Cruiser M30 at 38575 s: point-defence missile
+  LOST Raider Cruiser M25 at 38623 s: point-defence laser
+  LOST Raider Cruiser M36 at 38675 s: point-defence missile
+  LOST Raider Cruiser M31 at 38863 s: point-defence missile
+  FactionId(0) C1 = Raider Cruiser err    0.000 ls  2σ    0.042 ls  light age   284 s
+  FactionId(1) C1 = Transport err    0.001 ls  2σ    4.367 ls  light age  1892 s
+  FactionId(1) C2 = Lunar sensor station err    5.741 ls  2σ   29.069 ls  light age  1759 s
+  FactionId(1) C3 = Cruiser   err    0.001 ls  2σ    0.052 ls  light age   311 s
+T+    720 min
+  SHIP Transport hull=100.0/100 armour=100.0 screens=0% heat=103.6PJ SRM=0 LRM=0
+  SHIP Cruiser hull=3984.3/4000 armour=1936.3 screens=14% heat=332.2PJ SRM=12 LRM=0
+  SHIP Raider Cruiser hull=4000.0/4000 armour=1981.2 screens=56% heat=251.6PJ SRM=18 LRM=0
+  LOST Cruiser M5 at 37298 s: point-defence missile
+  LOST Cruiser M3 at 37298 s: point-defence missile
+  LOST Cruiser M1 at 37299 s: point-defence missile
+  LOST Cruiser M11 at 37383 s: point-defence missile
+  LOST Cruiser M9 at 37383 s: point-defence missile
+  LOST Cruiser M12 at 37383 s: point-defence missile
+  LOST Cruiser M7 at 37384 s: point-defence missile
+  LOST Raider Cruiser M1 at 37420 s: point-defence missile
+  LOST Raider Cruiser M3 at 37421 s: point-defence missile
+  LOST Raider Cruiser M4 at 37421 s: point-defence missile
+  LOST Raider Cruiser M6 at 37422 s: point-defence missile
+  LOST Cruiser M16 at 37467 s: point-defence missile
+  LOST Cruiser M15 at 37468 s: point-defence missile
+  LOST Cruiser M14 at 37469 s: point-defence missile
+  LOST Cruiser M4 at 37521 s: point-defence laser
+  LOST Cruiser M8 at 37553 s: point-defence missile
+  LOST Cruiser M21 at 37553 s: point-defence missile
+  LOST Cruiser M19 at 37554 s: point-defence missile
+  LOST Raider Cruiser M2 at 37572 s: point-defence missile
+  LOST Raider Cruiser M5 at 37573 s: point-defence missile
+  LOST Cruiser M10 at 37598 s: point-defence missile
+  LOST Cruiser M17 at 37638 s: point-defence missile
+  LOST Cruiser M27 at 37638 s: point-defence missile
+  LOST Cruiser M18 at 37638 s: point-defence missile
+  LOST Cruiser M13 at 37638 s: point-defence missile
+  LOST Cruiser M25 at 37639 s: point-defence missile
+  LOST Raider Cruiser M12 at 37672 s: point-defence missile
+  LOST Cruiser M35 at 37723 s: point-defence missile
+  LOST Cruiser M20 at 37724 s: point-defence missile
+  LOST Cruiser M24 at 37769 s: point-defence missile
+  LOST Cruiser M29 at 37808 s: point-defence missile
+  LOST Cruiser M26 at 37809 s: point-defence missile
+  LOST Raider Cruiser M10 at 37824 s: point-defence missile
+  LOST Cruiser M28 at 37853 s: point-defence missile
+  LOST Cruiser M30 at 37854 s: point-defence missile
+  LOST Raider Cruiser M9 at 37861 s: point-defence missile
+  LOST Raider Cruiser M7 at 37867 s: point-defence laser
+  LOST Cruiser M36 at 37894 s: point-defence missile
+  LOST Raider Cruiser M13 at 37921 s: point-defence missile
+  LOST Cruiser M34 at 37939 s: point-defence missile
+  LOST Cruiser M31 at 37943 s: point-defence laser
+  LOST Raider Cruiser M17 at 38074 s: point-defence missile
+  LOST Raider Cruiser M15 at 38112 s: point-defence missile
+  LOST Raider Cruiser M18 at 38112 s: point-defence missile
+  LOST Raider Cruiser M19 at 38172 s: point-defence missile
+  LOST Raider Cruiser M23 at 38173 s: point-defence missile
+  LOST Raider Cruiser M24 at 38363 s: point-defence missile
+  LOST Raider Cruiser M20 at 38364 s: point-defence laser
+  LOST Raider Cruiser M27 at 38423 s: point-defence missile
+  LOST Raider Cruiser M28 at 38424 s: point-defence missile
+  LOST Raider Cruiser M29 at 38575 s: point-defence missile
+  LOST Raider Cruiser M30 at 38575 s: point-defence missile
+  LOST Raider Cruiser M25 at 38623 s: point-defence laser
+  LOST Raider Cruiser M36 at 38675 s: point-defence missile
+  LOST Raider Cruiser M31 at 38863 s: point-defence missile
+  FactionId(0) C1 = Raider Cruiser err    0.000 ls  2σ    0.001 ls  light age    56 s
+  FactionId(0) C108 = Raider Cruiser M37 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C109 = Raider Cruiser M38 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C110 = Raider Cruiser M39 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C111 = Raider Cruiser M40 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C112 = Raider Cruiser M41 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C113 = Raider Cruiser M42 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C114 = Raider Cruiser interceptor 71 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C115 = Raider Cruiser interceptor 72 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C116 = Raider Cruiser interceptor 73 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C117 = Raider Cruiser interceptor 74 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C118 = Raider Cruiser interceptor 75 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C119 = Raider Cruiser interceptor 76 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C120 = Raider Cruiser interceptor 77 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C121 = Raider Cruiser interceptor 78 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C122 = Raider Cruiser interceptor 79 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C123 = Raider Cruiser interceptor 80 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C1 = Transport err    0.019 ls  2σ    5.179 ls  light age  2022 s
+  FactionId(1) C2 = Lunar sensor station err    5.741 ls  2σ   28.756 ls  light age  1817 s
+  FactionId(1) C3 = Cruiser   err    0.000 ls  2σ    0.001 ls  light age    62 s
+  FactionId(1) C120 = Cruiser M37 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C121 = Cruiser M38 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C122 = Cruiser M39 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C123 = Cruiser M40 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C124 = Cruiser M41 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C125 = Cruiser M42 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C126 = Cruiser M43 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C127 = Cruiser M44 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C128 = Cruiser M45 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C129 = Cruiser M46 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C130 = Cruiser M47 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C131 = Cruiser M48 err    0.000 ls  2σ    0.000 ls  light age     0 s
+
+simulated 12.00 h in 12.14 s wall (3560× real time)

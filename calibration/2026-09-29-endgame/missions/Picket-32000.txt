@@ -1,0 +1,31 @@
+T+     60 min
+  SHIP Transport hull=100.0/100 armour=100.0 screens=0% heat=38.3PJ SRM=0 LRM=0
+  SHIP Picket hull=500.0/500 armour=250.0 screens=100% heat=25.3PJ SRM=20 LRM=0
+  SHIP Raider Picket hull=500.0/500 armour=250.0 screens=10% heat=6.5PJ SRM=20 LRM=0
+  FactionId(0) C1 = Raider Picket err    0.006 ls  2σ    1.027 ls  light age   456 s
+  FactionId(1) C1 = Transport err    0.000 ls  2σ    0.150 ls  light age   479 s
+  FactionId(1) C2 = Picket    err    0.963 ls  2σ    4.086 ls  light age   458 s
+  FactionId(1) C3 = Lunar sensor station err    0.000 ls  2σ    0.153 ls  light age   484 s
+T+    120 min
+  SHIP Transport hull=100.0/100 armour=100.0 screens=0% heat=73.3PJ SRM=0 LRM=0
+  SHIP Picket hull=500.0/500 armour=250.0 screens=100% heat=40.7PJ SRM=20 LRM=0
+  SHIP Raider Picket hull=500.0/500 armour=250.0 screens=22% heat=10.5PJ SRM=20 LRM=0
+  FactionId(0) C1 = Raider Picket err    1.664 ls  2σ    4.248 ls  light age   318 s
+  FactionId(1) C1 = Transport err    0.000 ls  2σ    0.108 ls  light age   420 s
+  FactionId(1) C2 = Picket    err    0.001 ls  2σ    0.059 ls  light age   327 s
+  FactionId(1) C3 = Lunar sensor station err    0.000 ls  2σ    0.124 ls  light age   444 s
+T+    180 min
+  SHIP Transport hull=100.0/100 armour=100.0 screens=0% heat=94.4PJ SRM=0 LRM=0
+  SHIP Picket hull=500.0/500 armour=250.0 screens=100% heat=49.5PJ SRM=20 LRM=0
+  SHIP Raider Picket hull=500.0/500 armour=250.0 screens=34% heat=12.9PJ SRM=20 LRM=0
+  FactionId(0) C1 = Raider Picket err    0.000 ls  2σ    0.010 ls  light age   156 s
+  FactionId(1) C1 = Transport err    0.001 ls  2σ    0.088 ls  light age   387 s
+  FactionId(1) C2 = Picket    err    0.000 ls  2σ    0.011 ls  light age   165 s
+  FactionId(1) C3 = Lunar sensor station err    0.000 ls  2σ    0.124 ls  light age   443 s
+T+    240 min
+  OUTCOME FactionId(1): Picket surrendered
+  SHIP Transport hull=100.0/100 armour=100.0 screens=0% heat=103.2PJ SRM=0 LRM=0
+  LOST Picket at 13290 s: surrendered
+  LOST Raider Picket at 13853 s: SRM missile
+
+simulated 4.00 h in 2.12 s wall (6787× real time)

@@ -1,0 +1,78 @@
+T+     60 min
+  SHIP Transport hull=100.0/100 armour=100.0 screens=0% heat=0.0PJ SRM=0 LRM=0
+  SHIP Picket hull=500.0/500 armour=250.0 screens=100% heat=0.0PJ SRM=20 LRM=0
+  SHIP Raider Picket hull=500.0/500 armour=250.0 screens=100% heat=6.6PJ SRM=20 LRM=0
+  FactionId(0) C1 bearing only, light age 2224 s
+  FactionId(1) C2 bearing only, light age 2208 s
+  FactionId(1) C3 = Transport err    2.083 ls  2σ   86.051 ls  light age  2207 s
+T+    120 min
+  SHIP Transport hull=100.0/100 armour=100.0 screens=0% heat=0.0PJ SRM=0 LRM=0
+  SHIP Picket hull=500.0/500 armour=250.0 screens=100% heat=0.0PJ SRM=20 LRM=0
+  SHIP Raider Picket hull=500.0/500 armour=250.0 screens=100% heat=10.6PJ SRM=20 LRM=0
+  FactionId(0) C1 bearing only, light age 2187 s
+  FactionId(1) C1 = Lunar sensor station err    5.688 ls  2σ   91.447 ls  light age  2146 s
+  FactionId(1) C2 bearing only, light age 2146 s
+  FactionId(1) C3 = Transport err    2.107 ls  2σ   81.812 ls  light age  2145 s
+T+    180 min
+  SHIP Transport hull=100.0/100 armour=100.0 screens=0% heat=0.0PJ SRM=0 LRM=0
+  SHIP Picket hull=500.0/500 armour=250.0 screens=100% heat=0.0PJ SRM=20 LRM=0
+  SHIP Raider Picket hull=500.0/500 armour=250.0 screens=100% heat=13.0PJ SRM=20 LRM=0
+  FactionId(0) C1 bearing only, light age 2104 s
+  FactionId(1) C1 = Lunar sensor station err    5.688 ls  2σ   82.608 ls  light age  2042 s
+  FactionId(1) C2 bearing only, light age 2040 s
+  FactionId(1) C3 = Transport err    2.404 ls  2σ   79.942 ls  light age  2039 s
+T+    240 min
+  SHIP Transport hull=100.0/100 armour=100.0 screens=0% heat=0.0PJ SRM=0 LRM=0
+  SHIP Picket hull=500.0/500 armour=250.0 screens=100% heat=22.1PJ SRM=20 LRM=0
+  SHIP Raider Picket hull=500.0/500 armour=250.0 screens=100% heat=14.4PJ SRM=20 LRM=0
+  FactionId(0) C1 = Raider Picket err   75.028 ls  2σ  184.039 ls  light age  1944 s
+  FactionId(1) C1 = Lunar sensor station err    5.688 ls  2σ   71.613 ls  light age  1897 s
+  FactionId(1) C2 bearing only, light age 1885 s
+  FactionId(1) C3 = Transport err    2.986 ls  2σ   67.931 ls  light age  1891 s
+T+    300 min
+  SHIP Transport hull=100.0/100 armour=100.0 screens=0% heat=0.0PJ SRM=0 LRM=0
+  SHIP Picket hull=500.0/500 armour=250.0 screens=100% heat=17.0PJ SRM=20 LRM=0
+  SHIP Raider Picket hull=500.0/500 armour=250.0 screens=100% heat=15.3PJ SRM=20 LRM=0
+  FactionId(0) C1 bearing only, light age 1693 s
+  FactionId(1) C1 = Lunar sensor station err    5.688 ls  2σ   58.875 ls  light age  1710 s
+  FactionId(1) C2 bearing only, light age 1635 s
+  FactionId(1) C3 = Transport err    2.890 ls  2σ   54.660 ls  light age  1701 s
+T+    360 min
+  SHIP Transport hull=100.0/100 armour=100.0 screens=0% heat=0.0PJ SRM=0 LRM=0
+  SHIP Picket hull=500.0/500 armour=250.0 screens=100% heat=35.1PJ SRM=20 LRM=0
+  SHIP Raider Picket hull=500.0/500 armour=250.0 screens=100% heat=15.9PJ SRM=20 LRM=0
+  FactionId(0) C1 = Raider Picket err   11.511 ls  2σ   33.174 ls  light age  1356 s
+  FactionId(1) C1 = Lunar sensor station err    5.688 ls  2σ   45.976 ls  light age  1503 s
+  FactionId(1) C2 = Picket    err   16.578 ls  2σ   42.859 ls  light age  1329 s
+  FactionId(1) C3 = Transport err    2.832 ls  2σ   41.713 ls  light age  1492 s
+T+    420 min
+  SHIP Transport hull=100.0/100 armour=100.0 screens=0% heat=0.0PJ SRM=0 LRM=0
+  SHIP Picket hull=500.0/500 armour=250.0 screens=100% heat=46.6PJ SRM=20 LRM=0
+  SHIP Raider Picket hull=500.0/500 armour=250.0 screens=100% heat=16.2PJ SRM=20 LRM=0
+  FactionId(0) C1 = Raider Picket err   14.266 ls  2σ   39.961 ls  light age   972 s
+  FactionId(1) C1 = Lunar sensor station err    5.688 ls  2σ   36.440 ls  light age  1330 s
+  FactionId(1) C2 = Picket    err    4.606 ls  2σ   32.029 ls  light age   982 s
+  FactionId(1) C3 = Transport err    2.829 ls  2σ   32.053 ls  light age  1316 s
+T+    480 min
+  SHIP Transport hull=100.0/100 armour=100.0 screens=0% heat=0.0PJ SRM=0 LRM=0
+  SHIP Picket hull=500.0/500 armour=250.0 screens=100% heat=19.2PJ SRM=20 LRM=0
+  SHIP Raider Picket hull=500.0/500 armour=250.0 screens=100% heat=16.4PJ SRM=20 LRM=0
+  FactionId(0) C1 = Raider Picket err    2.520 ls  2σ    9.618 ls  light age   582 s
+  FactionId(1) C1 = Lunar sensor station err    5.688 ls  2σ   18.851 ls  light age  1199 s
+  FactionId(1) C2 = Picket    err    1.581 ls  2σ    7.161 ls  light age   604 s
+  FactionId(1) C3 = Transport err    2.830 ls  2σ   14.255 ls  light age  1184 s
+T+    540 min
+  SHIP Transport hull=100.0/100 armour=100.0 screens=0% heat=0.0PJ SRM=0 LRM=0
+  SHIP Picket hull=500.0/500 armour=250.0 screens=100% heat=37.0PJ SRM=20 LRM=0
+  SHIP Raider Picket hull=500.0/500 armour=250.0 screens=100% heat=16.5PJ SRM=20 LRM=0
+  FactionId(0) C1 = Raider Picket err    0.000 ls  2σ    0.017 ls  light age   194 s
+  FactionId(1) C1 = Lunar sensor station err    0.000 ls  2σ    1.783 ls  light age  1112 s
+  FactionId(1) C2 = Picket    err    0.002 ls  2σ    0.019 ls  light age   208 s
+  FactionId(1) C3 = Transport err    2.830 ls  2σ   12.821 ls  light age  1098 s
+T+    600 min
+  OUTCOME FactionId(0): Raider Picket surrendered
+  SHIP Transport hull=100.0/100 armour=100.0 screens=0% heat=0.0PJ SRM=0 LRM=0
+  LOST Raider Picket at 34030 s: surrendered
+  LOST Picket at 34060 s: surrendered
+
+simulated 10.00 h in 2.46 s wall (14643× real time)

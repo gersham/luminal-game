@@ -582,3 +582,22 @@ The [broader balance review](calibration/2026-09-29-review/report.md) covers
 active sensors, alternate tactics and mission pacing, with reproducible runners
 and raw results. The recommended Cruiser (80) and Battleship (120) interceptor
 magazines are now fitted; see the [follow-up validation and pacing proposals](calibration/2026-09-29-capital-fits/report.md).
+
+### Endgame and jumps
+
+Ships now evaluate whether they can still fight or repair an escape route.
+Losing AI prefers a jump withdrawal over destruction, or surrenders when it
+cannot recover an escape. **Withdraw (Jump)** concedes the objective only after
+the vulnerable ten-minute spool completes and removes the ship from the battle.
+**Surrender** concedes immediately. Opponents receive these announcements and
+outcomes after light delay.
+
+Choose **Automatic / Fight / Escape** repair goals in the ship panel. Power and
+damage control remain first priorities, and changing goals preserves ongoing
+repair work. **Next Tactical Event** advances the normal simulation until a
+received tactical change, repair, jump or result, with a 24-hour limit.
+
+Jump spooling has a sustained blue halo. Departure and arrival create large
+blue blooms lasting four real seconds; withdrawing ships have a departure
+bloom only. See the [endgame validation](calibration/2026-09-29-endgame/report.md)
+for behavior, screenshots, regression coverage and the 20-mission survey.

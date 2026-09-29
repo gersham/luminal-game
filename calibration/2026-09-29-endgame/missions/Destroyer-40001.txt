@@ -1,0 +1,102 @@
+T+     60 min
+  SHIP Transport hull=100.0/100 armour=100.0 screens=0% heat=0.0PJ SRM=0 LRM=0
+  SHIP Destroyer hull=2000.0/2000 armour=1000.0 screens=100% heat=9.3PJ SRM=24 LRM=18
+  SHIP Raider Destroyer hull=2000.0/2000 armour=1000.0 screens=100% heat=101.4PJ SRM=24 LRM=18
+  FactionId(1) C1 = Lunar sensor station err    8.389 ls  2σ  257.409 ls  light age  4025 s
+T+    120 min
+  SHIP Transport hull=100.0/100 armour=100.0 screens=0% heat=0.0PJ SRM=0 LRM=0
+  SHIP Destroyer hull=2000.0/2000 armour=1000.0 screens=100% heat=1.1PJ SRM=24 LRM=18
+  SHIP Raider Destroyer hull=2000.0/2000 armour=1000.0 screens=100% heat=124.5PJ SRM=24 LRM=18
+  FactionId(0) C1 = Raider Destroyer err   62.526 ls  2σ  541.944 ls  light age  4008 s
+  FactionId(1) C1 = Lunar sensor station err    8.390 ls  2σ  290.651 ls  light age  3964 s
+  FactionId(1) C2 bearing only, light age 3959 s
+  FactionId(1) C3 = Transport err   29.061 ls  2σ  251.608 ls  light age  3960 s
+T+    180 min
+  SHIP Transport hull=100.0/100 armour=100.0 screens=0% heat=0.0PJ SRM=0 LRM=0
+  SHIP Destroyer hull=2000.0/2000 armour=1000.0 screens=100% heat=102.0PJ SRM=24 LRM=18
+  SHIP Raider Destroyer hull=2000.0/2000 armour=1000.0 screens=100% heat=125.7PJ SRM=24 LRM=18
+  FactionId(0) C1 = Raider Destroyer err   47.358 ls  2σ  283.135 ls  light age  3906 s
+  FactionId(1) C1 = Lunar sensor station err    8.391 ls  2σ  301.055 ls  light age  3869 s
+  FactionId(1) C2 bearing only, light age 3849 s
+  FactionId(1) C3 = Transport err   29.287 ls  2σ  275.478 ls  light age  3849 s
+T+    240 min
+  SHIP Transport hull=100.0/100 armour=100.0 screens=0% heat=0.0PJ SRM=0 LRM=0
+  SHIP Destroyer hull=2000.0/2000 armour=1000.0 screens=100% heat=163.2PJ SRM=24 LRM=18
+  SHIP Raider Destroyer hull=2000.0/2000 armour=1000.0 screens=100% heat=125.8PJ SRM=24 LRM=18
+  FactionId(0) C1 = Raider Destroyer err   43.310 ls  2σ  302.170 ls  light age  3724 s
+  FactionId(1) C1 = Lunar sensor station err    8.391 ls  2σ  280.863 ls  light age  3741 s
+  FactionId(1) C2 = Destroyer err   46.042 ls  2σ  329.144 ls  light age  3678 s
+  FactionId(1) C3 = Transport err   23.097 ls  2σ  277.769 ls  light age  3694 s
+T+    300 min
+  SHIP Transport hull=100.0/100 armour=100.0 screens=0% heat=0.0PJ SRM=0 LRM=0
+  SHIP Destroyer hull=2000.0/2000 armour=1000.0 screens=100% heat=192.1PJ SRM=24 LRM=18
+  SHIP Raider Destroyer hull=2000.0/2000 armour=1000.0 screens=100% heat=125.8PJ SRM=24 LRM=18
+  FactionId(0) C1 = Raider Destroyer err   22.087 ls  2σ  306.891 ls  light age  3458 s
+  FactionId(1) C1 = Lunar sensor station err    8.390 ls  2σ  255.908 ls  light age  3579 s
+  FactionId(1) C2 = Destroyer err   43.562 ls  2σ  232.986 ls  light age  3425 s
+  FactionId(1) C3 = Transport err   19.214 ls  2σ  249.517 ls  light age  3493 s
+T+    360 min
+  SHIP Transport hull=100.0/100 armour=100.0 screens=0% heat=0.0PJ SRM=0 LRM=0
+  SHIP Destroyer hull=2000.0/2000 armour=1000.0 screens=100% heat=112.3PJ SRM=24 LRM=18
+  SHIP Raider Destroyer hull=2000.0/2000 armour=1000.0 screens=100% heat=121.1PJ SRM=24 LRM=18
+  FactionId(0) C1 = Raider Destroyer err   11.160 ls  2σ  271.882 ls  light age  3120 s
+  FactionId(1) C1 = Lunar sensor station err    8.390 ls  2σ  229.362 ls  light age  3385 s
+  FactionId(1) C2 = Destroyer err   10.855 ls  2σ   14.741 ls  light age  3087 s
+  FactionId(1) C3 = Transport err   18.252 ls  2σ  216.725 ls  light age  3247 s
+T+    420 min
+  SHIP Transport hull=100.0/100 armour=100.0 screens=0% heat=0.0PJ SRM=0 LRM=0
+  SHIP Destroyer hull=2000.0/2000 armour=1000.0 screens=100% heat=169.4PJ SRM=24 LRM=18
+  SHIP Raider Destroyer hull=2000.0/2000 armour=1000.0 screens=100% heat=154.8PJ SRM=24 LRM=18
+  FactionId(0) C1 = Raider Destroyer err   34.502 ls  2σ  146.818 ls  light age  2699 s
+  FactionId(1) C2 = Destroyer err   19.175 ls  2σ  107.723 ls  light age  2714 s
+  FactionId(1) C3 = Transport err   18.365 ls  2σ  186.566 ls  light age  2994 s
+T+    480 min
+  SHIP Transport hull=100.0/100 armour=100.0 screens=0% heat=0.0PJ SRM=0 LRM=0
+  SHIP Destroyer hull=2000.0/2000 armour=1000.0 screens=100% heat=111.2PJ SRM=24 LRM=18
+  SHIP Raider Destroyer hull=2000.0/2000 armour=1000.0 screens=100% heat=195.2PJ SRM=24 LRM=18
+  FactionId(0) C1 = Raider Destroyer err   34.488 ls  2σ  123.666 ls  light age  2259 s
+  FactionId(1) C2 = Destroyer err   18.068 ls  2σ  128.920 ls  light age  2332 s
+  FactionId(1) C3 = Transport err   18.595 ls  2σ  162.099 ls  light age  2770 s
+T+    540 min
+  SHIP Transport hull=100.0/100 armour=100.0 screens=0% heat=0.0PJ SRM=0 LRM=0
+  SHIP Destroyer hull=2000.0/2000 armour=1000.0 screens=100% heat=121.8PJ SRM=24 LRM=18
+  SHIP Raider Destroyer hull=2000.0/2000 armour=1000.0 screens=100% heat=99.2PJ SRM=24 LRM=18
+  FactionId(0) C1 = Raider Destroyer err   14.721 ls  2σ   40.608 ls  light age  1840 s
+  FactionId(1) C1 = Lunar sensor station err    8.390 ls  2σ  173.470 ls  light age  2933 s
+  FactionId(1) C2 = Destroyer err    9.062 ls  2σ   49.764 ls  light age  1936 s
+  FactionId(1) C3 = Transport err   18.704 ls  2σ  141.745 ls  light age  2569 s
+T+    600 min
+  SHIP Transport hull=100.0/100 armour=100.0 screens=0% heat=0.0PJ SRM=0 LRM=0
+  SHIP Destroyer hull=2000.0/2000 armour=1000.0 screens=100% heat=175.2PJ SRM=24 LRM=18
+  SHIP Raider Destroyer hull=2000.0/2000 armour=1000.0 screens=100% heat=161.5PJ SRM=24 LRM=18
+  FactionId(0) C1 = Raider Destroyer err   11.886 ls  2σ   40.748 ls  light age  1420 s
+  FactionId(1) C1 = Lunar sensor station err    8.390 ls  2σ  162.798 ls  light age  2856 s
+  FactionId(1) C2 = Destroyer err   13.157 ls  2σ   55.003 ls  light age  1534 s
+  FactionId(1) C3 = Transport err   18.726 ls  2σ  125.489 ls  light age  2395 s
+T+    660 min
+  SHIP Transport hull=100.0/100 armour=100.0 screens=0% heat=0.0PJ SRM=0 LRM=0
+  SHIP Destroyer hull=2000.0/2000 armour=1000.0 screens=100% heat=53.5PJ SRM=24 LRM=18
+  SHIP Raider Destroyer hull=2000.0/2000 armour=1000.0 screens=100% heat=199.3PJ SRM=24 LRM=18
+  FactionId(0) C1 = Raider Destroyer err    0.000 ls  2σ    0.941 ls  light age  1013 s
+  FactionId(1) C1 = Lunar sensor station err    8.390 ls  2σ  159.351 ls  light age  2823 s
+  FactionId(1) C2 = Destroyer err   12.258 ls  2σ   40.697 ls  light age  1122 s
+  FactionId(1) C3 = Transport err   18.721 ls  2σ  113.128 ls  light age  2253 s
+T+    720 min
+  SHIP Transport hull=100.0/100 armour=100.0 screens=0% heat=0.0PJ SRM=0 LRM=0
+  SHIP Destroyer hull=2000.0/2000 armour=1000.0 screens=100% heat=130.8PJ SRM=24 LRM=9
+  SHIP Raider Destroyer hull=2000.0/2000 armour=1000.0 screens=100% heat=108.6PJ SRM=24 LRM=18
+  FactionId(0) C1 = Raider Destroyer err   11.938 ls  2σ   26.578 ls  light age   620 s
+  FactionId(1) C1 = Lunar sensor station err    8.390 ls  2σ  160.055 ls  light age  2821 s
+  FactionId(1) C2 = Destroyer err    0.018 ls  2σ    0.415 ls  light age   699 s
+  FactionId(1) C3 = Transport err   18.716 ls  2σ  103.287 ls  light age  2132 s
+  FactionId(1) C4 = Destroyer M1 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C5 = Destroyer M2 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C6 = Destroyer M3 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C7 = Destroyer M4 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C8 = Destroyer M5 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C9 = Destroyer M6 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C10 = Destroyer M7 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C11 = Destroyer M8 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C12 = Destroyer M9 err    0.000 ls  2σ    0.000 ls  light age     0 s
+
+simulated 12.00 h in 9.40 s wall (4598× real time)

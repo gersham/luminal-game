@@ -21,6 +21,8 @@ mod refinements;
 pub use refinements::{CombatEvent, CombatKind};
 #[path = "calibration.rs"]
 pub mod calibration;
+#[path = "endgame.rs"]
+pub mod endgame;
 #[path = "point_defence.rs"]
 pub mod point_defence;
 #[path = "interceptor.rs"]
@@ -125,6 +127,7 @@ pub struct Autopilot {
 
 #[derive(Clone, Debug)]
 pub struct Body {
+    pub withdrawing:bool,
     step_generation:u64,
     pub jump:Option<jump::JumpState>,
     pub controls:controls::Controls,
@@ -338,6 +341,8 @@ pub enum OrderError {
 /// How a body came to an end. Truth only.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum LossCause {
+    Withdrawn,
+    Surrendered,
     /// Hit the surface of a celestial body (index into `System::bodies`).
     Impact(usize),
     /// Killed by a missile's payload.
@@ -391,7 +396,7 @@ pub struct Objective {
     pub protect: BodyId,
     /// Losing the player ship immediately loses the scenario.
     pub player:Option<BodyId>,
-    /// When set, this body must be destroyed to win; transport arrival/loss is not terminal.
+    /// When set, defeating this body (destruction, surrender or withdrawal) wins; transport arrival/loss is not terminal.
     pub defeat: Option<BodyId>,
     /// The side trying to get `protect` there.
     pub defender: FactionId,
@@ -529,6 +534,7 @@ pub struct World {
     pub hits: Vec<Hit>,
     pub objective: Option<Objective>,
     pub outcome: Option<Outcome>,
+    outcome_exit:Option<BodyId>,
     pub alerts: Vec<Alert>,
     scheduler: Scheduler<Event>,
     last_step: Vec<f64>,
@@ -559,7 +565,7 @@ impl World {
             .into_iter()
             .map(|spec| {
                 let trajectory = ballistic_history(&system, spec.state, spec.thrust, history_s);
-                Body {
+                Body {withdrawing:false,
                     jump:None,step_generation:0,
                     controls:controls::Controls::default(),last_missile_launch:None,
                     ship_class: (spec.kind==BodyKind::Ship).then_some(ShipClass::Frigate),
@@ -628,7 +634,7 @@ impl World {
             losses: vec![],
             hits: vec![],
             objective: None,
-            outcome: None,
+            outcome: None,outcome_exit:None,
             alerts: vec![],
             scheduler,
             last_frame: -SENSOR_FRAME_S.value,
@@ -951,7 +957,7 @@ impl World {
         let mut start = b.trajectory.state_at(t).expect("alive");start.pos=start.pos+offset;
         let dv = payload.delta_v();
         let mid = BodyId(self.bodies.len() as u32);
-        self.bodies.push(Body {
+        self.bodies.push(Body {withdrawing:false,
             jump:None,step_generation:0,
             controls:controls::Controls::default(),last_missile_launch:None,
             ship_class: None,facing:0.0,turn_target:0.0,facing_at:0.0,spinal_ready_at:0.0,spinal_tracking:None,
@@ -1629,10 +1635,12 @@ impl World {
         let at = b.trajectory.state_at(t).map(|s| s.pos);
         // Catastrophic loss releases remaining stored field/electrical/thermal
         // energy into the destruction flash, rather than deleting the reservoirs.
-        b.thermal.radiated_j += b.thermal.capacitor_j + b.thermal.heat_j;
+        let departure=matches!(cause,LossCause::Withdrawn|LossCause::Surrendered);
+        if !departure {b.thermal.radiated_j += b.thermal.capacitor_j + b.thermal.heat_j;
         b.thermal.capacitor_j = 0.0;
         b.thermal.heat_j = 0.0;
-        b.thermal.field = 0.0;
+        b.thermal.field = 0.0;}
+        b.jump=None;b.withdrawing=false;
         b.trajectory.terminate(t);
         b.autopilot = None;
         let (faction, name) = (b.faction, b.name.clone());
@@ -1647,7 +1655,7 @@ impl World {
         }
         self.losses.push(Loss { body: id, t, cause });
         if let Some(at) = at {
-            self.record_combat(t, at, if cause == LossCause::Expended { CombatKind::Expended } else { CombatKind::Destroyed }, Some(id), Some(faction));
+            self.record_combat(t, at, match cause {LossCause::Withdrawn=>CombatKind::Withdrawn,LossCause::Surrendered=>CombatKind::Surrendered,LossCause::Expended=>CombatKind::Expended,_=>CombatKind::Destroyed}, Some(id), Some(faction));
         }
         self.retire_tracked_missile(id,t);
         if cause != LossCause::Expended {
@@ -1657,7 +1665,10 @@ impl World {
             let winner=if o.player==Some(id) || (o.defeat.is_none() && o.protect==id) {Some(o.attacker)}
                 else if o.defeat==Some(id) {Some(o.defender)} else {None};
             if let Some(winner)=winner {
-                self.decide(winner, format!("{name} was destroyed"));
+                let reason=match cause {LossCause::Withdrawn=>"withdrew from combat",LossCause::Surrendered=>"surrendered",_=>"was destroyed"};
+                if departure {
+                    if self.outcome.is_none() {self.outcome_exit=Some(id);self.outcome=Some(Outcome {winner,t:self.time,reason:format!("{name} {reason}")});}
+                } else {self.decide(winner, format!("{name} {reason}"));}
             }
         }
     }

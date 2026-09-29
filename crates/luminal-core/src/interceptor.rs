@@ -131,7 +131,7 @@ impl World {
         body.damage=crate::damage::Damage::default();
         body.name=format!("{} interceptor {number}",carrier.name);
         body.kind=BodyKind::Missile; body.controllable=false; body.armed=false;
-        body.ship_class=None;body.jump=None;body.step_generation=0;
+        body.ship_class=None;body.jump=None;body.withdrawing=false;body.step_generation=0;
         body.has_screen=false; body.screen_up=false; body.hull_j=0.0;
         body.point_defence=None; body.interceptor_battery=None; body.missile=None;
         body.probes=0; body.probe_burn_until=None; body.probe_ping_at=t;

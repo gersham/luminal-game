@@ -4,6 +4,8 @@
 //! their `Role`. A faction view is built from that faction's `Perception` only, so it
 //! is safe to send over a network; only the spectator role ever receives truth.
 
+#[path = "event_wait.rs"]
+mod event_wait;
 use crate::celestial::{CelestialKind, System};
 use crate::kinematics::Vec2;
 use crate::mind::{ContactId, Measurement, Source};
@@ -26,6 +28,9 @@ pub enum Role {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Command {
+    Withdraw {body:BodyId},
+    Surrender {body:BodyId},
+    SetRepairGoal {body:BodyId,goal:crate::damage::RepairGoal},
     Jump {body:BodyId,destination:Vec2},
     CancelJump {body:BodyId},
     /// Constant thrust from now on, km/s². Gravity acts in addition. Cancels any
@@ -88,7 +93,7 @@ pub enum Rejection {
 impl Command {
     pub fn body(&self) -> Option<BodyId> {
         match *self {
-            Self::Jump {body,..} | Self::CancelJump {body} | Self::Alongside {body,..} | Self::Follow {body,..} | Self::SetThrust { body, .. } | Self::Orbit { body, .. } | Self::Intercept { body, .. }
+            Self::Withdraw {body} | Self::Surrender {body} | Self::SetRepairGoal {body,..} | Self::Jump {body,..} | Self::CancelJump {body} | Self::Alongside {body,..} | Self::Follow {body,..} | Self::SetThrust { body, .. } | Self::Orbit { body, .. } | Self::Intercept { body, .. }
             | Self::AppendWaypoint {body,..} | Self::Flyby { body, .. } | Self::KeepRange {body,..} | Self::Evade {body,..} | Self::MoveTo { body, .. } | Self::AllStop { body }
             | Self::SetDriveLimit { body, .. } | Self::Launch { body, .. } | Self::FireBeam { body, .. }
             | Self::SetHeatDump {body,..} | Self::Ping { body } | Self::EngageBeam { body, .. } | Self::SetScreen { body, .. } | Self::SetSystemMode {body,..}
@@ -118,6 +123,7 @@ impl From<OrderError> for Rejection {
 /// Command-ship state, delayed friendly telemetry, or truth for the spectator.
 #[derive(Clone, Debug)]
 pub struct BodyView {
+    pub withdrawing:bool,
     pub jump:Option<crate::world::jump::JumpState>,
     pub ship_class:Option<crate::world::ShipClass>,
     pub heading:Vec2,
@@ -280,6 +286,8 @@ pub struct LossView {
 
 #[derive(Clone, Debug)]
 pub struct View {
+    pub jump_events:Vec<crate::world::CombatEvent>,
+    pub withdrawals:BTreeMap<ContactId,f64>,
     pub hostile_pings: Vec<PingSighting>,
     pub combat: Vec<crate::world::CombatEvent>,
     pub pending_orders: usize,
@@ -303,6 +311,7 @@ pub struct View {
 }
 
 pub struct LocalSession {
+    event_wait:Option<event_wait::EventWait>,
     bot_debug: VecDeque<(f64, FactionId, String)>,
     bots: BTreeMap<FactionId, crate::doctrine::Doctrine>,
     next_doctrine: f64,
@@ -316,7 +325,7 @@ pub struct LocalSession {
 
 impl LocalSession {
     pub fn new(world: World) -> Self {
-        Self { bot_debug: VecDeque::new(), world, warp: 1.0, paused: true, watch: None, last_alert: None, bots: BTreeMap::new(), next_doctrine: 0.0 }
+        Self { event_wait:None,bot_debug: VecDeque::new(), world, warp: 1.0, paused: true, watch: None, last_alert: None, bots: BTreeMap::new(), next_doctrine: 0.0 }
     }
 
     /// Explicit omniscient local debug feed, separate from faction sensor views.
@@ -338,7 +347,7 @@ impl LocalSession {
         if self.paused {
             return;
         }
-        let t = self.world.time() + wall_dt * self.warp;
+        let t = (self.world.time() + wall_dt * self.warp).min(self.event_wait_until());
         loop {
             if deadline.is_some_and(|d|std::time::Instant::now()>=d) {break;}
             if !self.bots.is_empty() && self.world.time() >= self.next_doctrine {
@@ -364,12 +373,15 @@ impl LocalSession {
                 }
                 self.next_doctrine = self.world.time() + params::SENSOR_FRAME_S.value;
             }
-            let until = if self.bots.is_empty() { t } else { t.min(self.next_doctrine) };
-            if let Some(alert) = self.world.advance_until_alert_budgeted(until, self.watch,deadline) {
+            let mut until = if self.bots.is_empty() { t } else { t.min(self.next_doctrine) };
+            if self.waiting_for_event() {until=until.min(self.world.time()+5.0);}
+            if let Some(alert) = self.world.advance_until_alert_budgeted(until, self.event_wait_watch().or(self.watch),deadline) {
                 self.last_alert = Some((alert.t, self.describe(&alert)));
+                if self.finish_event_wait(true) {break;}
                 if self.world.time()>=t { break; }
                 continue;
             }
+            if self.finish_event_wait(false) {break;}
             if self.world.time() >= t { break; }
         }
     }
@@ -428,12 +440,15 @@ impl LocalSession {
             if self.world.transmit_order(body, cmd.clone()) { return Ok(()); }
         }
         match cmd {
+            Command::Withdraw {body}=>self.world.withdraw(body)?,
+            Command::Surrender {body}=>self.world.surrender(body)?,
+            Command::SetRepairGoal {body,goal}=>self.world.set_repair_goal(body,goal)?,
             Command::Jump {body,destination}=>self.world.start_jump(body,destination)?,
             Command::CancelJump {body}=>self.world.cancel_jump(body)?,
             Command::DeployProbe {body,direction} => { self.owned(role,body)?; self.world.deploy_probe(body,direction)?; }
             Command::CancelLaunches { body } => { self.owned(role, body)?; self.world.cancel_launches(body)?; }
-            Command::SetWarp(w) => self.warp = w.clamp(0.0, 1e6),
-            Command::SetPaused(p) => self.paused = p,
+            Command::SetWarp(w) => {self.cancel_event_wait();self.warp = w.clamp(0.0, 1e6);},
+            Command::SetPaused(p) => {self.cancel_event_wait();self.paused = p;},
             Command::SetThrust { body, thrust } => {
                 let kind = self.owned(role, body)?;
                 let max_g = match kind {
@@ -576,7 +591,7 @@ impl LocalSession {
                 let known;
                 let b = if let Role::Faction(f) = role { known = w.known_body(f, BodyId(i as u32))?; &known } else { b };
                 let s = b.trajectory.state_at(t).or_else(||b.jump.and_then(|jump|jump.display_state(t)))?;
-                Some(BodyView {jump:b.jump,beam_solutions:if b.controllable && b.kind==BodyKind::Ship {
+                Some(BodyView {withdrawing:b.withdrawing,jump:b.jump,beam_solutions:if b.controllable && b.kind==BodyKind::Ship {
                     w.received_picture(BodyId(i as u32)).into_iter().flat_map(|p|p.contacts.keys())
                         .filter_map(|c|w.beam_solution(BodyId(i as u32),*c).map(|s|(*c,s))).collect()
                 } else {BTreeMap::new()},ship_class:b.ship_class,heading:b.heading_at(t),spinal_ready_at:b.spinal_ready_at,
@@ -707,6 +722,8 @@ impl LocalSession {
                 cause: match l.cause {
                     LossCause::Impact(i) => format!("hit {}", w.system.bodies[i].name),
                     LossCause::Missile { payload, .. } => format!("{} missile", payload.name()),
+                    LossCause::Withdrawn=>"withdrew from combat".into(),
+                    LossCause::Surrendered=>"surrendered".into(),
                     LossCause::Expended => "expended".into(),
                     LossCause::ShipBeam { .. } => "ship beam".into(),
                     LossCause::PointDefence { .. } => "point-defence laser".into(),
@@ -716,6 +733,8 @@ impl LocalSession {
             .collect();
 
         View {
+            jump_events:w.jump_events(match role {Role::Faction(f)=>Some(f),Role::Spectator=>None}),
+            withdrawals:match role {Role::Faction(f)=>w.withdrawal_notices(f),Role::Spectator=>BTreeMap::new()},
             hostile_pings: w.hostile_pings(match role { Role::Faction(f) => Some(f), Role::Spectator => None }),
             combat: w.combat_events(match role { Role::Spectator => None, Role::Faction(f) => Some(f) }),
             pending_orders: match role { Role::Spectator => 0, Role::Faction(f) => w.pending_orders(f) },
@@ -734,7 +753,7 @@ impl LocalSession {
             losses,
             system: w.system.clone(),
             objective: w.objective.clone(),
-            outcome: w.outcome.clone(),
+            outcome: match role {Role::Spectator=>w.outcome.clone(),Role::Faction(f)=>w.received_outcome(f)},
         }
     }
 

@@ -45,6 +45,7 @@ impl World {
         b.spinal_tracking=None;
         b.trajectory.set_thrust(t,Vec2::ZERO).unwrap();
         b.avoidance=Avoidance {thrust:Vec2::ZERO,active:false,impossible:false};
+        self.announce_ship_event(id,CombatKind::JumpSpool);
         self.scheduler.schedule(t+SPOOL_SECONDS,Event::JumpDepart(id,t+SPOOL_SECONDS));
         self.snapshot_platform(id,t);
         Ok(())
@@ -54,7 +55,10 @@ impl World {
         let b=self.bodies.get_mut(id.0 as usize).ok_or(OrderError::InvalidTarget)?;
         if !b.alive_at(t) {return Err(if b.jump.is_some() {OrderError::JumpBusy} else {OrderError::Destroyed});}
         if !matches!(b.jump,Some(JumpState::Spooling {..})) {return Err(OrderError::InvalidTarget);}
-        b.advance_thermal(t);b.jump=None;b.thermal.field=0.0;
+        let withdrawal=b.withdrawing;
+        b.advance_thermal(t);b.jump=None;b.withdrawing=false;b.thermal.field=0.0;
+        self.announce_ship_event(id,CombatKind::JumpCancelled);
+        if withdrawal {self.announce_ship_event(id,CombatKind::WithdrawalCancelled);}
         self.update_system_controls(id);
         self.snapshot_platform(id,t);
         Ok(())
@@ -64,6 +68,12 @@ impl World {
         if self.bodies[id.0 as usize].operating_effectiveness(crate::damage::System::Jump)<=0.0 {let _=self.cancel_jump(id);return;}
         // Resolve the final normal-space coast before allowing departure.
         self.step(id);
+        if !self.bodies[id.0 as usize].alive_at(at)
+            || !matches!(self.bodies[id.0 as usize].jump,Some(JumpState::Spooling {depart_at,..}) if depart_at==at) {return;}
+        self.announce_ship_event(id,CombatKind::JumpDeparture);
+        if self.bodies[id.0 as usize].withdrawing && self.bodies[id.0 as usize].alive_at(at) {
+            self.destroy(id,at,LossCause::Withdrawn);return;
+        }
         let b=&mut self.bodies[id.0 as usize];
         let Some(JumpState::Spooling {destination,depart_at})=b.jump else {return};
         if depart_at!=at || !b.alive_at(at) {return;}
@@ -84,6 +94,7 @@ impl World {
         b.jump=None;
         b.thermal.add_waste_heat(SHIP_HEAT_LIMIT_J*b.thermal.capacity_scale*ARRIVAL_HEAT_FRACTION);
         b.thermal.field=0.0;
+        self.announce_ship_event(id,CombatKind::JumpArrival);
         // Never sweep a collision segment across the FTL path.
         self.last_step[id.0 as usize]=at;
         if let Some((celestial,_))=self.system.impact(destination,destination,at,at) {

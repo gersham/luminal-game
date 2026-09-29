@@ -30,14 +30,19 @@ impl System {
     pub fn code(self)->&'static str {match self {Self::Passive=>"PASS",Self::Active=>"ACTV",Self::Direction=>"DIRF",Self::Ecm=>"ECMS",Self::Eccm=>"ECCM",Self::Propulsion=>"PROP",Self::Power=>"POWR",Self::Screens=>"SCRN",Self::Crew=>"CREW",Self::Mind=>"MIND",Self::PdMissiles=>"PDMS",Self::PdLaser=>"PDLS",Self::Beam=>"BEAM",Self::Launcher=>"LRM",Self::SrmLauncher=>"SRM",Self::Jump=>"JUMP",Self::Repair=>"DCTL"}}
     pub fn name(self)->&'static str {match self {Self::Passive=>"Passive sensors",Self::Active=>"Active sensors",Self::Direction=>"Direction finding",Self::Ecm=>"Electronic countermeasures",Self::Eccm=>"Electronic counter-countermeasures",Self::Propulsion=>"Propulsion",Self::Power=>"Power generation",Self::Screens=>"Screens",Self::Crew=>"Crew",Self::Mind=>"Ship mind",Self::PdMissiles=>"Point-defence missile launcher",Self::PdLaser=>"Point-defence laser",Self::Beam=>"Main beam",Self::Launcher=>"LRM launchers",Self::SrmLauncher=>"SRM launchers",Self::Jump=>"Jump drive",Self::Repair=>"Damage control"}}
 }
+#[derive(Clone,Copy,Debug,Default,PartialEq,Eq)]
+pub enum RepairGoal {#[default] Automatic,Fight,Escape}
+impl RepairGoal {pub fn label(self)->&'static str {match self {Self::Automatic=>"Automatic",Self::Fight=>"Fight",Self::Escape=>"Escape"}}}
+
 #[derive(Clone,Copy,Debug,PartialEq)]
 pub struct Damage {
+    pub repair_goal:RepairGoal,
     pub hull:f64,pub hull_max:f64,pub armour:f64,pub armour_max:f64,
     pub systems:[Condition;System::COUNT],
     pub repair_progress:f64,
     pub repair_target:Option<System>,
 }
-impl Default for Damage {fn default()->Self {Self {hull:100.0,hull_max:100.0,armour:100.0,armour_max:100.0,systems:[Condition::Intact;System::COUNT],repair_progress:0.0,repair_target:None}}}
+impl Default for Damage {fn default()->Self {Self {repair_goal:RepairGoal::Automatic,hull:100.0,hull_max:100.0,armour:100.0,armour_max:100.0,systems:[Condition::Intact;System::COUNT],repair_progress:0.0,repair_target:None}}}
 impl Damage {
     /// Catastrophic field feedback bypasses armour. Each secondary casualty is
     /// distinct, installed, and not already destroyed.
@@ -124,7 +129,14 @@ impl Damage {
         let repaired=if self.state(System::Power)==Condition::Damaged {System::Power}
             else if self.state(System::Repair)==Condition::Damaged {System::Repair}
             else if let Some(target)=self.repair_target.filter(|s|self.state(*s)==Condition::Damaged) {target}
-            else {damaged[(rng.uniform()*damaged.len() as f64) as usize]};
+            else {
+                let priorities=match self.repair_goal {
+                    RepairGoal::Automatic=>[System::Propulsion,System::Beam,System::Launcher,System::Passive,System::Jump],
+                    RepairGoal::Fight=>[System::Beam,System::SrmLauncher,System::Launcher,System::Propulsion,System::Passive],
+                    RepairGoal::Escape=>[System::Jump,System::Propulsion,System::Screens,System::Passive,System::Beam],
+                };
+                priorities.into_iter().find(|s|damaged.contains(s)).unwrap_or_else(||damaged[(rng.uniform()*damaged.len() as f64) as usize])
+            };
         if self.repair_target!=Some(repaired) {self.repair_progress=0.0;self.repair_target=Some(repaired);}
         self.repair_progress+=dt.max(0.0)*self.system_repair_rate();
         if self.repair_progress+1e-8<SYSTEM_REPAIR_SECONDS {return None;}
@@ -301,5 +313,21 @@ mod tests {
         d.systems[System::Repair as usize]=Condition::Destroyed;
         d.repair(3600.0,&mut rng);assert_eq!(d.hull,40.0);
         d=Damage {hull:0.0,..Default::default()};d.repair(3600.0,&mut rng);assert_eq!(d.hull,0.0);
+    }
+}
+
+#[cfg(test)]
+mod repair_goal_tests {
+    use super::*;
+    #[test]
+    fn goals_choose_useful_repairs_and_keep_existing_work() {
+        for (goal,expected) in [(RepairGoal::Automatic,System::Propulsion),(RepairGoal::Fight,System::Beam),(RepairGoal::Escape,System::Jump)] {
+            let mut d=Damage {repair_goal:goal,..Default::default()};
+            for s in [System::Propulsion,System::Beam,System::Jump] {d.systems[s as usize]=Condition::Damaged;}
+            let mut rng=Rng::new(42);d.repair(600.0,&mut rng);assert_eq!(d.repair_target,Some(expected));
+            d.repair_goal=RepairGoal::Fight;
+            assert_eq!(d.repair(600.0,&mut rng),Some(expected),"changing goal preserves in-progress repair");
+            assert_eq!(d.state(expected),Condition::Intact);
+        }
     }
 }

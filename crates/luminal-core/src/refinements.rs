@@ -6,9 +6,12 @@ use std::io::Write;
 use std::sync::Arc;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum CombatKind { NuclearBurst, BeamPulse, PointDefence, Impact, Destroyed, Expended, MissileHit, MissileMiss, SpinalPulse }
+pub enum CombatKind { JumpSpool, JumpCancelled, JumpDeparture, JumpArrival, WithdrawalStarted,WithdrawalCancelled,Withdrawn, Surrendered, NuclearBurst, BeamPulse, PointDefence, Impact, Destroyed, Expended, MissileHit, MissileMiss, SpinalPulse }
 impl CombatKind {
     pub fn label(self) -> &'static str { match self {
+        Self::JumpSpool=>"Jump spooling",Self::JumpCancelled=>"Jump cancelled",Self::JumpDeparture=>"Jump departure",Self::JumpArrival=>"Jump arrival",
+        Self::WithdrawalStarted=>"Withdrawal jump spooling",Self::WithdrawalCancelled=>"Withdrawal interrupted",
+        Self::Withdrawn=>"Withdrew from combat",Self::Surrendered=>"Surrendered",
         Self::SpinalPulse => "Spinal pulse", Self::NuclearBurst => "Nuclear burst", Self::BeamPulse => "Beam pulse",
         Self::Impact => "Impact flash", Self::Destroyed => "Loss reported", Self::Expended => "Missile expended / pass complete",
         Self::PointDefence => "Point-defence laser",
@@ -227,7 +230,7 @@ impl World {
         let pid=BodyId(self.bodies.len() as u32);
         probe.name=format!("{} Probe {}",probe.name,pid.0);
         probe.kind=BodyKind::Probe; probe.controllable=false; probe.armed=false;
-        probe.ship_class=None;probe.jump=None;probe.step_generation=0;
+        probe.ship_class=None;probe.jump=None;probe.withdrawing=false;probe.step_generation=0;
         probe.has_screen=false;
         probe.point_defence=None;
         probe.interceptor_battery=None; probe.interceptor=None;
@@ -299,6 +302,9 @@ impl World {
     }
     fn execute_transmitted(&mut self, cmd: Command) -> Result<(), OrderError> {
         match cmd {
+            Command::Withdraw {body}=>self.withdraw(body),
+            Command::Surrender {body}=>self.surrender(body),
+            Command::SetRepairGoal {body,goal}=>self.set_repair_goal(body,goal),
             Command::Jump {body,destination}=>self.start_jump(body,destination),
             Command::CancelJump {body}=>self.cancel_jump(body),
             Command::DeployProbe {body,direction} => self.deploy_probe(body,direction).map(|_|()),
@@ -331,6 +337,11 @@ impl World {
         let all = if faction.is_none() { &self.refinement.truth_events } else if let Some(e) = events { e } else { return vec![] };
         all.iter().rev().take(64).cloned().collect()
     }
+    /// Retain jump visuals separately so a missile barrage cannot evict them.
+    pub fn jump_events(&self,faction:Option<FactionId>)->Vec<CombatEvent> {
+        let all=match faction {None=>&self.refinement.truth_events,Some(f)=>match self.refinement.received.get(&f) {Some(e)=>e,None=>return vec![]}};
+        all.iter().filter(|e|matches!(e.kind,CombatKind::JumpSpool|CombatKind::JumpCancelled|CombatKind::JumpDeparture|CombatKind::JumpArrival|CombatKind::Withdrawn|CombatKind::Surrendered) || (e.kind==CombatKind::Destroyed && e.subject_kind==Some(BodyKind::Ship))).cloned().collect()
+    }
     pub(super) fn record_beam(&mut self,t:f64,pos:Vec2,kind:CombatKind,body:BodyId,target:BodyId,owner:FactionId) {
         self.record_combat(t,pos,kind,Some(body),Some(owner));
         if let Some(flash)=self.refinement.flashes.last_mut() {flash.target=Some(target);}
@@ -361,6 +372,12 @@ impl World {
         });
         let velocity=body.and_then(|id|self.state(id,t)).map(|s|s.vel);
         self.refinement.truth_events.push(CombatEvent { target:None, velocity, subject_kind:body.map(|id|self.bodies[id.0 as usize].kind),impact_strength,damage:damage.clone(),contact:None, emitted_at: t, received_at: t, pos:Some(pos), kind, own_body: body, aim });
+        let mut pending:Vec<FactionId>=pending;
+        if matches!(kind,CombatKind::JumpSpool|CombatKind::JumpCancelled|CombatKind::JumpDeparture|CombatKind::JumpArrival)
+            && let (Some(id),Some(f))=(body,owner) && self.decider(f,t)==Some(id) {
+            self.refinement.received.entry(f).or_default().push(self.refinement.truth_events.last().unwrap().clone());
+            pending.retain(|other|*other!=f);
+        }
         self.refinement.flashes.push(Flash { target:None, velocity,impact_strength,damage,front: Front { origin: pos, t_emit: t }, kind, body, owner, pending, aim });
     }
     pub(super) fn delay_alert(&mut self, id: BodyId, t: f64, kind: AlertKind) {
@@ -370,8 +387,28 @@ impl World {
             self.refinement.alerts.push(AlertPacket { front: Front { origin, t_emit: t }, faction: b.faction, kind });
         }
     }
+    pub fn withdrawal_notices(&self,f:FactionId)->BTreeMap<ContactId,f64> {
+        let mut notices=BTreeMap::new();
+        if let Some(events)=self.refinement.received.get(&f) {for e in events {if let Some(c)=e.contact {
+            match e.kind {
+                CombatKind::WithdrawalStarted=>{notices.insert(c,e.emitted_at+super::jump::SPOOL_SECONDS);},
+                CombatKind::WithdrawalCancelled|CombatKind::Withdrawn|CombatKind::Surrendered|CombatKind::Destroyed=>{notices.remove(&c);},
+                _=>{},
+            }
+        }}}
+        notices
+    }
+    pub(super) fn refinement_received_exit(&self,f:FactionId,contact:Option<ContactId>,t:f64)->bool {
+        self.refinement.received.get(&f).is_some_and(|events|events.iter().any(|e|e.emitted_at==t && e.contact==contact && matches!(e.kind,CombatKind::Withdrawn|CombatKind::Surrendered)))
+    }
     fn observe_flash(&mut self, faction: FactionId, flash: &Flash, arrival: f64) -> Option<CombatEvent> {
         let own=flash.owner==Some(faction);
+        if matches!(flash.kind,CombatKind::WithdrawalStarted|CombatKind::WithdrawalCancelled|CombatKind::Withdrawn|CombatKind::Surrendered) {
+            let contact=if own {None} else {flash.body.map(|id|self.contact_id(faction,id))};
+            if let Some(c)=contact && matches!(flash.kind,CombatKind::Withdrawn|CombatKind::Surrendered) {self.refinement.retired_contacts.insert((faction,c));}
+            return Some(CombatEvent {velocity:None,subject_kind:Some(BodyKind::Ship),impact_strength:0.0,damage:None,contact,target:None,aim:None,
+                emitted_at:flash.front.t_emit,received_at:arrival,pos:own.then_some(flash.front.origin),kind:flash.kind,own_body:if own {flash.body} else {None}});
+        }
         let pos=if own { Some(flash.front.origin) } else {
             let observer=self.decider(faction,self.time)?;
             if self.bodies[observer.0 as usize].sensor_effectiveness()==[0.0,0.0] {return None;}
@@ -433,7 +470,7 @@ impl World {
         if self.system.occluder(front.origin, front.t_emit, at, arrived).is_some() { Err(()) } else { Ok(Some(arrived)) }
     }
     pub fn loss_known(&self, f: FactionId, id: BodyId) -> bool {
-        self.refinement.received.get(&f).is_some_and(|events| events.iter().any(|e| e.own_body == Some(id) && matches!(e.kind, CombatKind::Destroyed | CombatKind::Expended)))
+        self.refinement.received.get(&f).is_some_and(|events| events.iter().any(|e| e.own_body == Some(id) && matches!(e.kind, CombatKind::Destroyed | CombatKind::Expended | CombatKind::Withdrawn | CombatKind::Surrendered)))
     }
     /// Remote telemetry is extrapolated from the latest packet whose light has arrived.
     pub fn known_body(&self, f: FactionId, id: BodyId) -> Option<Body> {

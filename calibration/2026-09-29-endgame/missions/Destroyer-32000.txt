@@ -1,0 +1,272 @@
+T+     60 min
+  SHIP Transport hull=100.0/100 armour=100.0 screens=0% heat=44.2PJ SRM=0 LRM=0
+  SHIP Destroyer hull=2000.0/2000 armour=1000.0 screens=100% heat=101.4PJ SRM=24 LRM=3
+  SHIP Raider Destroyer hull=2000.0/2000 armour=1000.0 screens=10% heat=101.0PJ SRM=24 LRM=3
+  FactionId(0) C1 = Raider Destroyer err    0.003 ls  2σ    0.173 ls  light age   508 s
+  FactionId(0) C2 = Raider Destroyer M1 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C3 = Raider Destroyer M2 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C4 = Raider Destroyer M3 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C5 = Raider Destroyer M4 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C6 = Raider Destroyer M5 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C7 = Raider Destroyer M6 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C8 = Raider Destroyer M7 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C9 = Raider Destroyer M8 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C10 = Raider Destroyer M9 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C11 = Raider Destroyer M10 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C12 = Raider Destroyer M11 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C13 = Raider Destroyer M12 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C14 = Raider Destroyer M13 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C15 = Raider Destroyer M14 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C16 = Raider Destroyer M15 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C1 = Transport err    0.000 ls  2σ    0.171 ls  light age   506 s
+  FactionId(1) C2 = Destroyer err    0.729 ls  2σ    0.171 ls  light age   507 s
+  FactionId(1) C3 = Lunar sensor station err    0.000 ls  2σ    0.171 ls  light age   506 s
+  FactionId(1) C4 = Destroyer M1 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C5 = Destroyer M2 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C6 = Destroyer M3 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C7 = Destroyer M4 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C8 = Destroyer M5 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C9 = Destroyer M6 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C10 = Destroyer M7 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C11 = Destroyer M8 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C12 = Destroyer M9 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C13 = Destroyer M10 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C14 = Destroyer M11 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C15 = Destroyer M12 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C16 = Destroyer M13 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C17 = Destroyer M14 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C18 = Destroyer M15 err    0.000 ls  2σ    0.000 ls  light age     0 s
+T+    120 min
+  SHIP Transport hull=100.0/100 armour=100.0 screens=0% heat=76.8PJ SRM=0 LRM=0
+  SHIP Destroyer hull=2000.0/2000 armour=1000.0 screens=100% heat=162.9PJ SRM=24 LRM=3
+  SHIP Raider Destroyer hull=1972.4/2000 armour=964.5 screens=5% heat=124.4PJ SRM=24 LRM=3
+  LOST Destroyer M2 at 5182 s: point-defence missile
+  LOST Destroyer M3 at 5183 s: point-defence missile
+  LOST Raider Destroyer M2 at 5233 s: point-defence missile
+  LOST Destroyer M5 at 5303 s: point-defence missile
+  LOST Destroyer M6 at 5303 s: point-defence missile
+  LOST Destroyer M8 at 5425 s: point-defence missile
+  LOST Destroyer M9 at 5426 s: point-defence missile
+  LOST Destroyer M1 at 5502 s: point-defence missile
+  LOST Destroyer M11 at 5549 s: point-defence missile
+  LOST Destroyer M12 at 5550 s: point-defence missile
+  LOST Raider Destroyer M3 at 5616 s: point-defence laser
+  LOST Destroyer M4 at 5649 s: point-defence laser
+  LOST Destroyer M13 at 5673 s: point-defence missile
+  LOST Destroyer M10 at 5790 s: point-defence missile
+  LOST Destroyer M15 at 5915 s: point-defence missile
+  LOST Raider Destroyer M6 at 5942 s: point-defence missile
+  LOST Raider Destroyer M4 at 5993 s: point-defence missile
+  LOST Raider Destroyer M5 at 5993 s: point-defence missile
+  LOST Destroyer M14 at 6014 s: point-defence laser
+  LOST Raider Destroyer M8 at 6019 s: point-defence missile
+  LOST Raider Destroyer M7 at 6019 s: point-defence missile
+  LOST Raider Destroyer M9 at 6271 s: point-defence missile
+  LOST Raider Destroyer M10 at 6812 s: point-defence missile
+  LOST Raider Destroyer M12 at 7037 s: point-defence missile
+  LOST Raider Destroyer M11 at 7037 s: point-defence missile
+  LOST Raider Destroyer M14 at 7197 s: point-defence missile
+  FactionId(0) C1 = Raider Destroyer err    0.003 ls  2σ    0.155 ls  light age   487 s
+  FactionId(0) C14 = Raider Destroyer M13 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C16 = Raider Destroyer M15 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C1 = Transport err    0.000 ls  2σ    0.145 ls  light age   473 s
+  FactionId(1) C2 = Destroyer err    0.001 ls  2σ    0.155 ls  light age   486 s
+  FactionId(1) C3 = Lunar sensor station err    0.000 ls  2σ    0.155 ls  light age   487 s
+T+    180 min
+  SHIP Transport hull=100.0/100 armour=100.0 screens=0% heat=96.6PJ SRM=0 LRM=0
+  SHIP Destroyer hull=2000.0/2000 armour=1000.0 screens=78% heat=192.1PJ SRM=24 LRM=3
+  SHIP Raider Destroyer hull=1992.4/2000 armour=964.5 screens=17% heat=125.7PJ SRM=24 LRM=3
+  LOST Destroyer M2 at 5182 s: point-defence missile
+  LOST Destroyer M3 at 5183 s: point-defence missile
+  LOST Raider Destroyer M2 at 5233 s: point-defence missile
+  LOST Destroyer M5 at 5303 s: point-defence missile
+  LOST Destroyer M6 at 5303 s: point-defence missile
+  LOST Destroyer M8 at 5425 s: point-defence missile
+  LOST Destroyer M9 at 5426 s: point-defence missile
+  LOST Destroyer M1 at 5502 s: point-defence missile
+  LOST Destroyer M11 at 5549 s: point-defence missile
+  LOST Destroyer M12 at 5550 s: point-defence missile
+  LOST Raider Destroyer M3 at 5616 s: point-defence laser
+  LOST Destroyer M4 at 5649 s: point-defence laser
+  LOST Destroyer M13 at 5673 s: point-defence missile
+  LOST Destroyer M10 at 5790 s: point-defence missile
+  LOST Destroyer M15 at 5915 s: point-defence missile
+  LOST Raider Destroyer M6 at 5942 s: point-defence missile
+  LOST Raider Destroyer M4 at 5993 s: point-defence missile
+  LOST Raider Destroyer M5 at 5993 s: point-defence missile
+  LOST Destroyer M14 at 6014 s: point-defence laser
+  LOST Raider Destroyer M8 at 6019 s: point-defence missile
+  LOST Raider Destroyer M7 at 6019 s: point-defence missile
+  LOST Raider Destroyer M9 at 6271 s: point-defence missile
+  LOST Raider Destroyer M10 at 6812 s: point-defence missile
+  LOST Raider Destroyer M12 at 7037 s: point-defence missile
+  LOST Raider Destroyer M11 at 7037 s: point-defence missile
+  LOST Raider Destroyer M14 at 7197 s: point-defence missile
+  LOST Raider Destroyer M15 at 7405 s: point-defence missile
+  FactionId(0) C1 = Raider Destroyer err    0.030 ls  2σ    0.092 ls  light age   392 s
+  FactionId(1) C1 = Transport err    0.003 ls  2σ    0.093 ls  light age   397 s
+  FactionId(1) C2 = Destroyer err    0.012 ls  2σ    0.092 ls  light age   393 s
+  FactionId(1) C3 = Lunar sensor station err    0.000 ls  2σ    0.119 ls  light age   437 s
+T+    240 min
+  SHIP Transport hull=100.0/100 armour=100.0 screens=0% heat=103.3PJ SRM=0 LRM=0
+  SHIP Destroyer hull=2000.0/2000 armour=1000.0 screens=90% heat=112.3PJ SRM=24 LRM=3
+  SHIP Raider Destroyer hull=2000.0/2000 armour=964.5 screens=29% heat=174.3PJ SRM=24 LRM=3
+  LOST Destroyer M2 at 5182 s: point-defence missile
+  LOST Destroyer M3 at 5183 s: point-defence missile
+  LOST Raider Destroyer M2 at 5233 s: point-defence missile
+  LOST Destroyer M5 at 5303 s: point-defence missile
+  LOST Destroyer M6 at 5303 s: point-defence missile
+  LOST Destroyer M8 at 5425 s: point-defence missile
+  LOST Destroyer M9 at 5426 s: point-defence missile
+  LOST Destroyer M1 at 5502 s: point-defence missile
+  LOST Destroyer M11 at 5549 s: point-defence missile
+  LOST Destroyer M12 at 5550 s: point-defence missile
+  LOST Raider Destroyer M3 at 5616 s: point-defence laser
+  LOST Destroyer M4 at 5649 s: point-defence laser
+  LOST Destroyer M13 at 5673 s: point-defence missile
+  LOST Destroyer M10 at 5790 s: point-defence missile
+  LOST Destroyer M15 at 5915 s: point-defence missile
+  LOST Raider Destroyer M6 at 5942 s: point-defence missile
+  LOST Raider Destroyer M4 at 5993 s: point-defence missile
+  LOST Raider Destroyer M5 at 5993 s: point-defence missile
+  LOST Destroyer M14 at 6014 s: point-defence laser
+  LOST Raider Destroyer M8 at 6019 s: point-defence missile
+  LOST Raider Destroyer M7 at 6019 s: point-defence missile
+  LOST Raider Destroyer M9 at 6271 s: point-defence missile
+  LOST Raider Destroyer M10 at 6812 s: point-defence missile
+  LOST Raider Destroyer M12 at 7037 s: point-defence missile
+  LOST Raider Destroyer M11 at 7037 s: point-defence missile
+  LOST Raider Destroyer M14 at 7197 s: point-defence missile
+  LOST Raider Destroyer M15 at 7405 s: point-defence missile
+  FactionId(0) C1 = Raider Destroyer err    0.000 ls  2σ    0.035 ls  light age   263 s
+  FactionId(1) C1 = Transport err    0.000 ls  2σ    0.058 ls  light age   327 s
+  FactionId(1) C2 = Destroyer err    0.000 ls  2σ    0.036 ls  light age   268 s
+T+    300 min
+  SHIP Transport hull=100.0/100 armour=100.0 screens=0% heat=103.5PJ SRM=0 LRM=0
+  SHIP Destroyer hull=2000.0/2000 armour=1000.0 screens=100% heat=169.4PJ SRM=24 LRM=3
+  SHIP Raider Destroyer hull=2000.0/2000 armour=964.5 screens=41% heat=165.3PJ SRM=24 LRM=3
+  LOST Destroyer M2 at 5182 s: point-defence missile
+  LOST Destroyer M3 at 5183 s: point-defence missile
+  LOST Raider Destroyer M2 at 5233 s: point-defence missile
+  LOST Destroyer M5 at 5303 s: point-defence missile
+  LOST Destroyer M6 at 5303 s: point-defence missile
+  LOST Destroyer M8 at 5425 s: point-defence missile
+  LOST Destroyer M9 at 5426 s: point-defence missile
+  LOST Destroyer M1 at 5502 s: point-defence missile
+  LOST Destroyer M11 at 5549 s: point-defence missile
+  LOST Destroyer M12 at 5550 s: point-defence missile
+  LOST Raider Destroyer M3 at 5616 s: point-defence laser
+  LOST Destroyer M4 at 5649 s: point-defence laser
+  LOST Destroyer M13 at 5673 s: point-defence missile
+  LOST Destroyer M10 at 5790 s: point-defence missile
+  LOST Destroyer M15 at 5915 s: point-defence missile
+  LOST Raider Destroyer M6 at 5942 s: point-defence missile
+  LOST Raider Destroyer M4 at 5993 s: point-defence missile
+  LOST Raider Destroyer M5 at 5993 s: point-defence missile
+  LOST Destroyer M14 at 6014 s: point-defence laser
+  LOST Raider Destroyer M8 at 6019 s: point-defence missile
+  LOST Raider Destroyer M7 at 6019 s: point-defence missile
+  LOST Raider Destroyer M9 at 6271 s: point-defence missile
+  LOST Raider Destroyer M10 at 6812 s: point-defence missile
+  LOST Raider Destroyer M12 at 7037 s: point-defence missile
+  LOST Raider Destroyer M11 at 7037 s: point-defence missile
+  LOST Raider Destroyer M14 at 7197 s: point-defence missile
+  LOST Raider Destroyer M15 at 7405 s: point-defence missile
+  FactionId(0) C1 = Raider Destroyer err    0.000 ls  2σ    0.007 ls  light age   134 s
+  FactionId(1) C1 = Transport err    0.000 ls  2σ    0.054 ls  light age   314 s
+  FactionId(1) C2 = Destroyer err    0.000 ls  2σ    0.008 ls  light age   140 s
+  FactionId(1) C3 = Lunar sensor station err    0.000 ls  2σ    0.091 ls  light age   392 s
+T+    360 min
+  OUTCOME FactionId(1): Destroyer surrendered
+  SHIP Transport hull=100.0/100 armour=100.0 screens=0% heat=103.6PJ SRM=0 LRM=0
+  SHIP Raider Destroyer hull=2000.0/2000 armour=964.5 screens=25% heat=132.9PJ SRM=0 LRM=0
+  LOST Destroyer M2 at 5182 s: point-defence missile
+  LOST Destroyer M3 at 5183 s: point-defence missile
+  LOST Raider Destroyer M2 at 5233 s: point-defence missile
+  LOST Destroyer M5 at 5303 s: point-defence missile
+  LOST Destroyer M6 at 5303 s: point-defence missile
+  LOST Destroyer M8 at 5425 s: point-defence missile
+  LOST Destroyer M9 at 5426 s: point-defence missile
+  LOST Destroyer M1 at 5502 s: point-defence missile
+  LOST Destroyer M11 at 5549 s: point-defence missile
+  LOST Destroyer M12 at 5550 s: point-defence missile
+  LOST Raider Destroyer M3 at 5616 s: point-defence laser
+  LOST Destroyer M4 at 5649 s: point-defence laser
+  LOST Destroyer M13 at 5673 s: point-defence missile
+  LOST Destroyer M10 at 5790 s: point-defence missile
+  LOST Destroyer M15 at 5915 s: point-defence missile
+  LOST Raider Destroyer M6 at 5942 s: point-defence missile
+  LOST Raider Destroyer M4 at 5993 s: point-defence missile
+  LOST Raider Destroyer M5 at 5993 s: point-defence missile
+  LOST Destroyer M14 at 6014 s: point-defence laser
+  LOST Raider Destroyer M8 at 6019 s: point-defence missile
+  LOST Raider Destroyer M7 at 6019 s: point-defence missile
+  LOST Raider Destroyer M9 at 6271 s: point-defence missile
+  LOST Raider Destroyer M10 at 6812 s: point-defence missile
+  LOST Raider Destroyer M12 at 7037 s: point-defence missile
+  LOST Raider Destroyer M11 at 7037 s: point-defence missile
+  LOST Raider Destroyer M14 at 7197 s: point-defence missile
+  LOST Raider Destroyer M15 at 7405 s: point-defence missile
+  LOST Raider Destroyer interceptor 27 at 20282 s: point-defence laser
+  LOST Raider Destroyer interceptor 32 at 20367 s: point-defence laser
+  LOST Raider Destroyer interceptor 30 at 20368 s: point-defence laser
+  LOST Raider Destroyer interceptor 31 at 20369 s: point-defence laser
+  LOST Raider Destroyer M17 at 20418 s: point-defence missile
+  LOST Raider Destroyer M18 at 20419 s: point-defence missile
+  LOST Raider Destroyer M16 at 20419 s: point-defence missile
+  LOST Raider Destroyer M19 at 20420 s: point-defence missile
+  LOST Destroyer M19 at 20495 s: point-defence missile
+  LOST Destroyer M16 at 20495 s: point-defence missile
+  LOST Raider Destroyer interceptor 40 at 20540 s: point-defence laser
+  LOST Destroyer M22 at 20571 s: point-defence missile
+  LOST Destroyer M21 at 20572 s: point-defence missile
+  LOST Destroyer M20 at 20573 s: point-defence missile
+  LOST Destroyer M17 at 20582 s: point-defence missile
+  LOST Destroyer M40 at 20600 s: point-defence missile
+  LOST Destroyer M42 at 20601 s: point-defence missile
+  LOST Destroyer M39 at 20602 s: point-defence missile
+  LOST Destroyer M33 at 20612 s: point-defence missile
+  LOST Destroyer M34 at 20613 s: point-defence missile
+  LOST Destroyer M18 at 20618 s: point-defence missile
+  LOST Destroyer M26 at 20649 s: point-defence missile
+  LOST Destroyer M25 at 20649 s: point-defence missile
+  LOST Destroyer M27 at 20650 s: point-defence missile
+  LOST Destroyer M24 at 20651 s: point-defence missile
+  LOST Raider Destroyer M21 at 20654 s: point-defence missile
+  LOST Raider Destroyer M22 at 20655 s: point-defence missile
+  LOST Raider Destroyer M23 at 20656 s: point-defence missile
+  LOST Destroyer M23 at 20658 s: point-defence missile
+  LOST Raider Destroyer M33 at 20707 s: point-defence missile
+  LOST Raider Destroyer M35 at 20711 s: point-defence missile
+  LOST Raider Destroyer M38 at 20712 s: point-defence missile
+  LOST Raider Destroyer M42 at 20715 s: point-defence missile
+  LOST Raider Destroyer M24 at 20716 s: point-defence missile
+  LOST Destroyer M30 at 20725 s: point-defence missile
+  LOST Destroyer M29 at 20725 s: point-defence missile
+  LOST Destroyer M28 at 20726 s: point-defence missile
+  LOST Raider Destroyer M20 at 20736 s: point-defence missile
+  LOST Destroyer M37 at 20800 s: point-defence missile
+  LOST Destroyer M35 at 20802 s: point-defence missile
+  LOST Destroyer M41 at 20803 s: point-defence missile
+  LOST Destroyer M31 at 20808 s: point-defence missile
+  LOST Raider Destroyer M31 at 20872 s: point-defence missile
+  LOST Raider Destroyer M34 at 20873 s: point-defence missile
+  LOST Raider Destroyer M28 at 20881 s: point-defence missile
+  LOST Destroyer M36 at 20881 s: point-defence missile
+  LOST Raider Destroyer M27 at 20882 s: point-defence missile
+  LOST Raider Destroyer M32 at 20885 s: point-defence missile
+  LOST Raider Destroyer M36 at 20888 s: point-defence missile
+  LOST Raider Destroyer M37 at 20888 s: point-defence missile
+  LOST Raider Destroyer M40 at 20891 s: point-defence missile
+  LOST Raider Destroyer M41 at 20891 s: point-defence missile
+  LOST Raider Destroyer M39 at 20892 s: point-defence missile
+  LOST Raider Destroyer M25 at 20906 s: point-defence missile
+  LOST Raider Destroyer M29 at 20956 s: point-defence missile
+  LOST Raider Destroyer M30 at 20992 s: point-defence missile
+  LOST Raider Destroyer M26 at 21014 s: point-defence missile
+  LOST Destroyer at 21570 s: surrendered
+  FactionId(0) C1 = Raider Destroyer err    0.000 ls  2σ    0.000 ls  light age    34 s
+  FactionId(1) C1 = Transport err    0.000 ls  2σ    0.070 ls  light age   350 s
+  FactionId(1) C3 = Lunar sensor station err    0.002 ls  2σ    0.107 ls  light age   419 s
+
+simulated 6.00 h in 9.88 s wall (2186× real time)

@@ -1,0 +1,21 @@
+class,seed,hours,outcome
+Picket,32000,4.00,FactionId(1): Picket surrendered
+Picket,32001,12.00,No outcome by 12 hours
+Picket,40000,10.00,FactionId(0): Raider Picket surrendered
+Picket,40001,12.00,No outcome by 12 hours
+Frigate,32000,6.00,FactionId(0): Raider Frigate surrendered
+Frigate,32001,12.00,No outcome by 12 hours
+Frigate,40000,12.00,No outcome by 12 hours
+Frigate,40001,12.00,No outcome by 12 hours
+Destroyer,32000,6.00,FactionId(1): Destroyer surrendered
+Destroyer,32001,12.00,No outcome by 12 hours
+Destroyer,40000,12.00,No outcome by 12 hours
+Destroyer,40001,12.00,No outcome by 12 hours
+Cruiser,32000,7.00,FactionId(0): Raider Cruiser withdrew from combat
+Cruiser,32001,12.00,No outcome by 12 hours
+Cruiser,40000,12.00,No outcome by 12 hours
+Cruiser,40001,12.00,No outcome by 12 hours
+Battleship,32000,8.00,FactionId(0): Raider Battleship surrendered
+Battleship,32001,12.00,No outcome by 12 hours
+Battleship,40000,12.00,No outcome by 12 hours
+Battleship,40001,12.00,No outcome by 12 hours

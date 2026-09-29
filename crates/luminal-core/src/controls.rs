@@ -236,15 +236,20 @@ impl World {
         }
         let auto=|mode,condition|match mode {Mode::On=>true,Mode::Off=>false,Mode::Auto=>condition};
         b.controls.screens_latched|=resolved_ship && b.controls.screens==Mode::Auto;
-        if matches!(b.jump,Some(super::jump::JumpState::Spooling {..})) && b.operating_effectiveness(crate::damage::System::Jump)<=0.0 {
-            b.jump=None;b.thermal.field=0.0;
+        let aborted=matches!(b.jump,Some(super::jump::JumpState::Spooling {..})) && b.operating_effectiveness(crate::damage::System::Jump)<=0.0;
+        let announce_abort=aborted && b.withdrawing;
+        if aborted {
+            b.jump=None;b.withdrawing=false;b.thermal.field=0.0;
         }
         b.controls.ecm_active=auto(b.controls.ecm,resolved_ship) && b.operating_effectiveness(crate::damage::System::Ecm)>0.0;
         b.screen_up=b.jump.is_none() && b.has_screen && b.damage.state(crate::damage::System::Screens)!=crate::damage::Condition::Destroyed
             && auto(b.controls.screens,b.controls.screens_latched);
         if !b.screen_up {b.thermal.field=0.0;} else {b.thermal.field=b.thermal.field.min(b.operating_effectiveness(crate::damage::System::Screens));}
         let ping=b.controls.active==Mode::Auto && self.time>=b.controls.next_ping_at;
-        if previous_limit!=b.drive_limit || (b.controls.evade==Mode::Auto && missile_watch) || b.controls.evading {self.guide(id);}
+        let guide=previous_limit!=b.drive_limit || (b.controls.evade==Mode::Auto && missile_watch) || b.controls.evading;
+        if aborted {self.announce_ship_event(id,CombatKind::JumpCancelled);}
+        if announce_abort {self.announce_ship_event(id,CombatKind::WithdrawalCancelled);}
+        if guide {self.guide(id);}
         if ping && self.ping(id) {
             let controls=&mut self.bodies[id.0 as usize].controls;
             if controls.last_auto_ping.is_some() {self.hidden_ping_circles.insert((id,self.time.to_bits()));}

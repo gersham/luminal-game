@@ -1,0 +1,94 @@
+T+     60 min
+  SHIP Transport hull=100.0/100 armour=100.0 screens=0% heat=0.0PJ SRM=0 LRM=0
+  SHIP Frigate hull=1000.0/1000 armour=500.0 screens=100% heat=0.6PJ SRM=12 LRM=10
+  SHIP Raider Frigate hull=1000.0/1000 armour=500.0 screens=100% heat=30.0PJ SRM=12 LRM=10
+  FactionId(1) C1 = Lunar sensor station err    8.389 ls  2σ  257.409 ls  light age  4025 s
+T+    120 min
+  SHIP Transport hull=100.0/100 armour=100.0 screens=0% heat=0.0PJ SRM=0 LRM=0
+  SHIP Frigate hull=1000.0/1000 armour=500.0 screens=100% heat=0.0PJ SRM=12 LRM=10
+  SHIP Raider Frigate hull=1000.0/1000 armour=500.0 screens=100% heat=48.2PJ SRM=12 LRM=10
+  FactionId(0) C1 bearing only, light age 4008 s
+  FactionId(1) C1 = Lunar sensor station err    8.390 ls  2σ  290.351 ls  light age  3962 s
+  FactionId(1) C2 bearing only, light age 3957 s
+  FactionId(1) C3 = Transport err   25.258 ls  2σ  251.914 ls  light age  3958 s
+T+    180 min
+  SHIP Transport hull=100.0/100 armour=100.0 screens=0% heat=0.0PJ SRM=0 LRM=0
+  SHIP Frigate hull=1000.0/1000 armour=500.0 screens=100% heat=0.0PJ SRM=12 LRM=10
+  SHIP Raider Frigate hull=1000.0/1000 armour=500.0 screens=100% heat=59.3PJ SRM=12 LRM=10
+  FactionId(0) C1 bearing only, light age 3921 s
+  FactionId(1) C1 = Lunar sensor station err    8.391 ls  2σ  299.073 ls  light age  3856 s
+  FactionId(1) C2 bearing only, light age 3836 s
+  FactionId(1) C3 = Transport err   25.427 ls  2σ  274.508 ls  light age  3836 s
+T+    240 min
+  SHIP Transport hull=100.0/100 armour=100.0 screens=0% heat=0.0PJ SRM=0 LRM=0
+  SHIP Frigate hull=1000.0/1000 armour=500.0 screens=100% heat=0.0PJ SRM=12 LRM=10
+  SHIP Raider Frigate hull=1000.0/1000 armour=500.0 screens=100% heat=62.7PJ SRM=12 LRM=10
+  FactionId(0) C1 bearing only, light age 3777 s
+  FactionId(1) C1 = Lunar sensor station err    8.391 ls  2σ  276.057 ls  light age  3708 s
+  FactionId(1) C2 bearing only, light age 3661 s
+  FactionId(1) C3 = Transport err   21.398 ls  2σ  273.742 ls  light age  3661 s
+T+    300 min
+  SHIP Transport hull=100.0/100 armour=100.0 screens=0% heat=0.0PJ SRM=0 LRM=0
+  SHIP Frigate hull=1000.0/1000 armour=500.0 screens=100% heat=0.0PJ SRM=12 LRM=10
+  SHIP Raider Frigate hull=1000.0/1000 armour=500.0 screens=100% heat=62.9PJ SRM=12 LRM=10
+  FactionId(0) C1 bearing only, light age 3574 s
+  FactionId(1) C1 = Lunar sensor station err    8.390 ls  2σ  247.760 ls  light age  3521 s
+  FactionId(1) C2 bearing only, light age 3433 s
+  FactionId(1) C3 = Transport err   19.579 ls  2σ  242.138 ls  light age  3434 s
+T+    360 min
+  SHIP Transport hull=100.0/100 armour=100.0 screens=0% heat=0.0PJ SRM=0 LRM=0
+  SHIP Frigate hull=1000.0/1000 armour=500.0 screens=100% heat=0.0PJ SRM=12 LRM=10
+  SHIP Raider Frigate hull=1000.0/1000 armour=500.0 screens=100% heat=62.9PJ SRM=12 LRM=10
+  FactionId(0) C1 bearing only, light age 3313 s
+  FactionId(1) C1 = Lunar sensor station err    8.390 ls  2σ  217.419 ls  light age  3293 s
+  FactionId(1) C2 bearing only, light age 3154 s
+  FactionId(1) C3 = Transport err   19.224 ls  2σ  205.982 ls  light age  3154 s
+T+    420 min
+  SHIP Transport hull=100.0/100 armour=100.0 screens=0% heat=0.0PJ SRM=0 LRM=0
+  SHIP Frigate hull=1000.0/1000 armour=500.0 screens=100% heat=0.0PJ SRM=12 LRM=10
+  SHIP Raider Frigate hull=1000.0/1000 armour=500.0 screens=100% heat=63.8PJ SRM=12 LRM=10
+  FactionId(0) C1 bearing only, light age 2991 s
+  FactionId(1) C2 bearing only, light age 2821 s
+  FactionId(1) C3 = Transport err   19.254 ls  2σ  168.241 ls  light age  2822 s
+T+    480 min
+  SHIP Transport hull=100.0/100 armour=100.0 screens=0% heat=0.0PJ SRM=0 LRM=0
+  SHIP Frigate hull=1000.0/1000 armour=500.0 screens=100% heat=22.5PJ SRM=12 LRM=10
+  SHIP Raider Frigate hull=1000.0/1000 armour=500.0 screens=100% heat=67.7PJ SRM=12 LRM=10
+  FactionId(0) C1 = Raider Frigate err   76.123 ls  2σ  200.155 ls  light age  2603 s
+  FactionId(1) C1 = Lunar sensor station err    8.390 ls  2σ  114.089 ls  light age  2718 s
+  FactionId(1) C2 bearing only, light age 2433 s
+  FactionId(1) C3 = Transport err   19.332 ls  2σ  129.984 ls  light age  2434 s
+T+    540 min
+  SHIP Transport hull=100.0/100 armour=100.0 screens=0% heat=0.0PJ SRM=0 LRM=0
+  SHIP Frigate hull=1000.0/1000 armour=500.0 screens=100% heat=60.1PJ SRM=12 LRM=10
+  SHIP Raider Frigate hull=1000.0/1000 armour=500.0 screens=100% heat=58.6PJ SRM=12 LRM=10
+  FactionId(0) C1 = Raider Frigate err   13.227 ls  2σ  132.724 ls  light age  2114 s
+  FactionId(1) C1 = Lunar sensor station err    8.390 ls  2σ  117.618 ls  light age  2394 s
+  FactionId(1) C2 = Frigate   err   28.381 ls  2σ  124.867 ls  light age  2002 s
+  FactionId(1) C3 = Transport err   19.361 ls  2σ   95.875 ls  light age  2017 s
+T+    600 min
+  SHIP Transport hull=100.0/100 armour=100.0 screens=0% heat=0.0PJ SRM=0 LRM=0
+  SHIP Frigate hull=1000.0/1000 armour=500.0 screens=100% heat=84.6PJ SRM=12 LRM=10
+  SHIP Raider Frigate hull=1000.0/1000 armour=500.0 screens=100% heat=65.4PJ SRM=12 LRM=10
+  FactionId(0) C1 = Raider Frigate err   22.246 ls  2σ   81.118 ls  light age  1590 s
+  FactionId(1) C1 = Lunar sensor station err    8.390 ls  2σ   90.505 ls  light age  2104 s
+  FactionId(1) C2 = Frigate   err   14.731 ls  2σ   62.287 ls  light age  1545 s
+  FactionId(1) C3 = Transport err   19.363 ls  2σ   70.760 ls  light age  1622 s
+T+    660 min
+  SHIP Transport hull=100.0/100 armour=100.0 screens=0% heat=0.0PJ SRM=0 LRM=0
+  SHIP Frigate hull=1000.0/1000 armour=500.0 screens=100% heat=57.0PJ SRM=12 LRM=10
+  SHIP Raider Frigate hull=1000.0/1000 armour=500.0 screens=100% heat=69.7PJ SRM=12 LRM=10
+  FactionId(0) C1 = Raider Frigate err    8.418 ls  2σ   41.313 ls  light age  1063 s
+  FactionId(1) C1 = Lunar sensor station err    8.390 ls  2σ   71.928 ls  light age  1853 s
+  FactionId(1) C2 = Frigate   err    3.431 ls  2σ   31.512 ls  light age  1064 s
+  FactionId(1) C3 = Transport err   19.361 ls  2σ   54.200 ls  light age  1253 s
+T+    720 min
+  SHIP Transport hull=100.0/100 armour=100.0 screens=0% heat=0.0PJ SRM=0 LRM=0
+  SHIP Frigate hull=1000.0/1000 armour=500.0 screens=100% heat=60.7PJ SRM=12 LRM=10
+  SHIP Raider Frigate hull=1000.0/1000 armour=500.0 screens=100% heat=72.3PJ SRM=12 LRM=10
+  FactionId(0) C1 = Raider Frigate err    7.311 ls  2σ   17.382 ls  light age   557 s
+  FactionId(1) C1 = Lunar sensor station err    8.390 ls  2σ   57.724 ls  light age  1645 s
+  FactionId(1) C2 = Frigate   err    0.001 ls  2σ    0.230 ls  light age   571 s
+  FactionId(1) C3 = Transport err    0.000 ls  2σ    0.733 ls  light age   915 s
+
+simulated 12.00 h in 6.88 s wall (6275× real time)

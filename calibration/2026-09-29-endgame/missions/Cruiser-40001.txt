@@ -1,0 +1,93 @@
+T+     60 min
+  SHIP Transport hull=100.0/100 armour=100.0 screens=0% heat=0.0PJ SRM=0 LRM=0
+  SHIP Cruiser hull=4000.0/4000 armour=2000.0 screens=100% heat=59.9PJ SRM=24 LRM=36
+  SHIP Raider Cruiser hull=4000.0/4000 armour=2000.0 screens=100% heat=202.7PJ SRM=24 LRM=36
+  FactionId(1) C1 = Lunar sensor station err   16.327 ls  2σ  264.487 ls  light age  4032 s
+T+    120 min
+  SHIP Transport hull=100.0/100 armour=100.0 screens=0% heat=0.0PJ SRM=0 LRM=0
+  SHIP Cruiser hull=4000.0/4000 armour=2000.0 screens=100% heat=193.5PJ SRM=24 LRM=36
+  SHIP Raider Cruiser hull=4000.0/4000 armour=2000.0 screens=100% heat=249.0PJ SRM=24 LRM=36
+  FactionId(0) C1 = Raider Cruiser err   52.470 ls  2σ  306.354 ls  light age  4007 s
+  FactionId(1) C1 = Lunar sensor station err   16.328 ls  2σ  299.130 ls  light age  3989 s
+  FactionId(1) C2 bearing only, light age 3984 s
+  FactionId(1) C3 = Transport err   24.748 ls  2σ  249.292 ls  light age  3985 s
+T+    180 min
+  SHIP Transport hull=100.0/100 armour=100.0 screens=0% heat=0.0PJ SRM=0 LRM=0
+  SHIP Cruiser hull=4000.0/4000 armour=2000.0 screens=100% heat=320.1PJ SRM=24 LRM=36
+  SHIP Raider Cruiser hull=4000.0/4000 armour=2000.0 screens=100% heat=251.4PJ SRM=24 LRM=36
+  FactionId(0) C1 = Raider Cruiser err   55.631 ls  2σ  312.499 ls  light age  3916 s
+  FactionId(1) C1 = Lunar sensor station err   16.328 ls  2σ  314.150 ls  light age  3922 s
+  FactionId(1) C2 = Cruiser   err   47.997 ls  2σ  228.057 ls  light age  3898 s
+  FactionId(1) C3 = Transport err   25.266 ls  2σ  276.735 ls  light age  3903 s
+T+    240 min
+  SHIP Transport hull=100.0/100 armour=100.0 screens=0% heat=0.0PJ SRM=0 LRM=0
+  SHIP Cruiser hull=4000.0/4000 armour=2000.0 screens=100% heat=396.8PJ SRM=24 LRM=36
+  SHIP Raider Cruiser hull=4000.0/4000 armour=2000.0 screens=100% heat=251.6PJ SRM=24 LRM=36
+  FactionId(0) C1 = Raider Cruiser err   42.334 ls  2σ  341.359 ls  light age  3768 s
+  FactionId(1) C1 = Lunar sensor station err   16.328 ls  2σ  299.822 ls  light age  3832 s
+  FactionId(1) C2 = Cruiser   err   42.647 ls  2σ  311.696 ls  light age  3757 s
+  FactionId(1) C3 = Transport err   18.433 ls  2σ  286.137 ls  light age  3786 s
+T+    300 min
+  SHIP Transport hull=100.0/100 armour=100.0 screens=0% heat=0.0PJ SRM=0 LRM=0
+  SHIP Cruiser hull=4000.0/4000 armour=2000.0 screens=100% heat=214.7PJ SRM=24 LRM=36
+  SHIP Raider Cruiser hull=4000.0/4000 armour=2000.0 screens=100% heat=251.6PJ SRM=24 LRM=36
+  FactionId(0) C1 = Raider Cruiser err   26.866 ls  2σ  329.262 ls  light age  3570 s
+  FactionId(1) C1 = Lunar sensor station err   16.328 ls  2σ  281.198 ls  light age  3719 s
+  FactionId(1) C2 = Cruiser   err   16.306 ls  2σ  283.764 ls  light age  3560 s
+  FactionId(1) C3 = Transport err   13.516 ls  2σ  264.220 ls  light age  3635 s
+T+    360 min
+  SHIP Transport hull=100.0/100 armour=100.0 screens=0% heat=0.0PJ SRM=0 LRM=0
+  SHIP Cruiser hull=4000.0/4000 armour=2000.0 screens=100% heat=332.9PJ SRM=24 LRM=36
+  SHIP Raider Cruiser hull=4000.0/4000 armour=2000.0 screens=100% heat=251.6PJ SRM=24 LRM=36
+  FactionId(0) C1 = Raider Cruiser err   19.313 ls  2σ  287.122 ls  light age  3317 s
+  FactionId(1) C1 = Lunar sensor station err   16.328 ls  2σ  261.662 ls  light age  3583 s
+  FactionId(1) C2 = Cruiser   err   11.105 ls  2σ  134.965 ls  light age  3312 s
+  FactionId(1) C3 = Transport err   12.058 ls  2σ  237.389 ls  light age  3448 s
+T+    420 min
+  SHIP Transport hull=100.0/100 armour=100.0 screens=0% heat=0.0PJ SRM=0 LRM=0
+  SHIP Cruiser hull=4000.0/4000 armour=2000.0 screens=100% heat=294.8PJ SRM=24 LRM=36
+  SHIP Raider Cruiser hull=4000.0/4000 armour=2000.0 screens=100% heat=354.5PJ SRM=24 LRM=36
+  FactionId(0) C1 = Raider Cruiser err    6.838 ls  2σ  189.280 ls  light age  3007 s
+  FactionId(1) C2 = Cruiser   err    9.863 ls  2σ  180.721 ls  light age  3034 s
+  FactionId(1) C3 = Transport err   12.120 ls  2σ  212.085 ls  light age  3253 s
+T+    480 min
+  SHIP Transport hull=100.0/100 armour=100.0 screens=0% heat=0.0PJ SRM=0 LRM=0
+  SHIP Cruiser hull=4000.0/4000 armour=2000.0 screens=100% heat=234.5PJ SRM=24 LRM=36
+  SHIP Raider Cruiser hull=4000.0/4000 armour=2000.0 screens=100% heat=107.3PJ SRM=24 LRM=36
+  FactionId(0) C1 = Raider Cruiser err    5.244 ls  2σ  168.324 ls  light age  2686 s
+  FactionId(1) C2 = Cruiser   err   25.003 ls  2σ   72.808 ls  light age  2751 s
+  FactionId(1) C3 = Transport err   12.448 ls  2σ  190.312 ls  light age  3073 s
+T+    540 min
+  SHIP Transport hull=100.0/100 armour=100.0 screens=0% heat=0.0PJ SRM=0 LRM=0
+  SHIP Cruiser hull=4000.0/4000 armour=2000.0 screens=100% heat=344.9PJ SRM=24 LRM=36
+  SHIP Raider Cruiser hull=4000.0/4000 armour=2000.0 screens=100% heat=265.3PJ SRM=24 LRM=36
+  FactionId(0) C1 = Raider Cruiser err    7.538 ls  2σ   76.699 ls  light age  2364 s
+  FactionId(1) C1 = Lunar sensor station err   16.328 ls  2σ  214.773 ls  light age  3251 s
+  FactionId(1) C2 = Cruiser   err   11.780 ls  2σ  102.109 ls  light age  2452 s
+  FactionId(1) C3 = Transport err   12.643 ls  2σ  169.830 ls  light age  2895 s
+T+    600 min
+  SHIP Transport hull=100.0/100 armour=100.0 screens=0% heat=0.0PJ SRM=0 LRM=0
+  SHIP Cruiser hull=4000.0/4000 armour=2000.0 screens=100% heat=158.6PJ SRM=24 LRM=36
+  SHIP Raider Cruiser hull=4000.0/4000 armour=2000.0 screens=100% heat=363.6PJ SRM=24 LRM=36
+  FactionId(0) C1 = Raider Cruiser err   21.940 ls  2σ   86.610 ls  light age  2034 s
+  FactionId(1) C1 = Lunar sensor station err   16.328 ls  2σ  208.070 ls  light age  3187 s
+  FactionId(1) C2 = Cruiser   err   16.151 ls  2σ   89.100 ls  light age  2148 s
+  FactionId(1) C3 = Transport err   12.699 ls  2σ  152.479 ls  light age  2735 s
+T+    660 min
+  SHIP Transport hull=100.0/100 armour=100.0 screens=0% heat=0.0PJ SRM=0 LRM=0
+  SHIP Cruiser hull=4000.0/4000 armour=2000.0 screens=100% heat=252.9PJ SRM=24 LRM=36
+  SHIP Raider Cruiser hull=4000.0/4000 armour=2000.0 screens=100% heat=130.4PJ SRM=24 LRM=36
+  FactionId(0) C1 = Raider Cruiser err   22.634 ls  2σ   74.562 ls  light age  1719 s
+  FactionId(1) C1 = Lunar sensor station err   16.328 ls  2σ  202.804 ls  light age  3150 s
+  FactionId(1) C2 = Cruiser   err   17.269 ls  2σ   61.170 ls  light age  1841 s
+  FactionId(1) C3 = Transport err   12.698 ls  2σ  137.720 ls  light age  2591 s
+T+    720 min
+  SHIP Transport hull=100.0/100 armour=100.0 screens=0% heat=0.0PJ SRM=0 LRM=0
+  SHIP Cruiser hull=4000.0/4000 armour=2000.0 screens=100% heat=356.1PJ SRM=24 LRM=36
+  SHIP Raider Cruiser hull=4000.0/4000 armour=2000.0 screens=100% heat=272.8PJ SRM=24 LRM=36
+  FactionId(0) C1 = Raider Cruiser err    0.452 ls  2σ    6.968 ls  light age  1402 s
+  FactionId(1) C1 = Lunar sensor station err   16.328 ls  2σ  202.556 ls  light age  3136 s
+  FactionId(1) C2 = Cruiser   err   16.198 ls  2σ   58.441 ls  light age  1527 s
+  FactionId(1) C3 = Transport err   12.689 ls  2σ  124.945 ls  light age  2459 s
+
+simulated 12.00 h in 5.91 s wall (7313× real time)
