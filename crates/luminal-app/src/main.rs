@@ -1259,12 +1259,25 @@ Shift + right click: extend route").monospace().size(9.0).color(TEXT_MUTED));
     }
 
     fn new() -> Self {
-        let chosen=std::env::var("LUMINAL_SHIP").ok().and_then(|name|luminal_core::world::ShipClass::COMBAT.into_iter().find(|c|c.name().eq_ignore_ascii_case(&name))).unwrap_or(luminal_core::world::ShipClass::Frigate);
-        Self::new_with_class(chosen)
-    }
-    fn new_with_class(chosen:luminal_core::world::ShipClass) -> Self {
-        let theme=std::env::var("LUMINAL_THEME").ok().and_then(|name|theme::Theme::ALL.into_iter().find(|t|t.name().eq_ignore_ascii_case(&name))).unwrap_or_default();
+        // Presentation-only stream: startup choices never consume combat RNG.
+        let seed=std::env::var("LUMINAL_SEED").ok().and_then(|s|s.parse().ok()).unwrap_or_else(|| {
+            if cfg!(test) || std::env::var_os("LUMINAL_SCREENSHOT").is_some() {42} else {
+                std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos() as u64
+            }
+        });
+        let mut rng=luminal_core::rng::Rng::stream(seed,0x53544152545550);
+        let classes=luminal_core::world::ShipClass::COMBAT;
+        let random_class=classes[(rng.next_u64()%classes.len() as u64) as usize];
+        let random_theme=theme::Theme::ALL[(rng.next_u64()%theme::Theme::ALL.len() as u64) as usize];
+        let chosen=std::env::var("LUMINAL_SHIP").ok().and_then(|name|classes.into_iter().find(|c|c.name().eq_ignore_ascii_case(&name)))
+            .unwrap_or(if cfg!(test) {luminal_core::world::ShipClass::Frigate} else {random_class});
+        let theme=std::env::var("LUMINAL_THEME").ok().and_then(|name|theme::Theme::ALL.into_iter().find(|t|t.name().eq_ignore_ascii_case(&name)))
+            .unwrap_or(if cfg!(test) {theme::Theme::Culture} else {random_theme});
         Self::new_with_theme(chosen,theme)
+    }
+    #[cfg(test)]
+    fn new_with_class(chosen:luminal_core::world::ShipClass) -> Self {
+        Self::new_with_theme(chosen,theme::Theme::Culture)
     }
     fn new_with_theme(chosen:luminal_core::world::ShipClass,theme:theme::Theme) -> Self {
         let seed = std::env::var("LUMINAL_SEED").ok().and_then(|s|s.parse().ok()).unwrap_or_else(|| {

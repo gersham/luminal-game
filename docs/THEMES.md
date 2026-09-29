@@ -3,7 +3,9 @@
 Themes are presentation choices in the native app. They never enter a simulation
 command, seed, loadout, sensor calculation or weapon rule. The original Luminal
 vocabulary remains available. The selected theme survives scenario restarts;
-a fresh application launch defaults to Culture unless `LUMINAL_THEME` is set.
+a fresh application launch randomly preselects a theme and combat ship class.
+`LUMINAL_THEME` and `LUMINAL_SHIP` override those choices for previews.
+`LUMINAL_SEED` makes the random selections repeatable.
 
 The startup screen previews these aliases before deployment. Full ship types now follow each theme, including distinct opposing fleets.
 The five underlying balance tiers and their abbreviations remain stable.
@@ -66,7 +68,7 @@ Names remain stable for that scenario. Opponent names appear only after a
 received identity-level observation, and remain remembered when precision
 telemetry expires. Full class names appear once the contact is resolved.
 
-Culture is the default. Grim Dark uses a Servitor, Imperium an AI and Culture a
+Grim Dark uses a Servitor, Imperium an AI and Culture a
 Mind for the command-computer system. Existing control logic is unchanged.
 
 The former ocean-ship sketches have been replaced by generated, setting-inspired
