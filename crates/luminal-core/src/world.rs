@@ -224,15 +224,14 @@ impl Body {
         self.damage.effectiveness(system)
     }
     pub fn operating_effectiveness(&self,system:crate::damage::System)->f64 {
-        use crate::damage::System as S;
-        if system.independent_power() {return self.system_effectiveness(system);}
-        self.system_effectiveness(system)*self.system_effectiveness(S::Power)
-            *self.system_effectiveness(S::Mind)
+        if matches!(self.kind,BodyKind::Missile|BodyKind::Probe) {return 1.0;}
+        if !self.installed_systems()[system as usize] {return 0.0;}
+        self.damage.operating_effectiveness(system)
     }
     pub fn advance_thermal(&mut self,t:f64) {
         if t<=self.thermal.last_t {return;}
         use crate::damage::System as S;
-        let power=self.system_effectiveness(S::Power);
+        let power=if self.damage.lifeless() {0.0} else {self.system_effectiveness(S::Power)};
 
         let screen=self.operating_effectiveness(S::Screens);
         let start=self.thermal.last_t;
@@ -656,6 +655,7 @@ impl World {
         let t=self.time;
         let b=self.live_body_mut(id)?;
         if b.kind!=BodyKind::Ship {return Err(OrderError::InvalidTarget);}
+        if b.damage.lifeless() {return Err(OrderError::PowerOrHeat);}
         b.advance_thermal(t);
         b.thermal.dumping=enabled;
         self.snapshot_platform(id,t);
@@ -2382,6 +2382,30 @@ mod tests {
         assert!(w.bodies[0].damage.hull>0.0);
         assert!(!w.bodies[0].alive_at(0.001));
     }
+    #[test]
+    fn dead_mind_stops_combat_and_lifeless_hulk_coasts_without_repair_or_sensors() {
+        use crate::damage::{System as S,Condition as D};
+        let (mut w,c)=beam_trial();
+        w.set_thrust(BodyId(0),Vec2::new(G0,0.0)).unwrap();
+        w.bodies[0].damage.systems[S::Mind as usize]=D::Destroyed;
+        w.guide(BodyId(0));
+        assert_eq!(w.bodies[0].trajectory.last().thrust,Vec2::ZERO);
+        assert_eq!(w.bodies[0].sensor_effectiveness(),[1.0,1.0]);
+        assert!(!w.ping(BodyId(0)));
+        assert_eq!(w.fire_beam(BodyId(0),c),Err(OrderError::PowerOrHeat));
+        assert_eq!(w.queue_launch(BodyId(0),c,Payload::Nuclear),Err(OrderError::PowerOrHeat));
+        w.bodies[0].damage.systems[S::Crew as usize]=D::Destroyed;
+        w.bodies[0].damage.hull*=0.5;
+        let hull=w.bodies[0].damage.hull;
+        assert_eq!(w.set_heat_dump(BodyId(0),true),Err(OrderError::PowerOrHeat));
+        w.advance_to(100.0);
+        assert!(w.bodies[0].alive_at(100.0));
+        assert_eq!(w.bodies[0].damage.hull,hull);
+        assert_eq!(w.bodies[0].trajectory.last().thrust,Vec2::ZERO);
+        assert_eq!(w.bodies[0].sensor_effectiveness(),[0.0,0.0]);
+        for system in S::ALL {assert_eq!(w.bodies[0].operating_effectiveness(system),0.0,"{system:?}");}
+    }
+
     #[test]
     fn automatic_beams_and_thrust_stay_off_until_power_repair() {
         use crate::damage::{System as S,Condition as D};

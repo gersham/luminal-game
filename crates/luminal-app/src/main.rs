@@ -676,6 +676,19 @@ mod tests {
     }
 
     #[test]
+    fn dead_mind_greys_dependent_systems_and_lifeless_hulk_greys_every_chip() {
+        let mut report=Report {damage:Default::default(),installed:[true;16],observed_at:0.0,screen_available:1.0};
+        report.damage.systems[System::Mind as usize]=Condition::Destroyed;
+        for system in [System::Repair,System::Ecm,System::Eccm,System::Propulsion,System::Beam,System::Active] {
+            assert!(Chip::of(Some(report),system)==Chip::Inoperative,"{}",system.code());
+        }
+        assert!(Chip::of(Some(report),System::Passive)==Chip::Intact);
+        report.damage.systems[System::Crew as usize]=Condition::Destroyed;
+        report.installed[System::SrmLauncher as usize]=false;
+        for system in System::ALL {assert!(Chip::of(Some(report),system)==Chip::Lifeless);}
+    }
+
+    #[test]
     fn inspecting_targets_and_automatic_ships_preserves_command_selection() {
         let mut app = LuminalApp::new();
         let view = app.session.view(Role::Faction(ESCORT));
@@ -812,13 +825,13 @@ impl LuminalApp {
             sub_header(ui,"FIRE CONTROL",Some(("PRE-DEFENCE",TEXT_MUTED)));
             if let Some(ship)=own {self.compact_weapons(ui,view,ship);}
             let ui=&mut columns[1];
-            sub_header(ui,"OWN SHIP",None);
+            sub_header(ui,"OWN SHIP",own.and_then(|b|if b.damage.damage.lifeless() {Some(("LIFELESS HULK",TEXT_MUTED))} else if b.damage.damage.state(System::Mind)==Condition::Destroyed {Some(("MIND OFFLINE",TEXT_MUTED))} else {None}));
             compact_status(ui,own.map(|b|&b.damage),own.map(|b|b.thrust.length()/G0),own.and_then(|b|b.ship_class).map(|c|c.max_g()),false);
             compact_systems(ui,"own_deck",own.map(|b|b.damage));
             self.central_controls(&mut columns[2],own,view);
             let ui=&mut columns[3];
             let systems=target.and_then(|c|target_system_report(c,view));
-            let label=if target.is_some_and(|c|c.damage.is_some()) && systems.is_none() {"STALE ECHO"} else {"LAST ECHO"};
+            let label=if systems.is_some_and(|r|r.damage.lifeless()) {"LIFELESS HULK"} else if target.is_some_and(|c|c.damage.is_some()) && systems.is_none() {"STALE ECHO"} else {"LAST ECHO"};
             sub_header(ui,"TARGET",Some((label,CONTACT)));
             let thrust=target.filter(|c|contact_has_course(c)).and_then(|c|c.track.as_ref()).map(|t|t.accel.length()/G0)
                 .filter(|_|systems.is_some_and(|r|r.operating_effectiveness(System::Propulsion)>0.0));
@@ -963,7 +976,7 @@ impl LuminalApp {
         ui.interact(r,ui.id().with("heat_rates"),Sense::hover()).on_hover_text("Net heat flow only: left cooling, right heating. Heat input is averaged over five seconds. Gauge scale: 1 MW to 1 PW; smaller nonzero rates retain one visible segment. Cruising at up to 50% rated thrust with screens enabled is heat balanced. Higher burns, weapons and absorbed hits build heat. Enabled screens add a small heat load; absorbed hits heat the ship immediately.");
         let button=Rect::from_center_size(Pos2::new(cx,r.top()+140.0),EVec2::new(150.0_f32.min(r.width()),26.0));
         let mut child=ui.new_child(egui::UiBuilder::new().max_rect(button));
-        if tac_button(&mut child,if thermal.dumping {"DUMPING · STOP"} else {"DUMP HEAT"},button.size(),WARM,thermal.dumping,true)
+        if tac_button(&mut child,if thermal.dumping {"DUMPING · STOP"} else {"DUMP HEAT"},button.size(),WARM,thermal.dumping,!ship.damage.damage.lifeless())
             .on_hover_text("Toggle radiators: 5× cooling, 10× heat signature; thrust and beam weapons remain disabled until switched off.").clicked() {
             self.command(Command::SetHeatDump {body:ship.id,enabled:!thermal.dumping});
         }
@@ -972,10 +985,10 @@ impl LuminalApp {
             else if ship.thermal.field<0.999 {format!("CHARGING {:.0}%",ship.damage.screen_available*100.0)}
             else {format!("{:.0}% AVAILABLE",ship.damage.screen_available*100.0)};
         let controls=[
-            ("ECM",C::Ecm,ship.controls.ecm,ship.controls.ecm_active,if ship.controls.ecm_active {"EMITTING".into()} else {"SILENT".into()},true,"Auto emits while a resolved enemy ship is known. Class-rated ECM/ECCM; maximum 50% resolution reduction."),
-            ("SCREENS",C::Screens,ship.controls.screens,ship.screen_up,screen,ship.has_screen,"Auto latches on after resolving an enemy ship. Charges 0.2% per minute. Off disables absorption immediately. Hits and idle operation heat the ship."),
-            ("EVADE",C::Evade,ship.controls.evade,ship.controls.evading,if ship.controls.evading {"EVADING".into()} else if ship.controls.evade==Mode::Auto {"WATCHING".into()} else {"OFF".into()},true,"Auto temporarily evades incoming damaging missiles, then resumes your prior movement order. Off disables automatic evasion."),
-            ("ACTIVE",C::Active,ship.controls.active,ship.controls.active==Mode::Auto,if ship.controls.active==Mode::Auto {format!("PING IN {:.0}s",(ship.controls.next_ping_at-view.time).max(0.0))} else {"SILENT".into()},ship.sensors.active,"Auto pings every 60 seconds until switched Off, even without contacts.")
+            ("ECM",C::Ecm,ship.controls.ecm,ship.controls.ecm_active,if ship.controls.ecm_active {"EMITTING".into()} else {"SILENT".into()},ship.damage.operating_effectiveness(System::Ecm)>0.0,"Auto emits while a resolved enemy ship is known. Class-rated ECM/ECCM; maximum 50% resolution reduction."),
+            ("SCREENS",C::Screens,ship.controls.screens,ship.screen_up,screen,ship.damage.operating_effectiveness(System::Screens)>0.0,"Auto latches on after resolving an enemy ship. Charges 0.2% per minute. Off disables absorption immediately. Hits and idle operation heat the ship."),
+            ("EVADE",C::Evade,ship.controls.evade,ship.controls.evading,if ship.controls.evading {"EVADING".into()} else if ship.controls.evade==Mode::Auto {"WATCHING".into()} else {"OFF".into()},ship.damage.operating_effectiveness(System::Propulsion)>0.0,"Auto temporarily evades incoming damaging missiles, then resumes your prior movement order. Off disables automatic evasion."),
+            ("ACTIVE",C::Active,ship.controls.active,ship.controls.active==Mode::Auto,if ship.controls.active==Mode::Auto {format!("PING IN {:.0}s",(ship.controls.next_ping_at-view.time).max(0.0))} else {"SILENT".into()},ship.damage.operating_effectiveness(System::Active)>0.0,"Auto pings every 60 seconds until switched Off, even without contacts.")
         ];
         for row in [[Some(0),Some(2),Some(3)],[Some(1),None,Some(4)]] {ui.columns(3,|columns| {
             for (ui,index) in columns.iter_mut().zip(row) {
@@ -3553,12 +3566,14 @@ enum Chip {
     Absent,
     Inoperative,
     PowerOffline,
+    Lifeless,
 }
 
 impl Chip {
     fn of(report: Option<Report>, system: System) -> Self {
         match report {
             None => Chip::Unknown,
+            Some(r) if r.damage.lifeless() => Chip::Lifeless,
             Some(r) if !r.installed[system as usize] => Chip::Absent,
             Some(r) if system==System::Power && r.damage.state(system)==Condition::Damaged => Chip::PowerOffline,
             Some(r) if system!=System::Power && !system.independent_power() && r.damage.state(System::Power)!=Condition::Intact => Chip::Inoperative,
@@ -3578,7 +3593,7 @@ impl Chip {
             Chip::Destroyed => SYS_DESTROYED,
             Chip::Unknown => Color32::from_rgb(80,150,180),
             Chip::Absent => SYS_ABSENT,
-            Chip::Inoperative => Color32::from_rgb(125,132,143),
+            Chip::Inoperative | Chip::Lifeless => Color32::from_rgb(125,132,143),
             Chip::PowerOffline => SYS_DAMAGED,
         }
     }
@@ -3590,7 +3605,8 @@ impl Chip {
             Chip::Destroyed => "Destroyed · offline",
             Chip::Unknown => "Unknown or stale · not confirmed disabled · fresh active echo required",
             Chip::Absent => "Not fitted",
-            Chip::Inoperative => "Inoperative · power or ship-mind dependency offline",
+            Chip::Inoperative => "Inoperative · required power, ship mind or crew unavailable",
+            Chip::Lifeless => "Lifeless hulk · crew and ship mind destroyed · all systems inactive",
             Chip::PowerOffline => "Power damaged · first repair priority · passive, direction finding and mind on backup; crew and damage control operational",
         }
     }

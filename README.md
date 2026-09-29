@@ -294,8 +294,14 @@ on a 35% roll; only a sufficiently damaging puncture guarantees a component shoc
 
 Damage control repairs one damaged system per **twenty effective minutes**, with
 power first, then damage control itself. A progress line and hover text show the
-current repair. Crew and damage-control damage slow repairs. Destroyed systems
+current repair. Crew, mind and damage-control damage slow repairs. Destroyed systems
 cannot be repaired. Hull repair is separate: 1% per effective hour.
+
+A destroyed ship mind disables damage control, propulsion, active sensors, ECM/ECCM,
+screens and all weapons. Surviving crew retain backup passive and direction sensors.
+A surviving mind can operate combat systems without crew, but cannot repair the ship.
+With both crew and mind destroyed, every system is inactive and shown grey: a
+lifeless hulk coasts without sensors, weapons, reactor charging or repairs.
 
 The current matched-class balance results, commands, failure investigations, and
 remaining limits are in [the September combat report](calibration/2026-09-28/report.md).

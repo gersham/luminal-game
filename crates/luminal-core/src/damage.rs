@@ -67,6 +67,19 @@ impl Damage {
         if system==System::Power && self.state(system)!=Condition::Intact {0.0}
         else {self.state(system).effectiveness()}
     }
+    pub fn lifeless(&self)->bool {
+        self.state(System::Crew)==Condition::Destroyed && self.state(System::Mind)==Condition::Destroyed
+    }
+    /// Shared dependency rules for simulation and received damage reports.
+    pub fn operating_effectiveness(&self,system:System)->f64 {
+        if self.lifeless() {return 0.0;}
+        let base=self.effectiveness(system);
+        if system==System::Repair {
+            return base*self.effectiveness(System::Crew)*self.effectiveness(System::Mind);
+        }
+        if system.independent_power() {return base;}
+        base*self.effectiveness(System::Power)*self.effectiveness(System::Mind)
+    }
     /// Every nonzero penetration damages hull. Armour absorbs half until exhausted;
     /// unused absorption flows through, so energy cannot disappear at depletion.
     pub fn penetrate(&mut self,energy_j:f64,installed:&[bool;16],rng:&mut Rng)->Option<System> {
@@ -88,11 +101,11 @@ impl Damage {
     }
     pub fn system_repair_rate(&self)->f64 {
         (match self.state(System::Repair) {Condition::Intact=>1.0,Condition::Damaged=>1.0/3.0,Condition::Destroyed=>0.0})
-            *self.effectiveness(System::Crew)
+            *self.effectiveness(System::Crew)*self.effectiveness(System::Mind)
     }
     pub fn repair(&mut self,dt:f64,rng:&mut Rng)->Option<System> {
-        if self.hull<=0.0 || self.state(System::Power)==Condition::Destroyed {return None;}
-        let work=dt.max(0.0)*self.effectiveness(System::Repair)*self.effectiveness(System::Crew);
+        if self.hull<=0.0 || self.state(System::Power)==Condition::Destroyed || self.operating_effectiveness(System::Repair)==0.0 {return None;}
+        let work=dt.max(0.0)*self.operating_effectiveness(System::Repair);
         // Emergency damage-control work can restart power without powered systems.
         // Other repair work, including hull restoration, waits for power.
         if self.state(System::Power)==Condition::Intact {
@@ -118,14 +131,30 @@ pub struct Report {pub damage:Damage,pub installed:[bool;16],pub observed_at:f64
 impl Report {
     pub fn operating_effectiveness(&self,system:System)->f64 {
         if !self.installed[system as usize] {return 0.0;}
-        if system.independent_power() {return self.damage.effectiveness(system);}
-        self.damage.effectiveness(system)*self.damage.effectiveness(System::Power)*self.damage.effectiveness(System::Mind)
+        self.damage.operating_effectiveness(system)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test] fn dead_mind_stops_repairs_and_dead_crew_and_mind_disable_everything() {
+        let mut d=Damage {hull:40.0,..Default::default()};
+        d.systems[System::Mind as usize]=Condition::Destroyed;
+        d.systems[System::Active as usize]=Condition::Damaged;
+        for s in System::ALL {
+            assert_eq!(d.operating_effectiveness(s),if matches!(s,System::Crew|System::Passive|System::Direction) {1.0} else {0.0},"{s:?}");
+        }
+        d.repair(86400.0,&mut Rng::new(1));assert_eq!(d.hull,40.0);
+        assert_eq!(d.state(System::Active),Condition::Damaged);assert_eq!(d.repair_progress,0.0);
+        d.systems[System::Crew as usize]=Condition::Destroyed;
+        assert!(d.lifeless());
+        let report=Report {damage:d,installed:[true;16],observed_at:0.0,screen_available:0.0};
+        for s in System::ALL {assert_eq!(report.operating_effectiveness(s),0.0,"{s:?}");}
+        d.systems[System::Mind as usize]=Condition::Intact;
+        assert!(!d.lifeless());assert_eq!(d.operating_effectiveness(System::Beam),1.0);
+        assert_eq!(d.operating_effectiveness(System::Repair),0.0,"repair still needs living crew");
+    }
     #[test] fn screen_overload_destroys_generator_hits_distinct_systems_and_bypasses_armour() {
         for seed in 0..100 {
             let mut d=Damage {hull:1000.0,hull_max:1000.0,..Default::default()};
