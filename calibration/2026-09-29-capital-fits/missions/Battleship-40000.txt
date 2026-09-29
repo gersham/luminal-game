@@ -1,0 +1,289 @@
+T+     60 min
+  SHIP Transport hull=100.0/100 armour=100.0 screens=0% heat=0.0PJ SRM=0 LRM=0
+  SHIP Battleship hull=8000.0/8000 armour=6000.0 screens=100% heat=405.4PJ SRM=48 LRM=48
+  SHIP Raider Battleship hull=8000.0/8000 armour=6000.0 screens=100% heat=405.3PJ SRM=48 LRM=48
+  FactionId(0) C1 = Raider Battleship err    8.329 ls  2σ  129.536 ls  light age  2216 s
+  FactionId(1) C1 = Transport err    2.773 ls  2σ   86.312 ls  light age  2216 s
+  FactionId(1) C2 = Battleship err    7.035 ls  2σ   92.414 ls  light age  2215 s
+T+    120 min
+  SHIP Transport hull=100.0/100 armour=100.0 screens=0% heat=40.2PJ SRM=0 LRM=0
+  SHIP Battleship hull=8000.0/8000 armour=6000.0 screens=100% heat=651.3PJ SRM=48 LRM=48
+  SHIP Raider Battleship hull=8000.0/8000 armour=6000.0 screens=100% heat=497.5PJ SRM=48 LRM=48
+  FactionId(0) C1 = Raider Battleship err    6.248 ls  2σ   55.525 ls  light age  2165 s
+  FactionId(1) C1 = Transport err    0.000 ls  2σ    6.238 ls  light age  2185 s
+  FactionId(1) C2 = Battleship err    6.473 ls  2σ   82.766 ls  light age  2166 s
+  FactionId(1) C3 = Lunar sensor station err    3.142 ls  2σ   92.546 ls  light age  2186 s
+T+    180 min
+  SHIP Transport hull=100.0/100 armour=100.0 screens=0% heat=74.4PJ SRM=0 LRM=0
+  SHIP Battleship hull=8000.0/8000 armour=6000.0 screens=100% heat=800.4PJ SRM=48 LRM=48
+  SHIP Raider Battleship hull=8000.0/8000 armour=6000.0 screens=100% heat=502.8PJ SRM=48 LRM=48
+  FactionId(0) C1 = Raider Battleship err    6.570 ls  2σ   77.347 ls  light age  2073 s
+  FactionId(1) C1 = Transport err    0.000 ls  2σ    5.887 ls  light age  2135 s
+  FactionId(1) C2 = Battleship err    5.817 ls  2σ   87.509 ls  light age  2077 s
+  FactionId(1) C3 = Lunar sensor station err    3.143 ls  2σ   88.630 ls  light age  2138 s
+T+    240 min
+  SHIP Transport hull=100.0/100 armour=100.0 screens=0% heat=95.1PJ SRM=0 LRM=0
+  SHIP Battleship hull=8000.0/8000 armour=6000.0 screens=100% heat=829.5PJ SRM=48 LRM=48
+  SHIP Raider Battleship hull=8000.0/8000 armour=6000.0 screens=100% heat=503.2PJ SRM=48 LRM=48
+  FactionId(0) C1 = Raider Battleship err    6.185 ls  2σ   68.338 ls  light age  1943 s
+  FactionId(1) C1 = Transport err    0.000 ls  2σ    5.430 ls  light age  2067 s
+  FactionId(1) C2 = Battleship err    0.019 ls  2σ    4.697 ls  light age  1948 s
+  FactionId(1) C3 = Lunar sensor station err    3.143 ls  2σ   83.196 ls  light age  2074 s
+T+    300 min
+  SHIP Transport hull=100.0/100 armour=100.0 screens=0% heat=103.3PJ SRM=0 LRM=0
+  SHIP Battleship hull=8000.0/8000 armour=6000.0 screens=100% heat=830.3PJ SRM=48 LRM=48
+  SHIP Raider Battleship hull=8000.0/8000 armour=6000.0 screens=100% heat=505.4PJ SRM=48 LRM=48
+  FactionId(0) C1 = Raider Battleship err    6.067 ls  2σ   57.711 ls  light age  1774 s
+  FactionId(1) C1 = Transport err    0.073 ls  2σ    4.895 ls  light age  1983 s
+  FactionId(1) C2 = Battleship err    0.000 ls  2σ    3.758 ls  light age  1780 s
+  FactionId(1) C3 = Lunar sensor station err    0.000 ls  2σ    4.965 ls  light age  1993 s
+T+    360 min
+  SHIP Transport hull=100.0/100 armour=100.0 screens=0% heat=103.5PJ SRM=0 LRM=0
+  SHIP Battleship hull=8000.0/8000 armour=6000.0 screens=100% heat=830.3PJ SRM=48 LRM=48
+  SHIP Raider Battleship hull=8000.0/8000 armour=6000.0 screens=100% heat=711.9PJ SRM=48 LRM=48
+  FactionId(0) C1 = Raider Battleship err    9.489 ls  2σ   40.133 ls  light age  1573 s
+  FactionId(1) C1 = Transport err    0.002 ls  2σ    4.427 ls  light age  1905 s
+  FactionId(1) C2 = Battleship err    0.000 ls  2σ    2.857 ls  light age  1594 s
+  FactionId(1) C3 = Lunar sensor station err    0.000 ls  2σ    4.503 ls  light age  1915 s
+T+    420 min
+  SHIP Transport hull=100.0/100 armour=100.0 screens=0% heat=103.6PJ SRM=0 LRM=0
+  SHIP Battleship hull=8000.0/8000 armour=6000.0 screens=100% heat=830.3PJ SRM=48 LRM=48
+  SHIP Raider Battleship hull=8000.0/8000 armour=6000.0 screens=100% heat=822.2PJ SRM=48 LRM=48
+  FactionId(0) C1 = Raider Battleship err    0.033 ls  2σ    1.971 ls  light age  1371 s
+  FactionId(1) C1 = Transport err    0.000 ls  2σ    4.137 ls  light age  1856 s
+  FactionId(1) C2 = Battleship err    0.000 ls  2σ    2.097 ls  light age  1406 s
+  FactionId(1) C3 = Lunar sensor station err    0.000 ls  2σ    4.181 ls  light age  1859 s
+T+    480 min
+  SHIP Transport hull=100.0/100 armour=100.0 screens=0% heat=103.6PJ SRM=0 LRM=0
+  SHIP Battleship hull=8000.0/8000 armour=6000.0 screens=100% heat=830.3PJ SRM=48 LRM=48
+  SHIP Raider Battleship hull=8000.0/8000 armour=6000.0 screens=100% heat=830.1PJ SRM=48 LRM=48
+  FactionId(0) C1 = Raider Battleship err    0.001 ls  2σ    1.342 ls  light age  1173 s
+  FactionId(1) C1 = Transport err    0.000 ls  2σ    4.017 ls  light age  1837 s
+  FactionId(1) C2 = Battleship err    0.000 ls  2σ    1.469 ls  light age  1217 s
+  FactionId(1) C3 = Lunar sensor station err    0.000 ls  2σ    3.981 ls  light age  1822 s
+T+    540 min
+  SHIP Transport hull=100.0/100 armour=100.0 screens=0% heat=103.6PJ SRM=0 LRM=0
+  SHIP Battleship hull=8000.0/8000 armour=6000.0 screens=100% heat=830.3PJ SRM=48 LRM=48
+  SHIP Raider Battleship hull=8000.0/8000 armour=6000.0 screens=100% heat=830.3PJ SRM=48 LRM=48
+  FactionId(0) C1 = Raider Battleship err    0.000 ls  2σ    0.857 ls  light age   978 s
+  FactionId(1) C1 = Transport err    0.000 ls  2σ    4.117 ls  light age  1852 s
+  FactionId(1) C2 = Battleship err    0.000 ls  2σ    0.964 ls  light age  1026 s
+  FactionId(1) C3 = Lunar sensor station err    0.000 ls  2σ    3.891 ls  light age  1805 s
+T+    600 min
+  SHIP Transport hull=100.0/100 armour=100.0 screens=0% heat=103.6PJ SRM=0 LRM=0
+  SHIP Battleship hull=8000.0/8000 armour=6000.0 screens=100% heat=830.3PJ SRM=48 LRM=48
+  SHIP Raider Battleship hull=8000.0/8000 armour=6000.0 screens=100% heat=606.0PJ SRM=48 LRM=48
+  FactionId(0) C1 = Raider Battleship err    0.004 ls  2σ    0.497 ls  light age   784 s
+  FactionId(1) C1 = Transport err    0.003 ls  2σ    4.407 ls  light age  1901 s
+  FactionId(1) C2 = Battleship err    0.000 ls  2σ    0.574 ls  light age   831 s
+  FactionId(1) C3 = Lunar sensor station err    0.026 ls  2σ    3.892 ls  light age  1806 s
+T+    660 min
+  SHIP Transport hull=100.0/100 armour=100.0 screens=0% heat=103.6PJ SRM=0 LRM=0
+  SHIP Battleship hull=8000.0/8000 armour=6000.0 screens=100% heat=830.3PJ SRM=48 LRM=0
+  SHIP Raider Battleship hull=8000.0/8000 armour=6000.0 screens=100% heat=510.5PJ SRM=48 LRM=8
+  FactionId(0) C1 = Raider Battleship err    0.001 ls  2σ    0.243 ls  light age   585 s
+  FactionId(0) C2 = Raider Battleship M1 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C3 = Raider Battleship M2 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C4 = Raider Battleship M3 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C5 = Raider Battleship M4 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C6 = Raider Battleship M5 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C7 = Raider Battleship M6 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C8 = Raider Battleship M7 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C9 = Raider Battleship M8 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C10 = Raider Battleship M9 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C11 = Raider Battleship M10 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C12 = Raider Battleship M11 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C13 = Raider Battleship M12 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C14 = Raider Battleship M13 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C15 = Raider Battleship M14 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C16 = Raider Battleship M15 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C17 = Raider Battleship M16 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C18 = Raider Battleship M17 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C19 = Raider Battleship M18 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C20 = Raider Battleship M19 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C21 = Raider Battleship M20 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C22 = Raider Battleship M21 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C23 = Raider Battleship M22 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C24 = Raider Battleship M23 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C25 = Raider Battleship M24 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C26 = Raider Battleship M25 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C27 = Raider Battleship M26 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C28 = Raider Battleship M27 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C29 = Raider Battleship M28 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C30 = Raider Battleship M29 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C31 = Raider Battleship M30 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C32 = Raider Battleship M31 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C33 = Raider Battleship M32 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C34 = Raider Battleship M33 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C35 = Raider Battleship M34 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C36 = Raider Battleship M35 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C37 = Raider Battleship M36 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C38 = Raider Battleship M37 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C39 = Raider Battleship M38 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C40 = Raider Battleship M39 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C41 = Raider Battleship M40 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C1 = Transport err    0.128 ls  2σ    4.842 ls  light age  1981 s
+  FactionId(1) C2 = Battleship err    0.000 ls  2σ    0.287 ls  light age   627 s
+  FactionId(1) C3 = Lunar sensor station err    0.038 ls  2σ    3.960 ls  light age  1820 s
+  FactionId(1) C4 = Battleship M1 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C5 = Battleship M2 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C6 = Battleship M3 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C7 = Battleship M4 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C8 = Battleship M5 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C9 = Battleship M6 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C10 = Battleship M7 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C11 = Battleship M8 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C12 = Battleship M9 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C13 = Battleship M10 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C14 = Battleship M11 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C15 = Battleship M12 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C16 = Battleship M13 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C17 = Battleship M14 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C18 = Battleship M15 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C19 = Battleship M16 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C20 = Battleship M17 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C21 = Battleship M18 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C22 = Battleship M19 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C23 = Battleship M20 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C24 = Battleship M21 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C25 = Battleship M22 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C26 = Battleship M23 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C27 = Battleship M24 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C28 = Battleship M25 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C29 = Battleship M26 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C30 = Battleship M27 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C31 = Battleship M28 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C32 = Battleship M29 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C33 = Battleship M30 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C34 = Battleship M31 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C35 = Battleship M32 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C36 = Battleship M33 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C37 = Battleship M34 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C38 = Battleship M35 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C39 = Battleship M36 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C40 = Battleship M37 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C41 = Battleship M38 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C42 = Battleship M39 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C43 = Battleship M40 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C44 = Battleship M41 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C45 = Battleship M42 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C46 = Battleship M43 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C47 = Battleship M44 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C48 = Battleship M45 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C49 = Battleship M46 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C50 = Battleship M47 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C51 = Battleship M48 err    0.000 ls  2σ    0.000 ls  light age     0 s
+T+    720 min
+  SHIP Transport hull=100.0/100 armour=100.0 screens=0% heat=103.6PJ SRM=0 LRM=0
+  SHIP Battleship hull=7993.2/8000 armour=5981.2 screens=92% heat=830.8PJ SRM=48 LRM=0
+  SHIP Raider Battleship hull=7996.8/8000 armour=5981.2 screens=76% heat=504.6PJ SRM=48 LRM=0
+  LOST Battleship M4 at 42086 s: point-defence missile
+  LOST Battleship M3 at 42087 s: point-defence missile
+  LOST Battleship M8 at 42088 s: point-defence missile
+  LOST Battleship M13 at 42170 s: point-defence missile
+  LOST Battleship M14 at 42171 s: point-defence missile
+  LOST Battleship M10 at 42172 s: point-defence missile
+  LOST Raider Battleship M4 at 42186 s: point-defence missile
+  LOST Raider Battleship M5 at 42186 s: point-defence missile
+  LOST Raider Battleship M1 at 42188 s: point-defence missile
+  LOST Raider Battleship M8 at 42188 s: point-defence missile
+  LOST Battleship M21 at 42254 s: point-defence missile
+  LOST Battleship M20 at 42255 s: point-defence missile
+  LOST Battleship M19 at 42255 s: point-defence missile
+  LOST Battleship M18 at 42256 s: point-defence missile
+  LOST Battleship M5 at 42264 s: point-defence missile
+  LOST Battleship M6 at 42265 s: point-defence missile
+  LOST Battleship M7 at 42265 s: point-defence missile
+  LOST Battleship M2 at 42314 s: point-defence missile
+  LOST Battleship M1 at 42314 s: point-defence missile
+  LOST Battleship M29 at 42338 s: point-defence missile
+  LOST Battleship M30 at 42339 s: point-defence missile
+  LOST Battleship M25 at 42341 s: point-defence missile
+  LOST Raider Battleship M2 at 42347 s: point-defence missile
+  LOST Battleship M12 at 42348 s: point-defence missile
+  LOST Battleship M15 at 42349 s: point-defence missile
+  LOST Battleship M9 at 42350 s: point-defence missile
+  LOST Raider Battleship M3 at 42388 s: point-defence missile
+  LOST Raider Battleship M6 at 42388 s: point-defence missile
+  LOST Raider Battleship M7 at 42391 s: point-defence laser
+  LOST Battleship M36 at 42423 s: point-defence missile
+  LOST Battleship M35 at 42423 s: point-defence missile
+  LOST Battleship M39 at 42424 s: point-defence missile
+  LOST Battleship M33 at 42425 s: point-defence missile
+  LOST Raider Battleship M13 at 42445 s: point-defence missile
+  LOST Raider Battleship M16 at 42447 s: point-defence missile
+  LOST Battleship M24 at 42482 s: point-defence missile
+  LOST Battleship M22 at 42486 s: point-defence laser
+  LOST Battleship M44 at 42507 s: point-defence missile
+  LOST Battleship M43 at 42508 s: point-defence missile
+  LOST Battleship M42 at 42509 s: point-defence missile
+  LOST Battleship M26 at 42518 s: point-defence missile
+  LOST Battleship M27 at 42570 s: point-defence laser
+  LOST Battleship M32 at 42579 s: point-defence laser
+  LOST Battleship M37 at 42601 s: point-defence missile
+  LOST Battleship M38 at 42601 s: point-defence missile
+  LOST Battleship M40 at 42602 s: point-defence missile
+  LOST Raider Battleship M12 at 42647 s: point-defence missile
+  LOST Raider Battleship M11 at 42647 s: point-defence missile
+  LOST Raider Battleship M10 at 42648 s: point-defence missile
+  LOST Battleship M34 at 42650 s: point-defence missile
+  LOST Raider Battleship M14 at 42654 s: point-defence laser
+  LOST Raider Battleship M15 at 42654 s: point-defence laser
+  LOST Raider Battleship M20 at 42704 s: point-defence missile
+  LOST Raider Battleship M23 at 42706 s: point-defence missile
+  LOST Raider Battleship M17 at 42706 s: point-defence missile
+  LOST Raider Battleship M24 at 42706 s: point-defence missile
+  LOST Battleship M45 at 42734 s: point-defence missile
+  LOST Battleship M46 at 42734 s: point-defence missile
+  LOST Battleship M41 at 42735 s: point-defence missile
+  LOST Battleship M47 at 42739 s: point-defence laser
+  LOST Battleship M48 at 42739 s: point-defence laser
+  LOST Raider Battleship M18 at 42865 s: point-defence missile
+  LOST Raider Battleship M21 at 42906 s: point-defence missile
+  LOST Raider Battleship M19 at 42914 s: point-defence laser
+  LOST Raider Battleship M22 at 42918 s: point-defence laser
+  LOST Raider Battleship M28 at 42963 s: point-defence missile
+  LOST Raider Battleship M26 at 42965 s: point-defence missile
+  LOST Raider Battleship M32 at 42966 s: point-defence missile
+  LOST Raider Battleship M31 at 43125 s: point-defence missile
+  LOST Raider Battleship M27 at 43166 s: point-defence missile
+  LOST Raider Battleship M29 at 43168 s: point-defence laser
+  LOST Raider Battleship M30 at 43168 s: point-defence laser
+  FactionId(0) C1 = Raider Battleship err    0.001 ls  2σ    0.090 ls  light age   385 s
+  FactionId(0) C34 = Raider Battleship M33 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C35 = Raider Battleship M34 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C36 = Raider Battleship M35 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C37 = Raider Battleship M36 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C38 = Raider Battleship M37 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C39 = Raider Battleship M38 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C40 = Raider Battleship M39 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C41 = Raider Battleship M40 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C42 = Raider Battleship M41 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C43 = Raider Battleship M42 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C44 = Raider Battleship M43 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C45 = Raider Battleship M44 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C46 = Raider Battleship M45 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C47 = Raider Battleship M46 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C48 = Raider Battleship M47 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C49 = Raider Battleship M48 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C1 = Transport err    0.100 ls  2σ    5.613 ls  light age  2096 s
+  FactionId(1) C2 = Battleship err    0.005 ls  2σ    0.101 ls  light age   416 s
+  FactionId(1) C3 = Lunar sensor station err    0.002 ls  2σ    4.136 ls  light age  1850 s
+  FactionId(1) C107 = Battleship interceptor 56 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C108 = Battleship interceptor 57 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C109 = Battleship interceptor 58 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C110 = Battleship interceptor 59 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C111 = Battleship interceptor 60 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C112 = Battleship interceptor 61 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C113 = Battleship interceptor 62 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C114 = Battleship interceptor 63 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C123 = Battleship interceptor 72 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C124 = Battleship interceptor 73 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C125 = Battleship interceptor 74 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C126 = Battleship interceptor 75 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C127 = Battleship interceptor 76 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C128 = Battleship interceptor 77 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C129 = Battleship interceptor 78 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C130 = Battleship interceptor 79 err    0.000 ls  2σ    0.000 ls  light age     0 s
+
+simulated 12.00 h in 15.98 s wall (2703× real time)

@@ -1,0 +1,9 @@
+class,seed,hours,outcome
+Cruiser,32000,12.00,No outcome by 12 hours
+Cruiser,32001,12.00,No outcome by 12 hours
+Cruiser,40000,12.00,No outcome by 12 hours
+Cruiser,40001,12.00,No outcome by 12 hours
+Battleship,32000,7.00,FactionId(1): Battleship was destroyed
+Battleship,32001,12.00,No outcome by 12 hours
+Battleship,40000,12.00,No outcome by 12 hours
+Battleship,40001,12.00,No outcome by 12 hours

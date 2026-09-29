@@ -1,0 +1,1056 @@
+T+     60 min
+  SHIP Transport hull=100.0/100 armour=100.0 screens=0% heat=44.2PJ SRM=0 LRM=0
+  SHIP Cruiser hull=4000.0/4000 armour=2000.0 screens=100% heat=202.7PJ SRM=24 LRM=0
+  SHIP Raider Cruiser hull=4000.0/4000 armour=2000.0 screens=12% heat=202.2PJ SRM=24 LRM=0
+  FactionId(0) C1 = Raider Cruiser err    0.001 ls  2σ    0.168 ls  light age   503 s
+  FactionId(0) C2 = Raider Cruiser M1 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C3 = Raider Cruiser M2 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C4 = Raider Cruiser M3 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C5 = Raider Cruiser M4 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C6 = Raider Cruiser M5 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C7 = Raider Cruiser M6 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C8 = Raider Cruiser M7 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C9 = Raider Cruiser M8 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C10 = Raider Cruiser M9 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C11 = Raider Cruiser M10 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C12 = Raider Cruiser M11 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C13 = Raider Cruiser M12 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C14 = Raider Cruiser M13 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C15 = Raider Cruiser M14 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C16 = Raider Cruiser M15 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C17 = Raider Cruiser M16 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C18 = Raider Cruiser M17 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C19 = Raider Cruiser M18 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C20 = Raider Cruiser M19 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C21 = Raider Cruiser M20 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C22 = Raider Cruiser M21 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C23 = Raider Cruiser M22 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C24 = Raider Cruiser M23 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C25 = Raider Cruiser M24 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C26 = Raider Cruiser M25 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C27 = Raider Cruiser M26 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C28 = Raider Cruiser M27 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C29 = Raider Cruiser M28 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C30 = Raider Cruiser M29 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C31 = Raider Cruiser M30 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C32 = Raider Cruiser M31 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C33 = Raider Cruiser M32 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C34 = Raider Cruiser M33 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C35 = Raider Cruiser M34 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C36 = Raider Cruiser M35 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C37 = Raider Cruiser M36 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C1 = Transport err    0.000 ls  2σ    0.168 ls  light age   503 s
+  FactionId(1) C2 = Cruiser   err    0.000 ls  2σ    0.168 ls  light age   503 s
+  FactionId(1) C3 = Lunar sensor station err    0.000 ls  2σ    0.169 ls  light age   504 s
+  FactionId(1) C4 = Cruiser M1 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C5 = Cruiser M2 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C6 = Cruiser M3 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C7 = Cruiser M4 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C8 = Cruiser M5 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C9 = Cruiser M6 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C10 = Cruiser M7 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C11 = Cruiser M8 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C12 = Cruiser M9 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C13 = Cruiser M10 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C14 = Cruiser M11 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C15 = Cruiser M12 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C16 = Cruiser M13 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C17 = Cruiser M14 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C18 = Cruiser M15 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C19 = Cruiser M16 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C20 = Cruiser M17 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C21 = Cruiser M18 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C22 = Cruiser M19 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C23 = Cruiser M20 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C24 = Cruiser M21 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C25 = Cruiser M22 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C26 = Cruiser M23 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C27 = Cruiser M24 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C28 = Cruiser M25 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C29 = Cruiser M26 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C30 = Cruiser M27 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C31 = Cruiser M28 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C32 = Cruiser M29 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C33 = Cruiser M30 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C34 = Cruiser M31 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C35 = Cruiser M32 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C36 = Cruiser M33 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C37 = Cruiser M34 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C38 = Cruiser M35 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C39 = Cruiser M36 err    0.000 ls  2σ    0.000 ls  light age     0 s
+T+    120 min
+  SHIP Transport hull=100.0/100 armour=100.0 screens=0% heat=76.8PJ SRM=0 LRM=0
+  SHIP Cruiser hull=4000.0/4000 armour=2000.0 screens=88% heat=326.0PJ SRM=24 LRM=0
+  SHIP Raider Cruiser hull=3953.7/4000 armour=1941.8 screens=4% heat=248.9PJ SRM=24 LRM=0
+  LOST Cruiser M4 at 5166 s: point-defence missile
+  LOST Raider Cruiser M2 at 5179 s: point-defence missile
+  LOST Raider Cruiser M3 at 5180 s: point-defence missile
+  LOST Raider Cruiser M5 at 5181 s: point-defence missile
+  LOST Cruiser M12 at 5288 s: point-defence missile
+  LOST Cruiser M2 at 5406 s: point-defence missile
+  LOST Cruiser M3 at 5406 s: point-defence missile
+  LOST Cruiser M14 at 5408 s: point-defence missile
+  LOST Cruiser M17 at 5410 s: point-defence missile
+  LOST Cruiser M5 at 5485 s: point-defence missile
+  LOST Cruiser M6 at 5485 s: point-defence missile
+  LOST Raider Cruiser M1 at 5500 s: point-defence missile
+  LOST Cruiser M8 at 5527 s: point-defence missile
+  LOST Cruiser M10 at 5528 s: point-defence missile
+  LOST Cruiser M11 at 5528 s: point-defence missile
+  LOST Cruiser M20 at 5530 s: point-defence missile
+  LOST Raider Cruiser M6 at 5530 s: point-defence laser
+  LOST Cruiser M21 at 5530 s: point-defence missile
+  LOST Cruiser M22 at 5531 s: point-defence missile
+  LOST Raider Cruiser M12 at 5548 s: point-defence missile
+  LOST Cruiser M7 at 5627 s: point-defence laser
+  LOST Cruiser M13 at 5649 s: point-defence missile
+  LOST Cruiser M15 at 5649 s: point-defence missile
+  LOST Cruiser M18 at 5650 s: point-defence missile
+  LOST Cruiser M25 at 5651 s: point-defence missile
+  LOST Cruiser M28 at 5653 s: point-defence missile
+  LOST Cruiser M16 at 5750 s: point-defence laser
+  LOST Cruiser M19 at 5771 s: point-defence missile
+  LOST Cruiser M24 at 5772 s: point-defence missile
+  LOST Cruiser M31 at 5773 s: point-defence missile
+  LOST Cruiser M32 at 5773 s: point-defence missile
+  LOST Cruiser M36 at 5775 s: point-defence missile
+  LOST Raider Cruiser M7 at 5787 s: point-defence missile
+  LOST Raider Cruiser M9 at 5787 s: point-defence missile
+  LOST Raider Cruiser M10 at 5788 s: point-defence missile
+  LOST Raider Cruiser M8 at 5866 s: point-defence missile
+  LOST Cruiser M23 at 5880 s: point-defence laser
+  LOST Cruiser M26 at 5892 s: point-defence missile
+  LOST Cruiser M29 at 5893 s: point-defence missile
+  LOST Raider Cruiser M14 at 5912 s: point-defence missile
+  LOST Raider Cruiser M15 at 5912 s: point-defence missile
+  LOST Cruiser M30 at 5971 s: point-defence missile
+  LOST Cruiser M27 at 5993 s: point-defence laser
+  LOST Cruiser M35 at 6015 s: point-defence missile
+  LOST Raider Cruiser M13 at 6152 s: point-defence missile
+  LOST Raider Cruiser M17 at 6153 s: point-defence missile
+  LOST Raider Cruiser M16 at 6232 s: point-defence missile
+  LOST Raider Cruiser M19 at 6277 s: point-defence missile
+  LOST Raider Cruiser M21 at 6278 s: point-defence missile
+  LOST Raider Cruiser M24 at 6280 s: point-defence missile
+  LOST Raider Cruiser M23 at 6520 s: point-defence missile
+  LOST Raider Cruiser M22 at 6598 s: point-defence missile
+  LOST Raider Cruiser M20 at 6619 s: point-defence laser
+  LOST Raider Cruiser M29 at 6639 s: point-defence missile
+  LOST Raider Cruiser M30 at 6880 s: point-defence missile
+  LOST Raider Cruiser M32 at 6956 s: point-defence missile
+  LOST Raider Cruiser M26 at 6956 s: point-defence missile
+  LOST Raider Cruiser M27 at 6956 s: point-defence missile
+  LOST Raider Cruiser M34 at 6957 s: point-defence missile
+  LOST Raider Cruiser M28 at 6957 s: point-defence missile
+  LOST Raider Cruiser M25 at 6977 s: point-defence laser
+  LOST Raider Cruiser M31 at 7192 s: point-defence missile
+  LOST Raider Cruiser M35 at 7193 s: point-defence missile
+  LOST Raider Cruiser M36 at 7194 s: point-defence missile
+  FactionId(0) C1 = Raider Cruiser err    0.001 ls  2σ    0.142 ls  light age   466 s
+  FactionId(0) C34 = Raider Cruiser M33 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C1 = Transport err    0.000 ls  2σ    0.142 ls  light age   470 s
+  FactionId(1) C2 = Cruiser   err    0.000 ls  2σ    0.132 ls  light age   466 s
+  FactionId(1) C3 = Lunar sensor station err    0.000 ls  2σ    0.152 ls  light age   483 s
+T+    180 min
+  SHIP Transport hull=100.0/100 armour=100.0 screens=0% heat=96.6PJ SRM=0 LRM=0
+  SHIP Cruiser hull=4000.0/4000 armour=2000.0 screens=100% heat=400.4PJ SRM=24 LRM=0
+  SHIP Raider Cruiser hull=3993.7/4000 armour=1941.8 screens=16% heat=277.5PJ SRM=24 LRM=0
+  LOST Cruiser M4 at 5166 s: point-defence missile
+  LOST Raider Cruiser M2 at 5179 s: point-defence missile
+  LOST Raider Cruiser M3 at 5180 s: point-defence missile
+  LOST Raider Cruiser M5 at 5181 s: point-defence missile
+  LOST Cruiser M12 at 5288 s: point-defence missile
+  LOST Cruiser M2 at 5406 s: point-defence missile
+  LOST Cruiser M3 at 5406 s: point-defence missile
+  LOST Cruiser M14 at 5408 s: point-defence missile
+  LOST Cruiser M17 at 5410 s: point-defence missile
+  LOST Cruiser M5 at 5485 s: point-defence missile
+  LOST Cruiser M6 at 5485 s: point-defence missile
+  LOST Raider Cruiser M1 at 5500 s: point-defence missile
+  LOST Cruiser M8 at 5527 s: point-defence missile
+  LOST Cruiser M10 at 5528 s: point-defence missile
+  LOST Cruiser M11 at 5528 s: point-defence missile
+  LOST Cruiser M20 at 5530 s: point-defence missile
+  LOST Raider Cruiser M6 at 5530 s: point-defence laser
+  LOST Cruiser M21 at 5530 s: point-defence missile
+  LOST Cruiser M22 at 5531 s: point-defence missile
+  LOST Raider Cruiser M12 at 5548 s: point-defence missile
+  LOST Cruiser M7 at 5627 s: point-defence laser
+  LOST Cruiser M13 at 5649 s: point-defence missile
+  LOST Cruiser M15 at 5649 s: point-defence missile
+  LOST Cruiser M18 at 5650 s: point-defence missile
+  LOST Cruiser M25 at 5651 s: point-defence missile
+  LOST Cruiser M28 at 5653 s: point-defence missile
+  LOST Cruiser M16 at 5750 s: point-defence laser
+  LOST Cruiser M19 at 5771 s: point-defence missile
+  LOST Cruiser M24 at 5772 s: point-defence missile
+  LOST Cruiser M31 at 5773 s: point-defence missile
+  LOST Cruiser M32 at 5773 s: point-defence missile
+  LOST Cruiser M36 at 5775 s: point-defence missile
+  LOST Raider Cruiser M7 at 5787 s: point-defence missile
+  LOST Raider Cruiser M9 at 5787 s: point-defence missile
+  LOST Raider Cruiser M10 at 5788 s: point-defence missile
+  LOST Raider Cruiser M8 at 5866 s: point-defence missile
+  LOST Cruiser M23 at 5880 s: point-defence laser
+  LOST Cruiser M26 at 5892 s: point-defence missile
+  LOST Cruiser M29 at 5893 s: point-defence missile
+  LOST Raider Cruiser M14 at 5912 s: point-defence missile
+  LOST Raider Cruiser M15 at 5912 s: point-defence missile
+  LOST Cruiser M30 at 5971 s: point-defence missile
+  LOST Cruiser M27 at 5993 s: point-defence laser
+  LOST Cruiser M35 at 6015 s: point-defence missile
+  LOST Raider Cruiser M13 at 6152 s: point-defence missile
+  LOST Raider Cruiser M17 at 6153 s: point-defence missile
+  LOST Raider Cruiser M16 at 6232 s: point-defence missile
+  LOST Raider Cruiser M19 at 6277 s: point-defence missile
+  LOST Raider Cruiser M21 at 6278 s: point-defence missile
+  LOST Raider Cruiser M24 at 6280 s: point-defence missile
+  LOST Raider Cruiser M23 at 6520 s: point-defence missile
+  LOST Raider Cruiser M22 at 6598 s: point-defence missile
+  LOST Raider Cruiser M20 at 6619 s: point-defence laser
+  LOST Raider Cruiser M29 at 6639 s: point-defence missile
+  LOST Raider Cruiser M30 at 6880 s: point-defence missile
+  LOST Raider Cruiser M32 at 6956 s: point-defence missile
+  LOST Raider Cruiser M26 at 6956 s: point-defence missile
+  LOST Raider Cruiser M27 at 6956 s: point-defence missile
+  LOST Raider Cruiser M34 at 6957 s: point-defence missile
+  LOST Raider Cruiser M28 at 6957 s: point-defence missile
+  LOST Raider Cruiser M25 at 6977 s: point-defence laser
+  LOST Raider Cruiser M31 at 7192 s: point-defence missile
+  LOST Raider Cruiser M35 at 7193 s: point-defence missile
+  LOST Raider Cruiser M36 at 7194 s: point-defence missile
+  LOST Raider Cruiser M33 at 7269 s: point-defence missile
+  FactionId(0) C1 = Raider Cruiser err    0.020 ls  2σ    0.082 ls  light age   374 s
+  FactionId(1) C1 = Transport err    0.000 ls  2σ    0.096 ls  light age   400 s
+  FactionId(1) C2 = Cruiser   err    0.002 ls  2σ    0.083 ls  light age   376 s
+  FactionId(1) C3 = Lunar sensor station err    0.000 ls  2σ    0.121 ls  light age   440 s
+T+    240 min
+  SHIP Transport hull=100.0/100 armour=100.0 screens=0% heat=103.3PJ SRM=0 LRM=0
+  SHIP Cruiser hull=4000.0/4000 armour=2000.0 screens=100% heat=414.8PJ SRM=24 LRM=0
+  SHIP Raider Cruiser hull=4000.0/4000 armour=1941.8 screens=28% heat=371.0PJ SRM=24 LRM=0
+  LOST Cruiser M4 at 5166 s: point-defence missile
+  LOST Raider Cruiser M2 at 5179 s: point-defence missile
+  LOST Raider Cruiser M3 at 5180 s: point-defence missile
+  LOST Raider Cruiser M5 at 5181 s: point-defence missile
+  LOST Cruiser M12 at 5288 s: point-defence missile
+  LOST Cruiser M2 at 5406 s: point-defence missile
+  LOST Cruiser M3 at 5406 s: point-defence missile
+  LOST Cruiser M14 at 5408 s: point-defence missile
+  LOST Cruiser M17 at 5410 s: point-defence missile
+  LOST Cruiser M5 at 5485 s: point-defence missile
+  LOST Cruiser M6 at 5485 s: point-defence missile
+  LOST Raider Cruiser M1 at 5500 s: point-defence missile
+  LOST Cruiser M8 at 5527 s: point-defence missile
+  LOST Cruiser M10 at 5528 s: point-defence missile
+  LOST Cruiser M11 at 5528 s: point-defence missile
+  LOST Cruiser M20 at 5530 s: point-defence missile
+  LOST Raider Cruiser M6 at 5530 s: point-defence laser
+  LOST Cruiser M21 at 5530 s: point-defence missile
+  LOST Cruiser M22 at 5531 s: point-defence missile
+  LOST Raider Cruiser M12 at 5548 s: point-defence missile
+  LOST Cruiser M7 at 5627 s: point-defence laser
+  LOST Cruiser M13 at 5649 s: point-defence missile
+  LOST Cruiser M15 at 5649 s: point-defence missile
+  LOST Cruiser M18 at 5650 s: point-defence missile
+  LOST Cruiser M25 at 5651 s: point-defence missile
+  LOST Cruiser M28 at 5653 s: point-defence missile
+  LOST Cruiser M16 at 5750 s: point-defence laser
+  LOST Cruiser M19 at 5771 s: point-defence missile
+  LOST Cruiser M24 at 5772 s: point-defence missile
+  LOST Cruiser M31 at 5773 s: point-defence missile
+  LOST Cruiser M32 at 5773 s: point-defence missile
+  LOST Cruiser M36 at 5775 s: point-defence missile
+  LOST Raider Cruiser M7 at 5787 s: point-defence missile
+  LOST Raider Cruiser M9 at 5787 s: point-defence missile
+  LOST Raider Cruiser M10 at 5788 s: point-defence missile
+  LOST Raider Cruiser M8 at 5866 s: point-defence missile
+  LOST Cruiser M23 at 5880 s: point-defence laser
+  LOST Cruiser M26 at 5892 s: point-defence missile
+  LOST Cruiser M29 at 5893 s: point-defence missile
+  LOST Raider Cruiser M14 at 5912 s: point-defence missile
+  LOST Raider Cruiser M15 at 5912 s: point-defence missile
+  LOST Cruiser M30 at 5971 s: point-defence missile
+  LOST Cruiser M27 at 5993 s: point-defence laser
+  LOST Cruiser M35 at 6015 s: point-defence missile
+  LOST Raider Cruiser M13 at 6152 s: point-defence missile
+  LOST Raider Cruiser M17 at 6153 s: point-defence missile
+  LOST Raider Cruiser M16 at 6232 s: point-defence missile
+  LOST Raider Cruiser M19 at 6277 s: point-defence missile
+  LOST Raider Cruiser M21 at 6278 s: point-defence missile
+  LOST Raider Cruiser M24 at 6280 s: point-defence missile
+  LOST Raider Cruiser M23 at 6520 s: point-defence missile
+  LOST Raider Cruiser M22 at 6598 s: point-defence missile
+  LOST Raider Cruiser M20 at 6619 s: point-defence laser
+  LOST Raider Cruiser M29 at 6639 s: point-defence missile
+  LOST Raider Cruiser M30 at 6880 s: point-defence missile
+  LOST Raider Cruiser M32 at 6956 s: point-defence missile
+  LOST Raider Cruiser M26 at 6956 s: point-defence missile
+  LOST Raider Cruiser M27 at 6956 s: point-defence missile
+  LOST Raider Cruiser M34 at 6957 s: point-defence missile
+  LOST Raider Cruiser M28 at 6957 s: point-defence missile
+  LOST Raider Cruiser M25 at 6977 s: point-defence laser
+  LOST Raider Cruiser M31 at 7192 s: point-defence missile
+  LOST Raider Cruiser M35 at 7193 s: point-defence missile
+  LOST Raider Cruiser M36 at 7194 s: point-defence missile
+  LOST Raider Cruiser M33 at 7269 s: point-defence missile
+  FactionId(0) C1 = Raider Cruiser err    0.000 ls  2σ    0.035 ls  light age   263 s
+  FactionId(1) C1 = Transport err    0.001 ls  2σ    0.064 ls  light age   339 s
+  FactionId(1) C2 = Cruiser   err    0.000 ls  2σ    0.037 ls  light age   268 s
+T+    300 min
+  SHIP Transport hull=100.0/100 armour=100.0 screens=0% heat=103.5PJ SRM=0 LRM=0
+  SHIP Cruiser hull=4000.0/4000 armour=2000.0 screens=100% heat=415.1PJ SRM=24 LRM=0
+  SHIP Raider Cruiser hull=4000.0/4000 armour=1941.8 screens=40% heat=311.7PJ SRM=24 LRM=0
+  LOST Cruiser M4 at 5166 s: point-defence missile
+  LOST Raider Cruiser M2 at 5179 s: point-defence missile
+  LOST Raider Cruiser M3 at 5180 s: point-defence missile
+  LOST Raider Cruiser M5 at 5181 s: point-defence missile
+  LOST Cruiser M12 at 5288 s: point-defence missile
+  LOST Cruiser M2 at 5406 s: point-defence missile
+  LOST Cruiser M3 at 5406 s: point-defence missile
+  LOST Cruiser M14 at 5408 s: point-defence missile
+  LOST Cruiser M17 at 5410 s: point-defence missile
+  LOST Cruiser M5 at 5485 s: point-defence missile
+  LOST Cruiser M6 at 5485 s: point-defence missile
+  LOST Raider Cruiser M1 at 5500 s: point-defence missile
+  LOST Cruiser M8 at 5527 s: point-defence missile
+  LOST Cruiser M10 at 5528 s: point-defence missile
+  LOST Cruiser M11 at 5528 s: point-defence missile
+  LOST Cruiser M20 at 5530 s: point-defence missile
+  LOST Raider Cruiser M6 at 5530 s: point-defence laser
+  LOST Cruiser M21 at 5530 s: point-defence missile
+  LOST Cruiser M22 at 5531 s: point-defence missile
+  LOST Raider Cruiser M12 at 5548 s: point-defence missile
+  LOST Cruiser M7 at 5627 s: point-defence laser
+  LOST Cruiser M13 at 5649 s: point-defence missile
+  LOST Cruiser M15 at 5649 s: point-defence missile
+  LOST Cruiser M18 at 5650 s: point-defence missile
+  LOST Cruiser M25 at 5651 s: point-defence missile
+  LOST Cruiser M28 at 5653 s: point-defence missile
+  LOST Cruiser M16 at 5750 s: point-defence laser
+  LOST Cruiser M19 at 5771 s: point-defence missile
+  LOST Cruiser M24 at 5772 s: point-defence missile
+  LOST Cruiser M31 at 5773 s: point-defence missile
+  LOST Cruiser M32 at 5773 s: point-defence missile
+  LOST Cruiser M36 at 5775 s: point-defence missile
+  LOST Raider Cruiser M7 at 5787 s: point-defence missile
+  LOST Raider Cruiser M9 at 5787 s: point-defence missile
+  LOST Raider Cruiser M10 at 5788 s: point-defence missile
+  LOST Raider Cruiser M8 at 5866 s: point-defence missile
+  LOST Cruiser M23 at 5880 s: point-defence laser
+  LOST Cruiser M26 at 5892 s: point-defence missile
+  LOST Cruiser M29 at 5893 s: point-defence missile
+  LOST Raider Cruiser M14 at 5912 s: point-defence missile
+  LOST Raider Cruiser M15 at 5912 s: point-defence missile
+  LOST Cruiser M30 at 5971 s: point-defence missile
+  LOST Cruiser M27 at 5993 s: point-defence laser
+  LOST Cruiser M35 at 6015 s: point-defence missile
+  LOST Raider Cruiser M13 at 6152 s: point-defence missile
+  LOST Raider Cruiser M17 at 6153 s: point-defence missile
+  LOST Raider Cruiser M16 at 6232 s: point-defence missile
+  LOST Raider Cruiser M19 at 6277 s: point-defence missile
+  LOST Raider Cruiser M21 at 6278 s: point-defence missile
+  LOST Raider Cruiser M24 at 6280 s: point-defence missile
+  LOST Raider Cruiser M23 at 6520 s: point-defence missile
+  LOST Raider Cruiser M22 at 6598 s: point-defence missile
+  LOST Raider Cruiser M20 at 6619 s: point-defence laser
+  LOST Raider Cruiser M29 at 6639 s: point-defence missile
+  LOST Raider Cruiser M30 at 6880 s: point-defence missile
+  LOST Raider Cruiser M32 at 6956 s: point-defence missile
+  LOST Raider Cruiser M26 at 6956 s: point-defence missile
+  LOST Raider Cruiser M27 at 6956 s: point-defence missile
+  LOST Raider Cruiser M34 at 6957 s: point-defence missile
+  LOST Raider Cruiser M28 at 6957 s: point-defence missile
+  LOST Raider Cruiser M25 at 6977 s: point-defence laser
+  LOST Raider Cruiser M31 at 7192 s: point-defence missile
+  LOST Raider Cruiser M35 at 7193 s: point-defence missile
+  LOST Raider Cruiser M36 at 7194 s: point-defence missile
+  LOST Raider Cruiser M33 at 7269 s: point-defence missile
+  FactionId(0) C1 = Raider Cruiser err    0.000 ls  2σ    0.010 ls  light age   154 s
+  FactionId(1) C1 = Transport err    0.000 ls  2σ    0.052 ls  light age   312 s
+  FactionId(1) C2 = Cruiser   err    0.000 ls  2σ    0.010 ls  light age   159 s
+  FactionId(1) C3 = Lunar sensor station err    0.000 ls  2σ    0.102 ls  light age   410 s
+T+    360 min
+  SHIP Transport hull=100.0/100 armour=100.0 screens=0% heat=103.6PJ SRM=0 LRM=0
+  SHIP Cruiser hull=4000.0/4000 armour=2000.0 screens=100% heat=415.1PJ SRM=0 LRM=0
+  SHIP Raider Cruiser hull=4000.0/4000 armour=1941.8 screens=24% heat=256.6PJ SRM=0 LRM=0
+  LOST Cruiser M4 at 5166 s: point-defence missile
+  LOST Raider Cruiser M2 at 5179 s: point-defence missile
+  LOST Raider Cruiser M3 at 5180 s: point-defence missile
+  LOST Raider Cruiser M5 at 5181 s: point-defence missile
+  LOST Cruiser M12 at 5288 s: point-defence missile
+  LOST Cruiser M2 at 5406 s: point-defence missile
+  LOST Cruiser M3 at 5406 s: point-defence missile
+  LOST Cruiser M14 at 5408 s: point-defence missile
+  LOST Cruiser M17 at 5410 s: point-defence missile
+  LOST Cruiser M5 at 5485 s: point-defence missile
+  LOST Cruiser M6 at 5485 s: point-defence missile
+  LOST Raider Cruiser M1 at 5500 s: point-defence missile
+  LOST Cruiser M8 at 5527 s: point-defence missile
+  LOST Cruiser M10 at 5528 s: point-defence missile
+  LOST Cruiser M11 at 5528 s: point-defence missile
+  LOST Cruiser M20 at 5530 s: point-defence missile
+  LOST Raider Cruiser M6 at 5530 s: point-defence laser
+  LOST Cruiser M21 at 5530 s: point-defence missile
+  LOST Cruiser M22 at 5531 s: point-defence missile
+  LOST Raider Cruiser M12 at 5548 s: point-defence missile
+  LOST Cruiser M7 at 5627 s: point-defence laser
+  LOST Cruiser M13 at 5649 s: point-defence missile
+  LOST Cruiser M15 at 5649 s: point-defence missile
+  LOST Cruiser M18 at 5650 s: point-defence missile
+  LOST Cruiser M25 at 5651 s: point-defence missile
+  LOST Cruiser M28 at 5653 s: point-defence missile
+  LOST Cruiser M16 at 5750 s: point-defence laser
+  LOST Cruiser M19 at 5771 s: point-defence missile
+  LOST Cruiser M24 at 5772 s: point-defence missile
+  LOST Cruiser M31 at 5773 s: point-defence missile
+  LOST Cruiser M32 at 5773 s: point-defence missile
+  LOST Cruiser M36 at 5775 s: point-defence missile
+  LOST Raider Cruiser M7 at 5787 s: point-defence missile
+  LOST Raider Cruiser M9 at 5787 s: point-defence missile
+  LOST Raider Cruiser M10 at 5788 s: point-defence missile
+  LOST Raider Cruiser M8 at 5866 s: point-defence missile
+  LOST Cruiser M23 at 5880 s: point-defence laser
+  LOST Cruiser M26 at 5892 s: point-defence missile
+  LOST Cruiser M29 at 5893 s: point-defence missile
+  LOST Raider Cruiser M14 at 5912 s: point-defence missile
+  LOST Raider Cruiser M15 at 5912 s: point-defence missile
+  LOST Cruiser M30 at 5971 s: point-defence missile
+  LOST Cruiser M27 at 5993 s: point-defence laser
+  LOST Cruiser M35 at 6015 s: point-defence missile
+  LOST Raider Cruiser M13 at 6152 s: point-defence missile
+  LOST Raider Cruiser M17 at 6153 s: point-defence missile
+  LOST Raider Cruiser M16 at 6232 s: point-defence missile
+  LOST Raider Cruiser M19 at 6277 s: point-defence missile
+  LOST Raider Cruiser M21 at 6278 s: point-defence missile
+  LOST Raider Cruiser M24 at 6280 s: point-defence missile
+  LOST Raider Cruiser M23 at 6520 s: point-defence missile
+  LOST Raider Cruiser M22 at 6598 s: point-defence missile
+  LOST Raider Cruiser M20 at 6619 s: point-defence laser
+  LOST Raider Cruiser M29 at 6639 s: point-defence missile
+  LOST Raider Cruiser M30 at 6880 s: point-defence missile
+  LOST Raider Cruiser M32 at 6956 s: point-defence missile
+  LOST Raider Cruiser M26 at 6956 s: point-defence missile
+  LOST Raider Cruiser M27 at 6956 s: point-defence missile
+  LOST Raider Cruiser M34 at 6957 s: point-defence missile
+  LOST Raider Cruiser M28 at 6957 s: point-defence missile
+  LOST Raider Cruiser M25 at 6977 s: point-defence laser
+  LOST Raider Cruiser M31 at 7192 s: point-defence missile
+  LOST Raider Cruiser M35 at 7193 s: point-defence missile
+  LOST Raider Cruiser M36 at 7194 s: point-defence missile
+  LOST Raider Cruiser M33 at 7269 s: point-defence missile
+  LOST Cruiser M37 at 21103 s: point-defence missile
+  LOST Raider Cruiser M37 at 21200 s: point-defence missile
+  LOST Raider Cruiser M42 at 21200 s: point-defence missile
+  LOST Cruiser M38 at 21541 s: point-defence laser
+  LOST Cruiser M41 at 21550 s: point-defence laser
+  LOST Cruiser M39 at 21554 s: point-defence laser
+  FactionId(0) C1 = Raider Cruiser err    0.002 ls  2σ    0.000 ls  light age    38 s
+  FactionId(0) C118 = Raider Cruiser M38 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C119 = Raider Cruiser M39 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C120 = Raider Cruiser M40 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C121 = Raider Cruiser M41 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C124 = Raider Cruiser M43 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C125 = Raider Cruiser M44 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C126 = Raider Cruiser M45 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C127 = Raider Cruiser M46 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C128 = Raider Cruiser M47 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C129 = Raider Cruiser M48 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C130 = Raider Cruiser M49 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C131 = Raider Cruiser M50 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C132 = Raider Cruiser M51 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C133 = Raider Cruiser M52 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C134 = Raider Cruiser M53 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C135 = Raider Cruiser M54 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C136 = Raider Cruiser M55 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C137 = Raider Cruiser M56 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C138 = Raider Cruiser M57 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C139 = Raider Cruiser M58 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C140 = Raider Cruiser M59 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C141 = Raider Cruiser M60 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C1 = Transport err    0.000 ls  2σ    0.057 ls  light age   322 s
+  FactionId(1) C2 = Cruiser   err    0.000 ls  2σ    0.000 ls  light age    40 s
+  FactionId(1) C3 = Lunar sensor station err    0.002 ls  2σ    0.113 ls  light age   428 s
+  FactionId(1) C170 = Cruiser M43 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C171 = Cruiser M44 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C172 = Cruiser M45 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C173 = Cruiser M46 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C174 = Cruiser M47 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C175 = Cruiser M48 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C182 = Cruiser M49 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C183 = Cruiser M50 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C184 = Cruiser M51 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C185 = Cruiser M52 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C186 = Cruiser M53 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C187 = Cruiser M54 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C188 = Cruiser M55 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C189 = Cruiser M56 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C190 = Cruiser M57 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C191 = Cruiser M58 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C192 = Cruiser M59 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C193 = Cruiser M60 err    0.000 ls  2σ    0.000 ls  light age     0 s
+T+    420 min
+  SHIP Transport hull=100.0/100 armour=100.0 screens=0% heat=103.6PJ SRM=0 LRM=0
+  SHIP Cruiser hull=3712.2/4000 armour=1675.4 screens=8% heat=416.1PJ SRM=0 LRM=0
+  SHIP Raider Cruiser hull=2112.0/4000 armour=27.7 screens=8% heat=129.0PJ SRM=0 LRM=0
+  LOST Cruiser M4 at 5166 s: point-defence missile
+  LOST Raider Cruiser M2 at 5179 s: point-defence missile
+  LOST Raider Cruiser M3 at 5180 s: point-defence missile
+  LOST Raider Cruiser M5 at 5181 s: point-defence missile
+  LOST Cruiser M12 at 5288 s: point-defence missile
+  LOST Cruiser M2 at 5406 s: point-defence missile
+  LOST Cruiser M3 at 5406 s: point-defence missile
+  LOST Cruiser M14 at 5408 s: point-defence missile
+  LOST Cruiser M17 at 5410 s: point-defence missile
+  LOST Cruiser M5 at 5485 s: point-defence missile
+  LOST Cruiser M6 at 5485 s: point-defence missile
+  LOST Raider Cruiser M1 at 5500 s: point-defence missile
+  LOST Cruiser M8 at 5527 s: point-defence missile
+  LOST Cruiser M10 at 5528 s: point-defence missile
+  LOST Cruiser M11 at 5528 s: point-defence missile
+  LOST Cruiser M20 at 5530 s: point-defence missile
+  LOST Raider Cruiser M6 at 5530 s: point-defence laser
+  LOST Cruiser M21 at 5530 s: point-defence missile
+  LOST Cruiser M22 at 5531 s: point-defence missile
+  LOST Raider Cruiser M12 at 5548 s: point-defence missile
+  LOST Cruiser M7 at 5627 s: point-defence laser
+  LOST Cruiser M13 at 5649 s: point-defence missile
+  LOST Cruiser M15 at 5649 s: point-defence missile
+  LOST Cruiser M18 at 5650 s: point-defence missile
+  LOST Cruiser M25 at 5651 s: point-defence missile
+  LOST Cruiser M28 at 5653 s: point-defence missile
+  LOST Cruiser M16 at 5750 s: point-defence laser
+  LOST Cruiser M19 at 5771 s: point-defence missile
+  LOST Cruiser M24 at 5772 s: point-defence missile
+  LOST Cruiser M31 at 5773 s: point-defence missile
+  LOST Cruiser M32 at 5773 s: point-defence missile
+  LOST Cruiser M36 at 5775 s: point-defence missile
+  LOST Raider Cruiser M7 at 5787 s: point-defence missile
+  LOST Raider Cruiser M9 at 5787 s: point-defence missile
+  LOST Raider Cruiser M10 at 5788 s: point-defence missile
+  LOST Raider Cruiser M8 at 5866 s: point-defence missile
+  LOST Cruiser M23 at 5880 s: point-defence laser
+  LOST Cruiser M26 at 5892 s: point-defence missile
+  LOST Cruiser M29 at 5893 s: point-defence missile
+  LOST Raider Cruiser M14 at 5912 s: point-defence missile
+  LOST Raider Cruiser M15 at 5912 s: point-defence missile
+  LOST Cruiser M30 at 5971 s: point-defence missile
+  LOST Cruiser M27 at 5993 s: point-defence laser
+  LOST Cruiser M35 at 6015 s: point-defence missile
+  LOST Raider Cruiser M13 at 6152 s: point-defence missile
+  LOST Raider Cruiser M17 at 6153 s: point-defence missile
+  LOST Raider Cruiser M16 at 6232 s: point-defence missile
+  LOST Raider Cruiser M19 at 6277 s: point-defence missile
+  LOST Raider Cruiser M21 at 6278 s: point-defence missile
+  LOST Raider Cruiser M24 at 6280 s: point-defence missile
+  LOST Raider Cruiser M23 at 6520 s: point-defence missile
+  LOST Raider Cruiser M22 at 6598 s: point-defence missile
+  LOST Raider Cruiser M20 at 6619 s: point-defence laser
+  LOST Raider Cruiser M29 at 6639 s: point-defence missile
+  LOST Raider Cruiser M30 at 6880 s: point-defence missile
+  LOST Raider Cruiser M32 at 6956 s: point-defence missile
+  LOST Raider Cruiser M26 at 6956 s: point-defence missile
+  LOST Raider Cruiser M27 at 6956 s: point-defence missile
+  LOST Raider Cruiser M34 at 6957 s: point-defence missile
+  LOST Raider Cruiser M28 at 6957 s: point-defence missile
+  LOST Raider Cruiser M25 at 6977 s: point-defence laser
+  LOST Raider Cruiser M31 at 7192 s: point-defence missile
+  LOST Raider Cruiser M35 at 7193 s: point-defence missile
+  LOST Raider Cruiser M36 at 7194 s: point-defence missile
+  LOST Raider Cruiser M33 at 7269 s: point-defence missile
+  LOST Cruiser M37 at 21103 s: point-defence missile
+  LOST Raider Cruiser M37 at 21200 s: point-defence missile
+  LOST Raider Cruiser M42 at 21200 s: point-defence missile
+  LOST Cruiser M38 at 21541 s: point-defence laser
+  LOST Cruiser M41 at 21550 s: point-defence laser
+  LOST Cruiser M39 at 21554 s: point-defence laser
+  LOST Cruiser M44 at 21623 s: point-defence laser
+  LOST Cruiser M48 at 21623 s: point-defence laser
+  LOST Raider Cruiser M41 at 21627 s: point-defence laser
+  LOST Cruiser M47 at 21644 s: point-defence laser
+  LOST Cruiser M53 at 21707 s: point-defence laser
+  LOST Cruiser M50 at 21721 s: point-defence laser
+  LOST Cruiser M57 at 21808 s: point-defence laser
+  LOST Cruiser M60 at 21809 s: point-defence laser
+  LOST Cruiser M55 at 21809 s: point-defence laser
+  LOST Raider Cruiser M43 at 21866 s: point-defence laser
+  LOST Raider Cruiser M45 at 21869 s: point-defence laser
+  LOST Raider Cruiser M52 at 22109 s: point-defence laser
+  LOST Raider Cruiser M50 at 22114 s: point-defence laser
+  LOST Raider Cruiser M49 at 22123 s: point-defence laser
+  LOST Raider Cruiser M57 at 22123 s: point-defence laser
+  FactionId(0) C1 = Raider Cruiser err    0.000 ls  2σ    0.002 ls  light age    77 s
+  FactionId(1) C1 = Transport err    0.000 ls  2σ    0.080 ls  light age   369 s
+  FactionId(1) C2 = Cruiser   err    0.000 ls  2σ    0.002 ls  light age    73 s
+  FactionId(1) C3 = Lunar sensor station err    0.000 ls  2σ    0.137 ls  light age   462 s
+T+    480 min
+  SHIP Transport hull=100.0/100 armour=100.0 screens=0% heat=103.6PJ SRM=0 LRM=0
+  SHIP Cruiser hull=3752.2/4000 armour=1675.4 screens=20% heat=415.2PJ SRM=0 LRM=0
+  SHIP Raider Cruiser hull=2152.0/4000 armour=27.7 screens=20% heat=10.3PJ SRM=0 LRM=0
+  LOST Cruiser M4 at 5166 s: point-defence missile
+  LOST Raider Cruiser M2 at 5179 s: point-defence missile
+  LOST Raider Cruiser M3 at 5180 s: point-defence missile
+  LOST Raider Cruiser M5 at 5181 s: point-defence missile
+  LOST Cruiser M12 at 5288 s: point-defence missile
+  LOST Cruiser M2 at 5406 s: point-defence missile
+  LOST Cruiser M3 at 5406 s: point-defence missile
+  LOST Cruiser M14 at 5408 s: point-defence missile
+  LOST Cruiser M17 at 5410 s: point-defence missile
+  LOST Cruiser M5 at 5485 s: point-defence missile
+  LOST Cruiser M6 at 5485 s: point-defence missile
+  LOST Raider Cruiser M1 at 5500 s: point-defence missile
+  LOST Cruiser M8 at 5527 s: point-defence missile
+  LOST Cruiser M10 at 5528 s: point-defence missile
+  LOST Cruiser M11 at 5528 s: point-defence missile
+  LOST Cruiser M20 at 5530 s: point-defence missile
+  LOST Raider Cruiser M6 at 5530 s: point-defence laser
+  LOST Cruiser M21 at 5530 s: point-defence missile
+  LOST Cruiser M22 at 5531 s: point-defence missile
+  LOST Raider Cruiser M12 at 5548 s: point-defence missile
+  LOST Cruiser M7 at 5627 s: point-defence laser
+  LOST Cruiser M13 at 5649 s: point-defence missile
+  LOST Cruiser M15 at 5649 s: point-defence missile
+  LOST Cruiser M18 at 5650 s: point-defence missile
+  LOST Cruiser M25 at 5651 s: point-defence missile
+  LOST Cruiser M28 at 5653 s: point-defence missile
+  LOST Cruiser M16 at 5750 s: point-defence laser
+  LOST Cruiser M19 at 5771 s: point-defence missile
+  LOST Cruiser M24 at 5772 s: point-defence missile
+  LOST Cruiser M31 at 5773 s: point-defence missile
+  LOST Cruiser M32 at 5773 s: point-defence missile
+  LOST Cruiser M36 at 5775 s: point-defence missile
+  LOST Raider Cruiser M7 at 5787 s: point-defence missile
+  LOST Raider Cruiser M9 at 5787 s: point-defence missile
+  LOST Raider Cruiser M10 at 5788 s: point-defence missile
+  LOST Raider Cruiser M8 at 5866 s: point-defence missile
+  LOST Cruiser M23 at 5880 s: point-defence laser
+  LOST Cruiser M26 at 5892 s: point-defence missile
+  LOST Cruiser M29 at 5893 s: point-defence missile
+  LOST Raider Cruiser M14 at 5912 s: point-defence missile
+  LOST Raider Cruiser M15 at 5912 s: point-defence missile
+  LOST Cruiser M30 at 5971 s: point-defence missile
+  LOST Cruiser M27 at 5993 s: point-defence laser
+  LOST Cruiser M35 at 6015 s: point-defence missile
+  LOST Raider Cruiser M13 at 6152 s: point-defence missile
+  LOST Raider Cruiser M17 at 6153 s: point-defence missile
+  LOST Raider Cruiser M16 at 6232 s: point-defence missile
+  LOST Raider Cruiser M19 at 6277 s: point-defence missile
+  LOST Raider Cruiser M21 at 6278 s: point-defence missile
+  LOST Raider Cruiser M24 at 6280 s: point-defence missile
+  LOST Raider Cruiser M23 at 6520 s: point-defence missile
+  LOST Raider Cruiser M22 at 6598 s: point-defence missile
+  LOST Raider Cruiser M20 at 6619 s: point-defence laser
+  LOST Raider Cruiser M29 at 6639 s: point-defence missile
+  LOST Raider Cruiser M30 at 6880 s: point-defence missile
+  LOST Raider Cruiser M32 at 6956 s: point-defence missile
+  LOST Raider Cruiser M26 at 6956 s: point-defence missile
+  LOST Raider Cruiser M27 at 6956 s: point-defence missile
+  LOST Raider Cruiser M34 at 6957 s: point-defence missile
+  LOST Raider Cruiser M28 at 6957 s: point-defence missile
+  LOST Raider Cruiser M25 at 6977 s: point-defence laser
+  LOST Raider Cruiser M31 at 7192 s: point-defence missile
+  LOST Raider Cruiser M35 at 7193 s: point-defence missile
+  LOST Raider Cruiser M36 at 7194 s: point-defence missile
+  LOST Raider Cruiser M33 at 7269 s: point-defence missile
+  LOST Cruiser M37 at 21103 s: point-defence missile
+  LOST Raider Cruiser M37 at 21200 s: point-defence missile
+  LOST Raider Cruiser M42 at 21200 s: point-defence missile
+  LOST Cruiser M38 at 21541 s: point-defence laser
+  LOST Cruiser M41 at 21550 s: point-defence laser
+  LOST Cruiser M39 at 21554 s: point-defence laser
+  LOST Cruiser M44 at 21623 s: point-defence laser
+  LOST Cruiser M48 at 21623 s: point-defence laser
+  LOST Raider Cruiser M41 at 21627 s: point-defence laser
+  LOST Cruiser M47 at 21644 s: point-defence laser
+  LOST Cruiser M53 at 21707 s: point-defence laser
+  LOST Cruiser M50 at 21721 s: point-defence laser
+  LOST Cruiser M57 at 21808 s: point-defence laser
+  LOST Cruiser M60 at 21809 s: point-defence laser
+  LOST Cruiser M55 at 21809 s: point-defence laser
+  LOST Raider Cruiser M43 at 21866 s: point-defence laser
+  LOST Raider Cruiser M45 at 21869 s: point-defence laser
+  LOST Raider Cruiser M52 at 22109 s: point-defence laser
+  LOST Raider Cruiser M50 at 22114 s: point-defence laser
+  LOST Raider Cruiser M49 at 22123 s: point-defence laser
+  LOST Raider Cruiser M57 at 22123 s: point-defence laser
+  FactionId(0) C1 = Raider Cruiser err    0.000 ls  2σ    0.012 ls  light age   167 s
+  FactionId(1) C1 = Transport err    0.000 ls  2σ    0.126 ls  light age   445 s
+  FactionId(1) C2 = Cruiser   err    0.000 ls  2σ    0.011 ls  light age   160 s
+  FactionId(1) C3 = Lunar sensor station err    0.000 ls  2σ    0.164 ls  light age   498 s
+T+    540 min
+  SHIP Transport hull=100.0/100 armour=100.0 screens=0% heat=103.6PJ SRM=0 LRM=0
+  SHIP Cruiser hull=3792.2/4000 armour=1675.4 screens=32% heat=415.1PJ SRM=0 LRM=0
+  SHIP Raider Cruiser hull=2192.0/4000 armour=27.7 screens=32% heat=0.0PJ SRM=0 LRM=0
+  LOST Cruiser M4 at 5166 s: point-defence missile
+  LOST Raider Cruiser M2 at 5179 s: point-defence missile
+  LOST Raider Cruiser M3 at 5180 s: point-defence missile
+  LOST Raider Cruiser M5 at 5181 s: point-defence missile
+  LOST Cruiser M12 at 5288 s: point-defence missile
+  LOST Cruiser M2 at 5406 s: point-defence missile
+  LOST Cruiser M3 at 5406 s: point-defence missile
+  LOST Cruiser M14 at 5408 s: point-defence missile
+  LOST Cruiser M17 at 5410 s: point-defence missile
+  LOST Cruiser M5 at 5485 s: point-defence missile
+  LOST Cruiser M6 at 5485 s: point-defence missile
+  LOST Raider Cruiser M1 at 5500 s: point-defence missile
+  LOST Cruiser M8 at 5527 s: point-defence missile
+  LOST Cruiser M10 at 5528 s: point-defence missile
+  LOST Cruiser M11 at 5528 s: point-defence missile
+  LOST Cruiser M20 at 5530 s: point-defence missile
+  LOST Raider Cruiser M6 at 5530 s: point-defence laser
+  LOST Cruiser M21 at 5530 s: point-defence missile
+  LOST Cruiser M22 at 5531 s: point-defence missile
+  LOST Raider Cruiser M12 at 5548 s: point-defence missile
+  LOST Cruiser M7 at 5627 s: point-defence laser
+  LOST Cruiser M13 at 5649 s: point-defence missile
+  LOST Cruiser M15 at 5649 s: point-defence missile
+  LOST Cruiser M18 at 5650 s: point-defence missile
+  LOST Cruiser M25 at 5651 s: point-defence missile
+  LOST Cruiser M28 at 5653 s: point-defence missile
+  LOST Cruiser M16 at 5750 s: point-defence laser
+  LOST Cruiser M19 at 5771 s: point-defence missile
+  LOST Cruiser M24 at 5772 s: point-defence missile
+  LOST Cruiser M31 at 5773 s: point-defence missile
+  LOST Cruiser M32 at 5773 s: point-defence missile
+  LOST Cruiser M36 at 5775 s: point-defence missile
+  LOST Raider Cruiser M7 at 5787 s: point-defence missile
+  LOST Raider Cruiser M9 at 5787 s: point-defence missile
+  LOST Raider Cruiser M10 at 5788 s: point-defence missile
+  LOST Raider Cruiser M8 at 5866 s: point-defence missile
+  LOST Cruiser M23 at 5880 s: point-defence laser
+  LOST Cruiser M26 at 5892 s: point-defence missile
+  LOST Cruiser M29 at 5893 s: point-defence missile
+  LOST Raider Cruiser M14 at 5912 s: point-defence missile
+  LOST Raider Cruiser M15 at 5912 s: point-defence missile
+  LOST Cruiser M30 at 5971 s: point-defence missile
+  LOST Cruiser M27 at 5993 s: point-defence laser
+  LOST Cruiser M35 at 6015 s: point-defence missile
+  LOST Raider Cruiser M13 at 6152 s: point-defence missile
+  LOST Raider Cruiser M17 at 6153 s: point-defence missile
+  LOST Raider Cruiser M16 at 6232 s: point-defence missile
+  LOST Raider Cruiser M19 at 6277 s: point-defence missile
+  LOST Raider Cruiser M21 at 6278 s: point-defence missile
+  LOST Raider Cruiser M24 at 6280 s: point-defence missile
+  LOST Raider Cruiser M23 at 6520 s: point-defence missile
+  LOST Raider Cruiser M22 at 6598 s: point-defence missile
+  LOST Raider Cruiser M20 at 6619 s: point-defence laser
+  LOST Raider Cruiser M29 at 6639 s: point-defence missile
+  LOST Raider Cruiser M30 at 6880 s: point-defence missile
+  LOST Raider Cruiser M32 at 6956 s: point-defence missile
+  LOST Raider Cruiser M26 at 6956 s: point-defence missile
+  LOST Raider Cruiser M27 at 6956 s: point-defence missile
+  LOST Raider Cruiser M34 at 6957 s: point-defence missile
+  LOST Raider Cruiser M28 at 6957 s: point-defence missile
+  LOST Raider Cruiser M25 at 6977 s: point-defence laser
+  LOST Raider Cruiser M31 at 7192 s: point-defence missile
+  LOST Raider Cruiser M35 at 7193 s: point-defence missile
+  LOST Raider Cruiser M36 at 7194 s: point-defence missile
+  LOST Raider Cruiser M33 at 7269 s: point-defence missile
+  LOST Cruiser M37 at 21103 s: point-defence missile
+  LOST Raider Cruiser M37 at 21200 s: point-defence missile
+  LOST Raider Cruiser M42 at 21200 s: point-defence missile
+  LOST Cruiser M38 at 21541 s: point-defence laser
+  LOST Cruiser M41 at 21550 s: point-defence laser
+  LOST Cruiser M39 at 21554 s: point-defence laser
+  LOST Cruiser M44 at 21623 s: point-defence laser
+  LOST Cruiser M48 at 21623 s: point-defence laser
+  LOST Raider Cruiser M41 at 21627 s: point-defence laser
+  LOST Cruiser M47 at 21644 s: point-defence laser
+  LOST Cruiser M53 at 21707 s: point-defence laser
+  LOST Cruiser M50 at 21721 s: point-defence laser
+  LOST Cruiser M57 at 21808 s: point-defence laser
+  LOST Cruiser M60 at 21809 s: point-defence laser
+  LOST Cruiser M55 at 21809 s: point-defence laser
+  LOST Raider Cruiser M43 at 21866 s: point-defence laser
+  LOST Raider Cruiser M45 at 21869 s: point-defence laser
+  LOST Raider Cruiser M52 at 22109 s: point-defence laser
+  LOST Raider Cruiser M50 at 22114 s: point-defence laser
+  LOST Raider Cruiser M49 at 22123 s: point-defence laser
+  LOST Raider Cruiser M57 at 22123 s: point-defence laser
+  FactionId(0) C1 = Raider Cruiser err    0.000 ls  2σ    0.025 ls  light age   229 s
+  FactionId(1) C1 = Transport err    0.000 ls  2σ    0.209 ls  light age   549 s
+  FactionId(1) C2 = Cruiser   err    0.000 ls  2σ    0.023 ls  light age   221 s
+  FactionId(1) C3 = Lunar sensor station err    0.000 ls  2σ    0.194 ls  light age   533 s
+T+    600 min
+  SHIP Transport hull=100.0/100 armour=100.0 screens=0% heat=103.6PJ SRM=0 LRM=0
+  SHIP Cruiser hull=3832.2/4000 armour=1675.4 screens=44% heat=415.1PJ SRM=0 LRM=0
+  SHIP Raider Cruiser hull=2232.0/4000 armour=27.7 screens=44% heat=0.0PJ SRM=0 LRM=0
+  LOST Cruiser M4 at 5166 s: point-defence missile
+  LOST Raider Cruiser M2 at 5179 s: point-defence missile
+  LOST Raider Cruiser M3 at 5180 s: point-defence missile
+  LOST Raider Cruiser M5 at 5181 s: point-defence missile
+  LOST Cruiser M12 at 5288 s: point-defence missile
+  LOST Cruiser M2 at 5406 s: point-defence missile
+  LOST Cruiser M3 at 5406 s: point-defence missile
+  LOST Cruiser M14 at 5408 s: point-defence missile
+  LOST Cruiser M17 at 5410 s: point-defence missile
+  LOST Cruiser M5 at 5485 s: point-defence missile
+  LOST Cruiser M6 at 5485 s: point-defence missile
+  LOST Raider Cruiser M1 at 5500 s: point-defence missile
+  LOST Cruiser M8 at 5527 s: point-defence missile
+  LOST Cruiser M10 at 5528 s: point-defence missile
+  LOST Cruiser M11 at 5528 s: point-defence missile
+  LOST Cruiser M20 at 5530 s: point-defence missile
+  LOST Raider Cruiser M6 at 5530 s: point-defence laser
+  LOST Cruiser M21 at 5530 s: point-defence missile
+  LOST Cruiser M22 at 5531 s: point-defence missile
+  LOST Raider Cruiser M12 at 5548 s: point-defence missile
+  LOST Cruiser M7 at 5627 s: point-defence laser
+  LOST Cruiser M13 at 5649 s: point-defence missile
+  LOST Cruiser M15 at 5649 s: point-defence missile
+  LOST Cruiser M18 at 5650 s: point-defence missile
+  LOST Cruiser M25 at 5651 s: point-defence missile
+  LOST Cruiser M28 at 5653 s: point-defence missile
+  LOST Cruiser M16 at 5750 s: point-defence laser
+  LOST Cruiser M19 at 5771 s: point-defence missile
+  LOST Cruiser M24 at 5772 s: point-defence missile
+  LOST Cruiser M31 at 5773 s: point-defence missile
+  LOST Cruiser M32 at 5773 s: point-defence missile
+  LOST Cruiser M36 at 5775 s: point-defence missile
+  LOST Raider Cruiser M7 at 5787 s: point-defence missile
+  LOST Raider Cruiser M9 at 5787 s: point-defence missile
+  LOST Raider Cruiser M10 at 5788 s: point-defence missile
+  LOST Raider Cruiser M8 at 5866 s: point-defence missile
+  LOST Cruiser M23 at 5880 s: point-defence laser
+  LOST Cruiser M26 at 5892 s: point-defence missile
+  LOST Cruiser M29 at 5893 s: point-defence missile
+  LOST Raider Cruiser M14 at 5912 s: point-defence missile
+  LOST Raider Cruiser M15 at 5912 s: point-defence missile
+  LOST Cruiser M30 at 5971 s: point-defence missile
+  LOST Cruiser M27 at 5993 s: point-defence laser
+  LOST Cruiser M35 at 6015 s: point-defence missile
+  LOST Raider Cruiser M13 at 6152 s: point-defence missile
+  LOST Raider Cruiser M17 at 6153 s: point-defence missile
+  LOST Raider Cruiser M16 at 6232 s: point-defence missile
+  LOST Raider Cruiser M19 at 6277 s: point-defence missile
+  LOST Raider Cruiser M21 at 6278 s: point-defence missile
+  LOST Raider Cruiser M24 at 6280 s: point-defence missile
+  LOST Raider Cruiser M23 at 6520 s: point-defence missile
+  LOST Raider Cruiser M22 at 6598 s: point-defence missile
+  LOST Raider Cruiser M20 at 6619 s: point-defence laser
+  LOST Raider Cruiser M29 at 6639 s: point-defence missile
+  LOST Raider Cruiser M30 at 6880 s: point-defence missile
+  LOST Raider Cruiser M32 at 6956 s: point-defence missile
+  LOST Raider Cruiser M26 at 6956 s: point-defence missile
+  LOST Raider Cruiser M27 at 6956 s: point-defence missile
+  LOST Raider Cruiser M34 at 6957 s: point-defence missile
+  LOST Raider Cruiser M28 at 6957 s: point-defence missile
+  LOST Raider Cruiser M25 at 6977 s: point-defence laser
+  LOST Raider Cruiser M31 at 7192 s: point-defence missile
+  LOST Raider Cruiser M35 at 7193 s: point-defence missile
+  LOST Raider Cruiser M36 at 7194 s: point-defence missile
+  LOST Raider Cruiser M33 at 7269 s: point-defence missile
+  LOST Cruiser M37 at 21103 s: point-defence missile
+  LOST Raider Cruiser M37 at 21200 s: point-defence missile
+  LOST Raider Cruiser M42 at 21200 s: point-defence missile
+  LOST Cruiser M38 at 21541 s: point-defence laser
+  LOST Cruiser M41 at 21550 s: point-defence laser
+  LOST Cruiser M39 at 21554 s: point-defence laser
+  LOST Cruiser M44 at 21623 s: point-defence laser
+  LOST Cruiser M48 at 21623 s: point-defence laser
+  LOST Raider Cruiser M41 at 21627 s: point-defence laser
+  LOST Cruiser M47 at 21644 s: point-defence laser
+  LOST Cruiser M53 at 21707 s: point-defence laser
+  LOST Cruiser M50 at 21721 s: point-defence laser
+  LOST Cruiser M57 at 21808 s: point-defence laser
+  LOST Cruiser M60 at 21809 s: point-defence laser
+  LOST Cruiser M55 at 21809 s: point-defence laser
+  LOST Raider Cruiser M43 at 21866 s: point-defence laser
+  LOST Raider Cruiser M45 at 21869 s: point-defence laser
+  LOST Raider Cruiser M52 at 22109 s: point-defence laser
+  LOST Raider Cruiser M50 at 22114 s: point-defence laser
+  LOST Raider Cruiser M49 at 22123 s: point-defence laser
+  LOST Raider Cruiser M57 at 22123 s: point-defence laser
+  FactionId(0) C1 = Raider Cruiser err    0.000 ls  2σ    0.035 ls  light age   263 s
+  FactionId(1) C1 = Transport err    0.000 ls  2σ    0.348 ls  light age   678 s
+  FactionId(1) C2 = Cruiser   err    0.000 ls  2σ    0.033 ls  light age   257 s
+  FactionId(1) C3 = Lunar sensor station err    0.000 ls  2σ    0.227 ls  light age   569 s
+T+    660 min
+  SHIP Transport hull=100.0/100 armour=100.0 screens=0% heat=103.6PJ SRM=0 LRM=0
+  SHIP Cruiser hull=3872.2/4000 armour=1675.4 screens=56% heat=415.1PJ SRM=0 LRM=0
+  SHIP Raider Cruiser hull=2272.0/4000 armour=27.7 screens=56% heat=0.0PJ SRM=0 LRM=0
+  LOST Cruiser M4 at 5166 s: point-defence missile
+  LOST Raider Cruiser M2 at 5179 s: point-defence missile
+  LOST Raider Cruiser M3 at 5180 s: point-defence missile
+  LOST Raider Cruiser M5 at 5181 s: point-defence missile
+  LOST Cruiser M12 at 5288 s: point-defence missile
+  LOST Cruiser M2 at 5406 s: point-defence missile
+  LOST Cruiser M3 at 5406 s: point-defence missile
+  LOST Cruiser M14 at 5408 s: point-defence missile
+  LOST Cruiser M17 at 5410 s: point-defence missile
+  LOST Cruiser M5 at 5485 s: point-defence missile
+  LOST Cruiser M6 at 5485 s: point-defence missile
+  LOST Raider Cruiser M1 at 5500 s: point-defence missile
+  LOST Cruiser M8 at 5527 s: point-defence missile
+  LOST Cruiser M10 at 5528 s: point-defence missile
+  LOST Cruiser M11 at 5528 s: point-defence missile
+  LOST Cruiser M20 at 5530 s: point-defence missile
+  LOST Raider Cruiser M6 at 5530 s: point-defence laser
+  LOST Cruiser M21 at 5530 s: point-defence missile
+  LOST Cruiser M22 at 5531 s: point-defence missile
+  LOST Raider Cruiser M12 at 5548 s: point-defence missile
+  LOST Cruiser M7 at 5627 s: point-defence laser
+  LOST Cruiser M13 at 5649 s: point-defence missile
+  LOST Cruiser M15 at 5649 s: point-defence missile
+  LOST Cruiser M18 at 5650 s: point-defence missile
+  LOST Cruiser M25 at 5651 s: point-defence missile
+  LOST Cruiser M28 at 5653 s: point-defence missile
+  LOST Cruiser M16 at 5750 s: point-defence laser
+  LOST Cruiser M19 at 5771 s: point-defence missile
+  LOST Cruiser M24 at 5772 s: point-defence missile
+  LOST Cruiser M31 at 5773 s: point-defence missile
+  LOST Cruiser M32 at 5773 s: point-defence missile
+  LOST Cruiser M36 at 5775 s: point-defence missile
+  LOST Raider Cruiser M7 at 5787 s: point-defence missile
+  LOST Raider Cruiser M9 at 5787 s: point-defence missile
+  LOST Raider Cruiser M10 at 5788 s: point-defence missile
+  LOST Raider Cruiser M8 at 5866 s: point-defence missile
+  LOST Cruiser M23 at 5880 s: point-defence laser
+  LOST Cruiser M26 at 5892 s: point-defence missile
+  LOST Cruiser M29 at 5893 s: point-defence missile
+  LOST Raider Cruiser M14 at 5912 s: point-defence missile
+  LOST Raider Cruiser M15 at 5912 s: point-defence missile
+  LOST Cruiser M30 at 5971 s: point-defence missile
+  LOST Cruiser M27 at 5993 s: point-defence laser
+  LOST Cruiser M35 at 6015 s: point-defence missile
+  LOST Raider Cruiser M13 at 6152 s: point-defence missile
+  LOST Raider Cruiser M17 at 6153 s: point-defence missile
+  LOST Raider Cruiser M16 at 6232 s: point-defence missile
+  LOST Raider Cruiser M19 at 6277 s: point-defence missile
+  LOST Raider Cruiser M21 at 6278 s: point-defence missile
+  LOST Raider Cruiser M24 at 6280 s: point-defence missile
+  LOST Raider Cruiser M23 at 6520 s: point-defence missile
+  LOST Raider Cruiser M22 at 6598 s: point-defence missile
+  LOST Raider Cruiser M20 at 6619 s: point-defence laser
+  LOST Raider Cruiser M29 at 6639 s: point-defence missile
+  LOST Raider Cruiser M30 at 6880 s: point-defence missile
+  LOST Raider Cruiser M32 at 6956 s: point-defence missile
+  LOST Raider Cruiser M26 at 6956 s: point-defence missile
+  LOST Raider Cruiser M27 at 6956 s: point-defence missile
+  LOST Raider Cruiser M34 at 6957 s: point-defence missile
+  LOST Raider Cruiser M28 at 6957 s: point-defence missile
+  LOST Raider Cruiser M25 at 6977 s: point-defence laser
+  LOST Raider Cruiser M31 at 7192 s: point-defence missile
+  LOST Raider Cruiser M35 at 7193 s: point-defence missile
+  LOST Raider Cruiser M36 at 7194 s: point-defence missile
+  LOST Raider Cruiser M33 at 7269 s: point-defence missile
+  LOST Cruiser M37 at 21103 s: point-defence missile
+  LOST Raider Cruiser M37 at 21200 s: point-defence missile
+  LOST Raider Cruiser M42 at 21200 s: point-defence missile
+  LOST Cruiser M38 at 21541 s: point-defence laser
+  LOST Cruiser M41 at 21550 s: point-defence laser
+  LOST Cruiser M39 at 21554 s: point-defence laser
+  LOST Cruiser M44 at 21623 s: point-defence laser
+  LOST Cruiser M48 at 21623 s: point-defence laser
+  LOST Raider Cruiser M41 at 21627 s: point-defence laser
+  LOST Cruiser M47 at 21644 s: point-defence laser
+  LOST Cruiser M53 at 21707 s: point-defence laser
+  LOST Cruiser M50 at 21721 s: point-defence laser
+  LOST Cruiser M57 at 21808 s: point-defence laser
+  LOST Cruiser M60 at 21809 s: point-defence laser
+  LOST Cruiser M55 at 21809 s: point-defence laser
+  LOST Raider Cruiser M43 at 21866 s: point-defence laser
+  LOST Raider Cruiser M45 at 21869 s: point-defence laser
+  LOST Raider Cruiser M52 at 22109 s: point-defence laser
+  LOST Raider Cruiser M50 at 22114 s: point-defence laser
+  LOST Raider Cruiser M49 at 22123 s: point-defence laser
+  LOST Raider Cruiser M57 at 22123 s: point-defence laser
+  FactionId(0) C1 = Raider Cruiser err    0.000 ls  2σ    0.037 ls  light age   270 s
+  FactionId(1) C1 = Transport err    0.001 ls  2σ    0.568 ls  light age   830 s
+  FactionId(1) C2 = Cruiser   err    0.000 ls  2σ    0.036 ls  light age   265 s
+  FactionId(1) C3 = Lunar sensor station err    0.000 ls  2σ    0.263 ls  light age   604 s
+T+    720 min
+  SHIP Transport hull=100.0/100 armour=100.0 screens=0% heat=103.6PJ SRM=0 LRM=0
+  SHIP Cruiser hull=3912.2/4000 armour=1675.4 screens=68% heat=415.1PJ SRM=0 LRM=0
+  SHIP Raider Cruiser hull=2312.0/4000 armour=27.7 screens=68% heat=0.0PJ SRM=0 LRM=0
+  LOST Cruiser M4 at 5166 s: point-defence missile
+  LOST Raider Cruiser M2 at 5179 s: point-defence missile
+  LOST Raider Cruiser M3 at 5180 s: point-defence missile
+  LOST Raider Cruiser M5 at 5181 s: point-defence missile
+  LOST Cruiser M12 at 5288 s: point-defence missile
+  LOST Cruiser M2 at 5406 s: point-defence missile
+  LOST Cruiser M3 at 5406 s: point-defence missile
+  LOST Cruiser M14 at 5408 s: point-defence missile
+  LOST Cruiser M17 at 5410 s: point-defence missile
+  LOST Cruiser M5 at 5485 s: point-defence missile
+  LOST Cruiser M6 at 5485 s: point-defence missile
+  LOST Raider Cruiser M1 at 5500 s: point-defence missile
+  LOST Cruiser M8 at 5527 s: point-defence missile
+  LOST Cruiser M10 at 5528 s: point-defence missile
+  LOST Cruiser M11 at 5528 s: point-defence missile
+  LOST Cruiser M20 at 5530 s: point-defence missile
+  LOST Raider Cruiser M6 at 5530 s: point-defence laser
+  LOST Cruiser M21 at 5530 s: point-defence missile
+  LOST Cruiser M22 at 5531 s: point-defence missile
+  LOST Raider Cruiser M12 at 5548 s: point-defence missile
+  LOST Cruiser M7 at 5627 s: point-defence laser
+  LOST Cruiser M13 at 5649 s: point-defence missile
+  LOST Cruiser M15 at 5649 s: point-defence missile
+  LOST Cruiser M18 at 5650 s: point-defence missile
+  LOST Cruiser M25 at 5651 s: point-defence missile
+  LOST Cruiser M28 at 5653 s: point-defence missile
+  LOST Cruiser M16 at 5750 s: point-defence laser
+  LOST Cruiser M19 at 5771 s: point-defence missile
+  LOST Cruiser M24 at 5772 s: point-defence missile
+  LOST Cruiser M31 at 5773 s: point-defence missile
+  LOST Cruiser M32 at 5773 s: point-defence missile
+  LOST Cruiser M36 at 5775 s: point-defence missile
+  LOST Raider Cruiser M7 at 5787 s: point-defence missile
+  LOST Raider Cruiser M9 at 5787 s: point-defence missile
+  LOST Raider Cruiser M10 at 5788 s: point-defence missile
+  LOST Raider Cruiser M8 at 5866 s: point-defence missile
+  LOST Cruiser M23 at 5880 s: point-defence laser
+  LOST Cruiser M26 at 5892 s: point-defence missile
+  LOST Cruiser M29 at 5893 s: point-defence missile
+  LOST Raider Cruiser M14 at 5912 s: point-defence missile
+  LOST Raider Cruiser M15 at 5912 s: point-defence missile
+  LOST Cruiser M30 at 5971 s: point-defence missile
+  LOST Cruiser M27 at 5993 s: point-defence laser
+  LOST Cruiser M35 at 6015 s: point-defence missile
+  LOST Raider Cruiser M13 at 6152 s: point-defence missile
+  LOST Raider Cruiser M17 at 6153 s: point-defence missile
+  LOST Raider Cruiser M16 at 6232 s: point-defence missile
+  LOST Raider Cruiser M19 at 6277 s: point-defence missile
+  LOST Raider Cruiser M21 at 6278 s: point-defence missile
+  LOST Raider Cruiser M24 at 6280 s: point-defence missile
+  LOST Raider Cruiser M23 at 6520 s: point-defence missile
+  LOST Raider Cruiser M22 at 6598 s: point-defence missile
+  LOST Raider Cruiser M20 at 6619 s: point-defence laser
+  LOST Raider Cruiser M29 at 6639 s: point-defence missile
+  LOST Raider Cruiser M30 at 6880 s: point-defence missile
+  LOST Raider Cruiser M32 at 6956 s: point-defence missile
+  LOST Raider Cruiser M26 at 6956 s: point-defence missile
+  LOST Raider Cruiser M27 at 6956 s: point-defence missile
+  LOST Raider Cruiser M34 at 6957 s: point-defence missile
+  LOST Raider Cruiser M28 at 6957 s: point-defence missile
+  LOST Raider Cruiser M25 at 6977 s: point-defence laser
+  LOST Raider Cruiser M31 at 7192 s: point-defence missile
+  LOST Raider Cruiser M35 at 7193 s: point-defence missile
+  LOST Raider Cruiser M36 at 7194 s: point-defence missile
+  LOST Raider Cruiser M33 at 7269 s: point-defence missile
+  LOST Cruiser M37 at 21103 s: point-defence missile
+  LOST Raider Cruiser M37 at 21200 s: point-defence missile
+  LOST Raider Cruiser M42 at 21200 s: point-defence missile
+  LOST Cruiser M38 at 21541 s: point-defence laser
+  LOST Cruiser M41 at 21550 s: point-defence laser
+  LOST Cruiser M39 at 21554 s: point-defence laser
+  LOST Cruiser M44 at 21623 s: point-defence laser
+  LOST Cruiser M48 at 21623 s: point-defence laser
+  LOST Raider Cruiser M41 at 21627 s: point-defence laser
+  LOST Cruiser M47 at 21644 s: point-defence laser
+  LOST Cruiser M53 at 21707 s: point-defence laser
+  LOST Cruiser M50 at 21721 s: point-defence laser
+  LOST Cruiser M57 at 21808 s: point-defence laser
+  LOST Cruiser M60 at 21809 s: point-defence laser
+  LOST Cruiser M55 at 21809 s: point-defence laser
+  LOST Raider Cruiser M43 at 21866 s: point-defence laser
+  LOST Raider Cruiser M45 at 21869 s: point-defence laser
+  LOST Raider Cruiser M52 at 22109 s: point-defence laser
+  LOST Raider Cruiser M50 at 22114 s: point-defence laser
+  LOST Raider Cruiser M49 at 22123 s: point-defence laser
+  LOST Raider Cruiser M57 at 22123 s: point-defence laser
+  FactionId(0) C1 = Raider Cruiser err    0.000 ls  2σ    0.031 ls  light age   249 s
+  FactionId(1) C1 = Transport err    0.003 ls  2σ    0.898 ls  light age  1002 s
+  FactionId(1) C2 = Cruiser   err    0.000 ls  2σ    0.030 ls  light age   246 s
+  FactionId(1) C3 = Lunar sensor station err    0.000 ls  2σ    0.302 ls  light age   640 s
+
+simulated 12.00 h in 21.57 s wall (2002× real time)

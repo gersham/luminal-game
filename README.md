@@ -518,8 +518,8 @@ navigation thruster vector. Hull-mounted spinal fire must wait for alignment.
 | Picket | 500 | 250 | 20 / 0 | 1 / 0 | 2 | 150 | 5s |
 | Frigate | 1000 | 500 | 12 / 10 | 1 / 1 | 40 | 120 | 10s |
 | Destroyer | 2000 | 1000 | 24 / 18 | 4 / 3 | 80 | 100 | 20s |
-| Cruiser | 4000 | 2000 | 24 / 36 | 6 / 6 | 200 | 70 | 35s |
-| Battleship | 8000 | 6000 | 48 / 48 | 12 / 8 | 240 | 50 | 60s |
+| Cruiser | 4000 | 2000 | 24 / 36 | 6 / 6 | 80 | 70 | 35s |
+| Battleship | 8000 | 6000 | 48 / 48 | 12 / 8 | 120 | 50 | 60s |
 
 Pickets have no offensive beam. Battleships add a 120-second spinal mount with
 10 times its main beam energy (3 PJ), a 60 LS envelope (10 times the nominal beam band),
@@ -580,4 +580,5 @@ for accelerating-target tests and SRM salvo comparisons.
 The [broader balance review](calibration/2026-09-29-review/report.md) covers
 10,240 isolated missile shots, class matchups, defensive ammunition, evasion,
 active sensors, alternate tactics and mission pacing, with reproducible runners
-and raw results. Its proposed magazine changes have not been applied.
+and raw results. The recommended Cruiser (80) and Battleship (120) interceptor
+magazines are now fitted; see the [follow-up validation and pacing proposals](calibration/2026-09-29-capital-fits/report.md).

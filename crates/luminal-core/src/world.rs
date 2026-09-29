@@ -71,7 +71,7 @@ impl ShipClass {
     pub fn magazine(self)->[u32;2] {self.missile_fit().rounds}
     pub fn beam_power(self)->f64 {match self {Self::Picket=>0.0,Self::Frigate|Self::Transport=>1.0,Self::Destroyer|Self::Cruiser=>2.0,Self::Battleship=>4.0}}
     pub fn pd_lasers(self)->u8 {match self {Self::Picket|Self::Transport=>1,Self::Frigate=>2,Self::Destroyer=>4,Self::Cruiser=>6,Self::Battleship=>8}}
-    pub fn interceptors(self)->u32 {match self {Self::Picket=>2,Self::Frigate=>40,Self::Destroyer=>80,Self::Cruiser=>200,Self::Battleship=>240,Self::Transport=>30}}
+    pub fn interceptors(self)->u32 {match self {Self::Picket=>2,Self::Frigate=>40,Self::Destroyer=>80,Self::Cruiser=>80,Self::Battleship=>120,Self::Transport=>30}}
     pub fn launchers(self,payload:Payload)->u32 {if payload==Payload::Beam {0} else {self.missile_fit().launchers[payload.index()]}}
     pub fn sensor_rating(self)->f64 {match self {Self::Picket=>80.0,Self::Frigate|Self::Transport=>100.0,Self::Destroyer=>125.0,Self::Cruiser=>160.0,Self::Battleship=>200.0}}
     pub fn protection(self)->f64 {if self==Self::Battleship {12.0} else {self.scale()}}
