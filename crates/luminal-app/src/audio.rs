@@ -5,7 +5,7 @@ use rodio::{OutputStream,OutputStreamBuilder,Sink,Decoder,Source,buffer::Samples
 use std::{collections::{BTreeMap,BTreeSet},io::Cursor,time::Instant};
 
 #[derive(Clone,Copy,PartialEq,Eq,PartialOrd,Ord)]
-pub enum Cue {Click,Contact,Ping,Launch,Beam,Spinal,Impact,Explosion,Alert}
+pub enum Cue {Click,Ping,Launch,Beam,Spinal,Impact,Explosion,Contact,Alert}
 const ASSETS:[(Cue,&[u8]);9]=[
     (Cue::Click,include_bytes!("../../../assets/audio/click.wav")),
     (Cue::Contact,include_bytes!("../../../assets/audio/contact.wav")),
@@ -52,11 +52,11 @@ impl Audio {
     pub fn play(&mut self,cue:Cue) {
         let now=Instant::now();
         if self.muted || self.volume<=0.0 || self.played.get(&cue).is_some_and(|at|now.duration_since(*at).as_secs_f64()<cooldown(cue))
-            || self.last.is_some_and(|at|now.duration_since(at).as_secs_f64()<0.075) {return;}
+            || (!matches!(cue,Cue::Contact|Cue::Alert) && self.last.is_some_and(|at|now.duration_since(at).as_secs_f64()<0.075)) {return;}
         let Some(stream)=&self.stream else {return;};
         self.voices.retain(|s|!s.empty());
         // Never build an audio backlog at 1000x. Important alerts replace a voice.
-        if self.voices.len()>=4 {if cue==Cue::Alert {self.voices.remove(0).stop();} else {return;}}
+        if self.voices.len()>=4 {if matches!(cue,Cue::Contact|Cue::Alert) {self.voices.remove(0).stop();} else {return;}}
         let Some(sample)=self.samples.get(&cue) else {return;};
         let sink=Sink::connect_new(stream.mixer());
         sink.set_volume(self.volume*match cue {Cue::Click=>0.55,Cue::Beam=>0.45,Cue::Ping=>0.6,_=>1.0});
@@ -116,6 +116,7 @@ impl Audio {
             assert!(peak>0.001 && peak<0.26,"asset peak {peak}");}
     }
     #[test] fn combat_audio_is_slower_than_ui_and_alerts_are_throttled() {
+        assert!(Cue::Contact>Cue::Explosion && Cue::Alert>Cue::Contact);
         assert!(cooldown(Cue::Beam)>cooldown(Cue::Click));assert!(cooldown(Cue::Alert)>=4.0);
     }
     #[test] fn ambient_loop_is_finite_quiet_and_stereo() {

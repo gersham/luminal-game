@@ -291,6 +291,21 @@ mod tests {
     }
 
     #[test]
+    fn tracking_zoom_includes_new_enemy_while_inspecting_charge() {
+        let mut app=LuminalApp::new();let mut view=app.session.view(app.role);
+        let rect=Rect::from_min_size(Pos2::ZERO,EVec2::new(1000.0,600.0));
+        let own=view.bodies.iter().find(|b|b.controllable).unwrap().pos;
+        app.inspected=Some(Selection::Body(BodyId(0)));app.camera.km_per_px=1000.0;
+        let mut track=test_track();track.pos=own+Vec2::new(AU,AU);track.cov=[[0.0;2];2];
+        view.contacts[0].track=Some(track);view.contacts[0].stale=false;
+        for _ in 0..50 {app.update_player_tracking(&view);app.update_tracking_zoom(&view,rect,0.1);}
+        assert!(rect.shrink(50.0).contains(to_screen(&app.camera,rect,view.contacts[0].track.as_ref().unwrap().pos)));
+        assert!(app.inspected==Some(Selection::Body(BodyId(0))),"framing must not change orders or selection");
+        let wide=app.camera.km_per_px;view.contacts[0].stale=true;
+        app.update_tracking_zoom(&view,rect,0.1);assert!(app.camera.km_per_px<wide);
+    }
+
+    #[test]
     fn tracking_zoom_includes_targets_target_using_visible_positions() {
         let app=LuminalApp::new();
         let mut view=app.session.view(app.role);
@@ -2217,7 +2232,7 @@ impl LuminalApp {
         if let Some(ap) = b.autopilot {
             let what = match ap.order {
                 Order::Alongside {target,..}=>format!("alongside {target} · 1 LS"),
-                Order::Follow {target,..}=>format!("follow {} · 1 LS alongside",view.bodies.iter().find(|b|b.id==target).map_or("?",|b|b.name.as_str())),
+                Order::Follow {target,..}=>format!("escort {} · 1 LS alongside / 10 LS screen",view.bodies.iter().find(|b|b.id==target).map_or("?",|b|b.name.as_str())),
                 Order::Route=>format!("fly-through route · {} points remaining",b.route.as_ref().map_or(0,|r|r.points.len().saturating_sub(r.progress.floor() as usize+1))),
                 Order::Orbit { celestial, radius, .. } => {
                     format!("orbit {} at {} altitude", view.celestials[celestial].name, fmt_distance(radius - view.celestials[celestial].radius))
@@ -2338,16 +2353,21 @@ impl LuminalApp {
         self.tracking_zoom_hold=(self.tracking_zoom_hold-dt).max(0.0);
         if !self.track_player || self.tracking_zoom_hold>0.0 || view.time<self.manual_ping_zoom_until {return;}
         let Some(ship)=view.bodies.iter().find(|b|b.controllable && b.kind==BodyKind::Ship) else {return;};
-        let Some(selected)=self.inspected.map(|s|match s {
+        let selected=self.inspected.map(|s|match s {
             Selection::Body(id)=>InterceptTarget::Own(id),Selection::Contact(id)=>InterceptTarget::Contact(id),
-        }) else {return;};
-        let secondary=self.session.camera_target_of(self.role,selected);
-        let Some(desired)=tracking_zoom_scale(view,ship.pos,rect,selected,secondary) else {return;};
+        });
+        let primary=selected.and_then(|target|tracking_zoom_scale(view,ship.pos,rect,target,self.session.camera_target_of(self.role,target)));
+        // New localized enemies must fit even while inspecting our charge or own
+        // ship. Use received estimates; a bearing alone has no drawable range.
+        let enemies=view.contacts.iter().filter(|c|!c.stale && !c.resolved_missile
+            && !matches!(c.resolved_kind,Some(BodyKind::Station|BodyKind::Probe)))
+            .filter_map(|c|tracking_zoom_scale(view,ship.pos,rect,InterceptTarget::Contact(c.id),None));
+        let Some(desired)=primary.into_iter().chain(enemies).reduce(f64::max) else {return;};
         let current=self.camera.km_per_px;
         // Hysteresis prevents sensor noise from making the camera breathe.
         if desired<=current && desired>=current*0.8 {return;}
-        // Settle about 95% of a zoom change over ten wall-clock seconds.
-        let tau=10.0/3.0;
+        // Reveal threats promptly; zoom back in more gently.
+        let tau=if desired>current {1.0} else {10.0/3.0};
         let alpha=1.0-(-dt.min(0.1)/tau).exp();
         self.camera.km_per_px=(current.ln()+(desired.ln()-current.ln())*alpha).exp().clamp(1e-3,1e8);
     }

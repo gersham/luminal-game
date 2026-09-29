@@ -94,7 +94,7 @@ pub enum InterceptTarget {
 pub enum Order {
     /// Best-effort continuous curve through the body's flight-route points.
     Route,
-    /// Join a friendly at a fixed formation offset, then mirror its acceleration.
+    /// Escort a friendly: screen detected enemies, otherwise hold the original offset.
     Follow { target: BodyId, offset: Vec2 },
     /// Match a sensor contact at a fixed one-light-second formation offset.
     Alongside { target: ContactId, offset: Vec2 },
@@ -769,6 +769,23 @@ impl World {
         Ok(())
     }
 
+    /// Position between our charge and the nearest localized hostile contact.
+    /// Unranged bearings cannot establish which enemy is closest. Resolved
+    /// missiles, probes and stations do not pull an escort out of formation.
+    fn escort_screen_offset(&self,id:BodyId,charge:Vec2)->Option<Vec2> {
+        let faction=self.body(id)?.faction;
+        self.received_picture(id)?.contacts.values()
+            .filter(|c|self.time-c.last.decider_received_at<=TRACK_STALE_S.value
+                && !self.refinement.retired_contacts.contains(&(faction,c.id)))
+            .filter(|c|!c.resolved || self.body_for_contact(faction,c.id)
+                .is_some_and(|other|self.bodies[other.0 as usize].kind==BodyKind::Ship))
+            .filter_map(|c|c.estimate(self.time,&self.system).map(|tr|tr.pos()-charge))
+            .filter(|delta|delta.length()>1e-6)
+            .min_by(|a,b|a.length().total_cmp(&b.length()))
+            // Keep between the ships even if the enemy is already inside 10 LS.
+            .map(|delta|delta.normalized()*(10.0*crate::units::LIGHT_SECOND).min(delta.length()*0.5))
+    }
+
     pub fn set_alongside(&mut self,id:BodyId,target:InterceptTarget)->Result<(),OrderError> {
         self.ensure_not_jumping(id)?;
         let InterceptTarget::Contact(contact)=target else {
@@ -1336,6 +1353,7 @@ impl World {
                     .map(|state|(state,known.trajectory.thrust_at(t).unwrap_or(Vec2::ZERO)))) {
                     Some((target,burn))=>{
                         let ff=burn+self.system.gravity(target.pos,t)-self.system.gravity(s.pos,t);
+                        let offset=self.escort_screen_offset(id,target.pos).unwrap_or(offset);
                         let approach=autopilot::move_to(s,State {pos:target.pos+offset,vel:target.vel},ff,limit);
                         let holding=approach.gap.abs()<0.01*crate::units::LIGHT_SECOND && approach.rel_speed<1.0;
                         (approach.thrust,Some(if holding {AutopilotStatus::Holding} else {AutopilotStatus::Closing {eta:approach.eta,range:approach.gap}}))
@@ -2144,7 +2162,6 @@ mod tests {
         let mut w=World::new(sun(),vec![
             ship("Follower",0,base,Vec2::ZERO,Vec2::ZERO),
             ship("Leader",0,base+Vec2::new(5.0*LIGHT_SECOND,0.0),Vec2::new(0.0,30.0),Vec2::new(0.0,10.0*G0)),
-            ship("Enemy",1,base+Vec2::new(10.0*LIGHT_SECOND,0.0),Vec2::ZERO,Vec2::ZERO),
         ],0.0,1);
         assert_eq!(w.set_follow(BodyId(0),BodyId(0)),Err(OrderError::InvalidTarget));
         assert_eq!(w.set_follow(BodyId(0),BodyId(2)),Err(OrderError::InvalidTarget));
@@ -2164,6 +2181,52 @@ mod tests {
             assert!((w.bodies[0].trajectory.last().thrust-burn).length()<G0,"burn mismatch");
             assert_eq!(w.bodies[0].autopilot.unwrap().status,AutopilotStatus::Holding);
         }
+    }
+
+    #[test]
+    fn escort_screens_nearest_received_enemy_and_returns_to_formation() {
+        let mut w=World::new(System {bodies:vec![]},vec![
+            ship("Escort",0,Vec2::new(0.0,LIGHT_SECOND),Vec2::ZERO,Vec2::ZERO),
+            ship("Charge",0,Vec2::ZERO,Vec2::ZERO,Vec2::ZERO),
+            ship("Near",1,Vec2::new(20.0*LIGHT_SECOND,0.0),Vec2::ZERO,Vec2::ZERO),
+            ship("Far",1,Vec2::new(-40.0*LIGHT_SECOND,0.0),Vec2::ZERO,Vec2::ZERO),
+        ],0.0,91);
+        let escort=BodyId(0);let charge=BodyId(1);let f=FactionId(0);
+        w.set_alongside(escort,InterceptTarget::Own(charge)).unwrap();
+        let fallback=w.bodies[0].trajectory.last().thrust;
+        assert!(w.escort_screen_offset(escort,Vec2::ZERO).is_none());
+        let mut contacts=vec![];
+        for (body,bearing,range) in [(BodyId(2),0.0,20.0),(BodyId(3),std::f64::consts::PI,40.0)] {
+            let c=w.contact_id(f,body);contacts.push(c);
+            w.perceptions.get_mut(&f).unwrap().ingest(Observation {
+                detection:sensors::DetectionLevel::Identity,contact:c,sensor:escort,origin:Vec2::ZERO,
+                emitted_at:0.0,sensor_received_at:0.0,decider_received_at:0.0,
+                measurement:Measurement::BearingRange {bearing,range:range*LIGHT_SECOND,sigma_bearing:1e-10,sigma_range:1e-5},
+                snr:1e9,source:Source::Echo,
+            },&w.system);
+        }
+        let offset=w.escort_screen_offset(escort,Vec2::ZERO).unwrap();
+        assert!((offset-Vec2::new(10.0*LIGHT_SECOND,0.0)).length()<1.0);
+        w.guide(escort);let screening=w.bodies[0].trajectory.last().thrust;
+        assert!(screening.x>0.0);assert_ne!(screening,fallback);
+        // Neither hidden position nor an unreceived death changes guidance.
+        w.bodies[2].trajectory=crate::kinematics::Trajectory::new(0.0,State {pos:Vec2::new(-100.0*AU,0.0),vel:Vec2::ZERO});
+        w.bodies[2].trajectory.terminate(0.0);
+        w.guide(escort);assert_eq!(w.bodies[0].trajectory.last().thrust,screening);
+        // A charge close to the estimated contact gets a midpoint, never an overshoot.
+        let close=w.escort_screen_offset(escort,Vec2::new(16.0*LIGHT_SECOND,0.0)).unwrap();
+        assert!((close-Vec2::new(2.0*LIGHT_SECOND,0.0)).length()<1.0);
+        // Resolved nonships cannot draw the escort out of position.
+        w.bodies[2].kind=BodyKind::Missile;
+        assert!(w.escort_screen_offset(escort,Vec2::ZERO).unwrap().x<0.0);
+        w.refinement.retired_contacts.insert((f,contacts[1]));
+        assert!(w.escort_screen_offset(escort,Vec2::ZERO).is_none());
+        w.guide(escort);assert_eq!(w.bodies[0].trajectory.last().thrust,fallback);
+        w.bodies[2].kind=BodyKind::Ship;
+        w.time=TRACK_STALE_S.value+1.0;
+        assert!(w.escort_screen_offset(escort,Vec2::ZERO).is_none());
+        w.perceptions.get_mut(&f).unwrap().contacts.clear();
+        assert!(w.escort_screen_offset(escort,Vec2::ZERO).is_none());
     }
 
     #[test]

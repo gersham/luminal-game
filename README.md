@@ -227,8 +227,9 @@ The escort wins when the transport escapes or the raider is destroyed; the
 raider wins if the transport is destroyed first.
 The transport has 25 g nominal acceleration, one quarter of a warship's 100 g.
 
-The playtest starts on **AUTO speed**, tracking your frigate with the transport
-selected and a follow order to join it 1 LS alongside. Use the top-left controls to pause, change speed, fit
+The playtest starts on **AUTO speed**, tracking your selected ship with the transport
+selected and an escort order. Without a localized enemy it joins 1 LS alongside;
+with one, it screens up to 10 LS toward the nearest received enemy position. Use the top-left controls to pause, change speed, fit
 the map, or restart. AUTO smoothly ranges from 5× at 1 LS through 10× at 10 LS,
 50× at 0.1 AU and 300× at 1 AU to 1000× at 2 AU. It uses the nearest received
 enemy track, allowing for uncertainty and two wall-seconds of projected closure.
@@ -251,7 +252,7 @@ never override manual speed. Restart restores AUTO.
 | 0 | EVADE |
 | Drag with left or middle mouse button | Pan; cancels ship tracking |
 | Mouse wheel | Zoom |
-| Right-click a friendly | Join 1 LS alongside at maximum burn, then match its motion and burn |
+| Right-click a friendly | Escort: join 1 LS alongside, or screen up to 10 LS toward the nearest detected enemy |
 | Shift+right-click map | Append a point to your ship's fly-through curve |
 | Left-click an object | Set a persistent target; leaves movement unchanged |
 | Right-click an enemy ship | Move toward that ship using the current helm mode |
@@ -614,3 +615,8 @@ For previews, `LUMINAL_THEME=Culture` selects a vocabulary and
 
 Class-specific pulse batteries, canister effects and the frigate's optional
 support projector are described in [weapon fits and fleet roles](docs/WEAPON_FITS.md).
+
+Enemy contact notifications use a low, descending two-strike chime with priority
+over routine weapon sounds. Automatic tracking frames localized enemy ships as
+well as the inspected unit, including while inspecting the escorted charge.
+Bearing-only contacts cannot set a zoom distance. Manual pan/zoom overrides remain.

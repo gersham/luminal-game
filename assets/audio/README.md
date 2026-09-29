@@ -29,3 +29,9 @@ The UI offers separate sliders and a global mute. Effect playback is capped
 at four voices, with wall-clock cooldowns and no backlog at high game speeds.
 Combat cues come only from the received player view, preserving light delays.
 Music has a three-second initial fade-in. Audio device failure is nonfatal.
+
+The contact cue was replaced on 2026-09-29 by the original synthesized warning
+in `scripts/generate-contact-audio.py`: two low, descending bell strikes,
+1.8 seconds, mono 24 kHz PCM, peak 0.24. It has priority over routine weapon
+sounds and can replace an occupied voice; its two-second cooldown still applies.
+The spinal cue is likewise generated locally by `scripts/generate-spinal-audio.py`.
