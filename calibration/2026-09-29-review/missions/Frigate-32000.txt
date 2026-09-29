@@ -1,0 +1,390 @@
+T+     60 min
+  SHIP Transport hull=100.0/100 armour=100.0 screens=0% heat=38.4PJ SRM=0 LRM=0
+  SHIP Frigate hull=1000.0/1000 armour=500.0 screens=100% heat=50.7PJ SRM=12 LRM=4
+  SHIP Raider Frigate hull=1000.0/1000 armour=500.0 screens=10% heat=32.9PJ SRM=12 LRM=7
+  FactionId(0) C1 = Raider Frigate err    0.658 ls  2σ    0.851 ls  light age   469 s
+  FactionId(0) C2 = Raider Frigate M1 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C3 = Raider Frigate M2 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C4 = Raider Frigate M3 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C1 = Transport err    0.000 ls  2σ    0.150 ls  light age   480 s
+  FactionId(1) C2 = Frigate   err    0.518 ls  2σ    3.366 ls  light age   467 s
+  FactionId(1) C3 = Lunar sensor station err    0.000 ls  2σ    0.153 ls  light age   484 s
+  FactionId(1) C4 = Frigate M4 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C5 = Frigate M6 err    0.000 ls  2σ    0.000 ls  light age     0 s
+T+    120 min
+  SHIP Transport hull=100.0/100 armour=100.0 screens=0% heat=73.3PJ SRM=0 LRM=0
+  SHIP Frigate hull=1000.0/1000 armour=500.0 screens=35% heat=81.7PJ SRM=12 LRM=4
+  SHIP Raider Frigate hull=1000.0/1000 armour=500.0 screens=22% heat=56.0PJ SRM=12 LRM=4
+  LOST Frigate M1 at 6889 s: point-defence missile
+  LOST Raider Frigate M2 at 6963 s: point-defence missile
+  LOST Frigate M2 at 7084 s: point-defence laser
+  FactionId(0) C1 = Raider Frigate err    0.002 ls  2σ    0.105 ls  light age   424 s
+  FactionId(0) C4 = Raider Frigate M3 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C5 = Raider Frigate M4 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C6 = Raider Frigate M5 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C7 = Raider Frigate M6 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C13 = Raider Frigate interceptor 6 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C14 = Raider Frigate interceptor 7 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C17 = Raider Frigate interceptor 10 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C18 = Raider Frigate interceptor 11 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C1 = Transport err    0.010 ls  2σ    0.112 ls  light age   424 s
+  FactionId(1) C2 = Frigate   err    0.001 ls  2σ    0.103 ls  light age   420 s
+  FactionId(1) C3 = Lunar sensor station err    0.002 ls  2σ    0.127 ls  light age   446 s
+  FactionId(1) C4 = Frigate M4 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C5 = Frigate M6 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C8 = Frigate M3 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C9 = Frigate M5 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C20 = Frigate interceptor 6 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C22 = Frigate interceptor 7 err    0.000 ls  2σ    0.000 ls  light age     0 s
+T+    180 min
+  SHIP Transport hull=100.0/100 armour=100.0 screens=0% heat=94.4PJ SRM=0 LRM=0
+  SHIP Frigate hull=971.6/1000 armour=467.2 screens=9% heat=65.5PJ SRM=12 LRM=4
+  SHIP Raider Frigate hull=960.4/1000 armour=451.4 screens=11% heat=63.8PJ SRM=12 LRM=4
+  LOST Frigate M1 at 6889 s: point-defence missile
+  LOST Raider Frigate M2 at 6963 s: point-defence missile
+  LOST Frigate M2 at 7084 s: point-defence laser
+  LOST Frigate M3 at 7231 s: point-defence missile
+  LOST Frigate M6 at 7350 s: point-defence missile
+  LOST Frigate M4 at 7433 s: point-defence laser
+  LOST Raider Frigate M3 at 7665 s: point-defence laser
+  LOST Raider Frigate M5 at 8028 s: point-defence missile
+  LOST Raider Frigate M6 at 8893 s: point-defence missile
+  FactionId(0) C1 = Raider Frigate err    0.005 ls  2σ    0.054 ls  light age   315 s
+  FactionId(1) C1 = Transport err    0.000 ls  2σ    0.060 ls  light age   331 s
+  FactionId(1) C2 = Frigate   err    0.000 ls  2σ    0.053 ls  light age   314 s
+  FactionId(1) C3 = Lunar sensor station err    0.000 ls  2σ    0.084 ls  light age   379 s
+T+    240 min
+  SHIP Transport hull=100.0/100 armour=100.0 screens=0% heat=103.2PJ SRM=0 LRM=0
+  SHIP Frigate hull=981.6/1000 armour=467.2 screens=21% heat=90.4PJ SRM=12 LRM=4
+  SHIP Raider Frigate hull=970.4/1000 armour=451.4 screens=23% heat=68.7PJ SRM=12 LRM=4
+  LOST Frigate M1 at 6889 s: point-defence missile
+  LOST Raider Frigate M2 at 6963 s: point-defence missile
+  LOST Frigate M2 at 7084 s: point-defence laser
+  LOST Frigate M3 at 7231 s: point-defence missile
+  LOST Frigate M6 at 7350 s: point-defence missile
+  LOST Frigate M4 at 7433 s: point-defence laser
+  LOST Raider Frigate M3 at 7665 s: point-defence laser
+  LOST Raider Frigate M5 at 8028 s: point-defence missile
+  LOST Raider Frigate M6 at 8893 s: point-defence missile
+  FactionId(0) C1 = Raider Frigate err    0.000 ls  2σ    0.016 ls  light age   188 s
+  FactionId(1) C1 = Transport err    0.000 ls  2σ    0.042 ls  light age   284 s
+  FactionId(1) C2 = Frigate   err    0.000 ls  2σ    0.016 ls  light age   192 s
+  FactionId(1) C3 = Lunar sensor station err    0.000 ls  2σ    0.065 ls  light age   342 s
+T+    300 min
+  SHIP Transport hull=100.0/100 armour=100.0 screens=0% heat=103.5PJ SRM=0 LRM=0
+  SHIP Frigate hull=991.6/1000 armour=467.2 screens=33% heat=103.0PJ SRM=9 LRM=4
+  SHIP Raider Frigate hull=980.4/1000 armour=451.4 screens=35% heat=65.2PJ SRM=11 LRM=4
+  LOST Frigate M1 at 6889 s: point-defence missile
+  LOST Raider Frigate M2 at 6963 s: point-defence missile
+  LOST Frigate M2 at 7084 s: point-defence laser
+  LOST Frigate M3 at 7231 s: point-defence missile
+  LOST Frigate M6 at 7350 s: point-defence missile
+  LOST Frigate M4 at 7433 s: point-defence laser
+  LOST Raider Frigate M3 at 7665 s: point-defence laser
+  LOST Raider Frigate M5 at 8028 s: point-defence missile
+  LOST Raider Frigate M6 at 8893 s: point-defence missile
+  FactionId(0) C1 = Raider Frigate err    0.000 ls  2σ    0.001 ls  light age    54 s
+  FactionId(0) C22 = Raider Frigate interceptor 15 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C23 = Raider Frigate M7 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C24 = Raider Frigate interceptor 16 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C25 = Raider Frigate interceptor 17 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C1 = Transport err    0.001 ls  2σ    0.053 ls  light age   311 s
+  FactionId(1) C2 = Frigate   err    0.000 ls  2σ    0.001 ls  light age    57 s
+  FactionId(1) C40 = Frigate M7 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C41 = Frigate interceptor 15 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C42 = Frigate M8 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C43 = Frigate M9 err    0.000 ls  2σ    0.000 ls  light age     0 s
+T+    360 min
+  SHIP Transport hull=100.0/100 armour=100.0 screens=0% heat=103.6PJ SRM=0 LRM=0
+  SHIP Frigate hull=850.9/1000 armour=316.5 screens=7% heat=88.7PJ SRM=0 LRM=0
+  SHIP Raider Frigate hull=311.1/1000 armour=0.0 screens=0% heat=36.3PJ SRM=0 LRM=0
+  LOST Frigate M1 at 6889 s: point-defence missile
+  LOST Raider Frigate M2 at 6963 s: point-defence missile
+  LOST Frigate M2 at 7084 s: point-defence laser
+  LOST Frigate M3 at 7231 s: point-defence missile
+  LOST Frigate M6 at 7350 s: point-defence missile
+  LOST Frigate M4 at 7433 s: point-defence laser
+  LOST Raider Frigate M3 at 7665 s: point-defence laser
+  LOST Raider Frigate M5 at 8028 s: point-defence missile
+  LOST Raider Frigate M6 at 8893 s: point-defence missile
+  LOST Frigate M7 at 18363 s: point-defence missile
+  LOST Raider Frigate M7 at 18372 s: point-defence missile
+  LOST Frigate M9 at 18521 s: point-defence missile
+  LOST Frigate M8 at 18531 s: point-defence missile
+  LOST Frigate M10 at 18598 s: point-defence missile
+  LOST Raider Frigate M8 at 18610 s: point-defence missile
+  LOST Frigate M12 at 18675 s: point-defence missile
+  LOST Frigate M13 at 18678 s: point-defence missile
+  LOST Raider Frigate M15 at 18702 s: point-defence missile
+  LOST Raider Frigate M18 at 18709 s: point-defence missile
+  LOST Frigate M14 at 18725 s: point-defence missile
+  LOST Frigate M15 at 18831 s: point-defence laser
+  LOST Raider Frigate M10 at 18839 s: point-defence missile
+  LOST Raider Frigate M11 at 18842 s: point-defence missile
+  LOST Raider Frigate M14 at 18848 s: point-defence missile
+  LOST Raider Frigate M16 at 18851 s: point-defence missile
+  LOST Raider Frigate M17 at 18855 s: point-defence missile
+  LOST Raider Frigate M9 at 18869 s: point-defence missile
+  LOST Raider Frigate M13 at 18962 s: point-defence laser
+  LOST Raider Frigate M20 at 18972 s: point-defence laser
+  LOST Raider Frigate M21 at 18977 s: point-defence laser
+  LOST Frigate M11 at 18985 s: point-defence laser
+  LOST Frigate M17 at 18986 s: point-defence laser
+  LOST Raider Frigate M22 at 18986 s: point-defence laser
+  LOST Raider Frigate M12 at 19075 s: point-defence laser
+  FactionId(0) C1 = Raider Frigate err    0.000 ls  2σ    0.002 ls  light age    84 s
+  FactionId(1) C1 = Transport err    0.000 ls  2σ    0.089 ls  light age   387 s
+  FactionId(1) C2 = Frigate   err    0.000 ls  2σ    0.002 ls  light age    80 s
+  FactionId(1) C3 = Lunar sensor station err    0.000 ls  2σ    0.087 ls  light age   387 s
+T+    420 min
+  SHIP Transport hull=100.0/100 armour=100.0 screens=0% heat=103.6PJ SRM=0 LRM=0
+  SHIP Frigate hull=860.9/1000 armour=316.5 screens=19% heat=102.7PJ SRM=0 LRM=0
+  SHIP Raider Frigate hull=311.1/1000 armour=0.0 screens=0% heat=4.5PJ SRM=0 LRM=0
+  LOST Frigate M1 at 6889 s: point-defence missile
+  LOST Raider Frigate M2 at 6963 s: point-defence missile
+  LOST Frigate M2 at 7084 s: point-defence laser
+  LOST Frigate M3 at 7231 s: point-defence missile
+  LOST Frigate M6 at 7350 s: point-defence missile
+  LOST Frigate M4 at 7433 s: point-defence laser
+  LOST Raider Frigate M3 at 7665 s: point-defence laser
+  LOST Raider Frigate M5 at 8028 s: point-defence missile
+  LOST Raider Frigate M6 at 8893 s: point-defence missile
+  LOST Frigate M7 at 18363 s: point-defence missile
+  LOST Raider Frigate M7 at 18372 s: point-defence missile
+  LOST Frigate M9 at 18521 s: point-defence missile
+  LOST Frigate M8 at 18531 s: point-defence missile
+  LOST Frigate M10 at 18598 s: point-defence missile
+  LOST Raider Frigate M8 at 18610 s: point-defence missile
+  LOST Frigate M12 at 18675 s: point-defence missile
+  LOST Frigate M13 at 18678 s: point-defence missile
+  LOST Raider Frigate M15 at 18702 s: point-defence missile
+  LOST Raider Frigate M18 at 18709 s: point-defence missile
+  LOST Frigate M14 at 18725 s: point-defence missile
+  LOST Frigate M15 at 18831 s: point-defence laser
+  LOST Raider Frigate M10 at 18839 s: point-defence missile
+  LOST Raider Frigate M11 at 18842 s: point-defence missile
+  LOST Raider Frigate M14 at 18848 s: point-defence missile
+  LOST Raider Frigate M16 at 18851 s: point-defence missile
+  LOST Raider Frigate M17 at 18855 s: point-defence missile
+  LOST Raider Frigate M9 at 18869 s: point-defence missile
+  LOST Raider Frigate M13 at 18962 s: point-defence laser
+  LOST Raider Frigate M20 at 18972 s: point-defence laser
+  LOST Raider Frigate M21 at 18977 s: point-defence laser
+  LOST Frigate M11 at 18985 s: point-defence laser
+  LOST Frigate M17 at 18986 s: point-defence laser
+  LOST Raider Frigate M22 at 18986 s: point-defence laser
+  LOST Raider Frigate M12 at 19075 s: point-defence laser
+  FactionId(0) C1 = Raider Frigate err    0.000 ls  2σ    0.015 ls  light age   188 s
+  FactionId(1) C1 = Transport err    0.000 ls  2σ    0.157 ls  light age   488 s
+  FactionId(1) C2 = Frigate   err    0.000 ls  2σ    0.014 ls  light age   181 s
+  FactionId(1) C3 = Lunar sensor station err    0.000 ls  2σ    0.112 ls  light age   428 s
+T+    480 min
+  SHIP Transport hull=100.0/100 armour=100.0 screens=0% heat=103.6PJ SRM=0 LRM=0
+  SHIP Frigate hull=870.9/1000 armour=316.5 screens=31% heat=103.8PJ SRM=0 LRM=0
+  SHIP Raider Frigate hull=311.1/1000 armour=0.0 screens=0% heat=0.0PJ SRM=0 LRM=0
+  LOST Frigate M1 at 6889 s: point-defence missile
+  LOST Raider Frigate M2 at 6963 s: point-defence missile
+  LOST Frigate M2 at 7084 s: point-defence laser
+  LOST Frigate M3 at 7231 s: point-defence missile
+  LOST Frigate M6 at 7350 s: point-defence missile
+  LOST Frigate M4 at 7433 s: point-defence laser
+  LOST Raider Frigate M3 at 7665 s: point-defence laser
+  LOST Raider Frigate M5 at 8028 s: point-defence missile
+  LOST Raider Frigate M6 at 8893 s: point-defence missile
+  LOST Frigate M7 at 18363 s: point-defence missile
+  LOST Raider Frigate M7 at 18372 s: point-defence missile
+  LOST Frigate M9 at 18521 s: point-defence missile
+  LOST Frigate M8 at 18531 s: point-defence missile
+  LOST Frigate M10 at 18598 s: point-defence missile
+  LOST Raider Frigate M8 at 18610 s: point-defence missile
+  LOST Frigate M12 at 18675 s: point-defence missile
+  LOST Frigate M13 at 18678 s: point-defence missile
+  LOST Raider Frigate M15 at 18702 s: point-defence missile
+  LOST Raider Frigate M18 at 18709 s: point-defence missile
+  LOST Frigate M14 at 18725 s: point-defence missile
+  LOST Frigate M15 at 18831 s: point-defence laser
+  LOST Raider Frigate M10 at 18839 s: point-defence missile
+  LOST Raider Frigate M11 at 18842 s: point-defence missile
+  LOST Raider Frigate M14 at 18848 s: point-defence missile
+  LOST Raider Frigate M16 at 18851 s: point-defence missile
+  LOST Raider Frigate M17 at 18855 s: point-defence missile
+  LOST Raider Frigate M9 at 18869 s: point-defence missile
+  LOST Raider Frigate M13 at 18962 s: point-defence laser
+  LOST Raider Frigate M20 at 18972 s: point-defence laser
+  LOST Raider Frigate M21 at 18977 s: point-defence laser
+  LOST Frigate M11 at 18985 s: point-defence laser
+  LOST Frigate M17 at 18986 s: point-defence laser
+  LOST Raider Frigate M22 at 18986 s: point-defence laser
+  LOST Raider Frigate M12 at 19075 s: point-defence laser
+  FactionId(0) C1 = Raider Frigate err    0.000 ls  2σ    0.029 ls  light age   242 s
+  FactionId(1) C1 = Transport err    0.000 ls  2σ    0.272 ls  light age   612 s
+  FactionId(1) C2 = Frigate   err    0.000 ls  2σ    0.027 ls  light age   236 s
+  FactionId(1) C3 = Lunar sensor station err    0.000 ls  2σ    0.141 ls  light age   469 s
+T+    540 min
+  SHIP Transport hull=100.0/100 armour=100.0 screens=0% heat=103.6PJ SRM=0 LRM=0
+  SHIP Frigate hull=880.9/1000 armour=316.5 screens=43% heat=103.8PJ SRM=0 LRM=0
+  SHIP Raider Frigate hull=311.1/1000 armour=0.0 screens=0% heat=0.0PJ SRM=0 LRM=0
+  LOST Frigate M1 at 6889 s: point-defence missile
+  LOST Raider Frigate M2 at 6963 s: point-defence missile
+  LOST Frigate M2 at 7084 s: point-defence laser
+  LOST Frigate M3 at 7231 s: point-defence missile
+  LOST Frigate M6 at 7350 s: point-defence missile
+  LOST Frigate M4 at 7433 s: point-defence laser
+  LOST Raider Frigate M3 at 7665 s: point-defence laser
+  LOST Raider Frigate M5 at 8028 s: point-defence missile
+  LOST Raider Frigate M6 at 8893 s: point-defence missile
+  LOST Frigate M7 at 18363 s: point-defence missile
+  LOST Raider Frigate M7 at 18372 s: point-defence missile
+  LOST Frigate M9 at 18521 s: point-defence missile
+  LOST Frigate M8 at 18531 s: point-defence missile
+  LOST Frigate M10 at 18598 s: point-defence missile
+  LOST Raider Frigate M8 at 18610 s: point-defence missile
+  LOST Frigate M12 at 18675 s: point-defence missile
+  LOST Frigate M13 at 18678 s: point-defence missile
+  LOST Raider Frigate M15 at 18702 s: point-defence missile
+  LOST Raider Frigate M18 at 18709 s: point-defence missile
+  LOST Frigate M14 at 18725 s: point-defence missile
+  LOST Frigate M15 at 18831 s: point-defence laser
+  LOST Raider Frigate M10 at 18839 s: point-defence missile
+  LOST Raider Frigate M11 at 18842 s: point-defence missile
+  LOST Raider Frigate M14 at 18848 s: point-defence missile
+  LOST Raider Frigate M16 at 18851 s: point-defence missile
+  LOST Raider Frigate M17 at 18855 s: point-defence missile
+  LOST Raider Frigate M9 at 18869 s: point-defence missile
+  LOST Raider Frigate M13 at 18962 s: point-defence laser
+  LOST Raider Frigate M20 at 18972 s: point-defence laser
+  LOST Raider Frigate M21 at 18977 s: point-defence laser
+  LOST Frigate M11 at 18985 s: point-defence laser
+  LOST Frigate M17 at 18986 s: point-defence laser
+  LOST Raider Frigate M22 at 18986 s: point-defence laser
+  LOST Raider Frigate M12 at 19075 s: point-defence laser
+  FactionId(0) C1 = Raider Frigate err    0.000 ls  2σ    0.030 ls  light age   249 s
+  FactionId(1) C1 = Transport err    0.000 ls  2σ    0.456 ls  light age   758 s
+  FactionId(1) C2 = Frigate   err    0.000 ls  2σ    0.030 ls  light age   245 s
+  FactionId(1) C3 = Lunar sensor station err    0.000 ls  2σ    0.174 ls  light age   511 s
+T+    600 min
+  SHIP Transport hull=100.0/100 armour=100.0 screens=0% heat=103.6PJ SRM=0 LRM=0
+  SHIP Frigate hull=890.9/1000 armour=316.5 screens=55% heat=103.8PJ SRM=0 LRM=0
+  SHIP Raider Frigate hull=311.1/1000 armour=0.0 screens=0% heat=0.0PJ SRM=0 LRM=0
+  LOST Frigate M1 at 6889 s: point-defence missile
+  LOST Raider Frigate M2 at 6963 s: point-defence missile
+  LOST Frigate M2 at 7084 s: point-defence laser
+  LOST Frigate M3 at 7231 s: point-defence missile
+  LOST Frigate M6 at 7350 s: point-defence missile
+  LOST Frigate M4 at 7433 s: point-defence laser
+  LOST Raider Frigate M3 at 7665 s: point-defence laser
+  LOST Raider Frigate M5 at 8028 s: point-defence missile
+  LOST Raider Frigate M6 at 8893 s: point-defence missile
+  LOST Frigate M7 at 18363 s: point-defence missile
+  LOST Raider Frigate M7 at 18372 s: point-defence missile
+  LOST Frigate M9 at 18521 s: point-defence missile
+  LOST Frigate M8 at 18531 s: point-defence missile
+  LOST Frigate M10 at 18598 s: point-defence missile
+  LOST Raider Frigate M8 at 18610 s: point-defence missile
+  LOST Frigate M12 at 18675 s: point-defence missile
+  LOST Frigate M13 at 18678 s: point-defence missile
+  LOST Raider Frigate M15 at 18702 s: point-defence missile
+  LOST Raider Frigate M18 at 18709 s: point-defence missile
+  LOST Frigate M14 at 18725 s: point-defence missile
+  LOST Frigate M15 at 18831 s: point-defence laser
+  LOST Raider Frigate M10 at 18839 s: point-defence missile
+  LOST Raider Frigate M11 at 18842 s: point-defence missile
+  LOST Raider Frigate M14 at 18848 s: point-defence missile
+  LOST Raider Frigate M16 at 18851 s: point-defence missile
+  LOST Raider Frigate M17 at 18855 s: point-defence missile
+  LOST Raider Frigate M9 at 18869 s: point-defence missile
+  LOST Raider Frigate M13 at 18962 s: point-defence laser
+  LOST Raider Frigate M20 at 18972 s: point-defence laser
+  LOST Raider Frigate M21 at 18977 s: point-defence laser
+  LOST Frigate M11 at 18985 s: point-defence laser
+  LOST Frigate M17 at 18986 s: point-defence laser
+  LOST Raider Frigate M22 at 18986 s: point-defence laser
+  LOST Raider Frigate M12 at 19075 s: point-defence laser
+  FactionId(0) C1 = Raider Frigate err    0.000 ls  2σ    0.020 ls  light age   208 s
+  FactionId(1) C1 = Transport err    0.000 ls  2σ    0.737 ls  light age   922 s
+  FactionId(1) C2 = Frigate   err    0.000 ls  2σ    0.020 ls  light age   208 s
+  FactionId(1) C3 = Lunar sensor station err    0.000 ls  2σ    0.211 ls  light age   554 s
+T+    660 min
+  SHIP Transport hull=100.0/100 armour=100.0 screens=0% heat=103.6PJ SRM=0 LRM=0
+  SHIP Frigate hull=900.9/1000 armour=316.5 screens=67% heat=103.8PJ SRM=0 LRM=0
+  SHIP Raider Frigate hull=311.1/1000 armour=0.0 screens=0% heat=0.0PJ SRM=0 LRM=0
+  LOST Frigate M1 at 6889 s: point-defence missile
+  LOST Raider Frigate M2 at 6963 s: point-defence missile
+  LOST Frigate M2 at 7084 s: point-defence laser
+  LOST Frigate M3 at 7231 s: point-defence missile
+  LOST Frigate M6 at 7350 s: point-defence missile
+  LOST Frigate M4 at 7433 s: point-defence laser
+  LOST Raider Frigate M3 at 7665 s: point-defence laser
+  LOST Raider Frigate M5 at 8028 s: point-defence missile
+  LOST Raider Frigate M6 at 8893 s: point-defence missile
+  LOST Frigate M7 at 18363 s: point-defence missile
+  LOST Raider Frigate M7 at 18372 s: point-defence missile
+  LOST Frigate M9 at 18521 s: point-defence missile
+  LOST Frigate M8 at 18531 s: point-defence missile
+  LOST Frigate M10 at 18598 s: point-defence missile
+  LOST Raider Frigate M8 at 18610 s: point-defence missile
+  LOST Frigate M12 at 18675 s: point-defence missile
+  LOST Frigate M13 at 18678 s: point-defence missile
+  LOST Raider Frigate M15 at 18702 s: point-defence missile
+  LOST Raider Frigate M18 at 18709 s: point-defence missile
+  LOST Frigate M14 at 18725 s: point-defence missile
+  LOST Frigate M15 at 18831 s: point-defence laser
+  LOST Raider Frigate M10 at 18839 s: point-defence missile
+  LOST Raider Frigate M11 at 18842 s: point-defence missile
+  LOST Raider Frigate M14 at 18848 s: point-defence missile
+  LOST Raider Frigate M16 at 18851 s: point-defence missile
+  LOST Raider Frigate M17 at 18855 s: point-defence missile
+  LOST Raider Frigate M9 at 18869 s: point-defence missile
+  LOST Raider Frigate M13 at 18962 s: point-defence laser
+  LOST Raider Frigate M20 at 18972 s: point-defence laser
+  LOST Raider Frigate M21 at 18977 s: point-defence laser
+  LOST Frigate M11 at 18985 s: point-defence laser
+  LOST Frigate M17 at 18986 s: point-defence laser
+  LOST Raider Frigate M22 at 18986 s: point-defence laser
+  LOST Raider Frigate M12 at 19075 s: point-defence laser
+  FactionId(0) C1 = Raider Frigate err    0.000 ls  2σ    0.005 ls  light age   120 s
+  FactionId(1) C1 = Transport err    0.000 ls  2σ    1.149 ls  light age  1106 s
+  FactionId(1) C2 = Frigate   err    0.000 ls  2σ    0.006 ls  light age   121 s
+  FactionId(1) C3 = Lunar sensor station err    0.000 ls  2σ    0.253 ls  light age   596 s
+T+    720 min
+  OUTCOME FactionId(0): Raider Frigate was destroyed
+  SHIP Transport hull=100.0/100 armour=100.0 screens=0% heat=103.6PJ SRM=0 LRM=0
+  SHIP Frigate hull=910.9/1000 armour=316.5 screens=73% heat=105.3PJ SRM=0 LRM=0
+  LOST Frigate M1 at 6889 s: point-defence missile
+  LOST Raider Frigate M2 at 6963 s: point-defence missile
+  LOST Frigate M2 at 7084 s: point-defence laser
+  LOST Frigate M3 at 7231 s: point-defence missile
+  LOST Frigate M6 at 7350 s: point-defence missile
+  LOST Frigate M4 at 7433 s: point-defence laser
+  LOST Raider Frigate M3 at 7665 s: point-defence laser
+  LOST Raider Frigate M5 at 8028 s: point-defence missile
+  LOST Raider Frigate M6 at 8893 s: point-defence missile
+  LOST Frigate M7 at 18363 s: point-defence missile
+  LOST Raider Frigate M7 at 18372 s: point-defence missile
+  LOST Frigate M9 at 18521 s: point-defence missile
+  LOST Frigate M8 at 18531 s: point-defence missile
+  LOST Frigate M10 at 18598 s: point-defence missile
+  LOST Raider Frigate M8 at 18610 s: point-defence missile
+  LOST Frigate M12 at 18675 s: point-defence missile
+  LOST Frigate M13 at 18678 s: point-defence missile
+  LOST Raider Frigate M15 at 18702 s: point-defence missile
+  LOST Raider Frigate M18 at 18709 s: point-defence missile
+  LOST Frigate M14 at 18725 s: point-defence missile
+  LOST Frigate M15 at 18831 s: point-defence laser
+  LOST Raider Frigate M10 at 18839 s: point-defence missile
+  LOST Raider Frigate M11 at 18842 s: point-defence missile
+  LOST Raider Frigate M14 at 18848 s: point-defence missile
+  LOST Raider Frigate M16 at 18851 s: point-defence missile
+  LOST Raider Frigate M17 at 18855 s: point-defence missile
+  LOST Raider Frigate M9 at 18869 s: point-defence missile
+  LOST Raider Frigate M13 at 18962 s: point-defence laser
+  LOST Raider Frigate M20 at 18972 s: point-defence laser
+  LOST Raider Frigate M21 at 18977 s: point-defence laser
+  LOST Frigate M11 at 18985 s: point-defence laser
+  LOST Frigate M17 at 18986 s: point-defence laser
+  LOST Raider Frigate M22 at 18986 s: point-defence laser
+  LOST Raider Frigate M12 at 19075 s: point-defence laser
+  LOST Raider Frigate at 42847 s: ship beam
+  FactionId(0) C1 track on a lost body
+
+simulated 12.00 h in 36.22 s wall (1193× real time)

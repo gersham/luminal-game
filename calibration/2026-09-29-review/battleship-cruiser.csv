@@ -1,0 +1,9 @@
+class,seed,depth,time,winner,srm_launched,lrm_launched,srm_hits,lrm_hits,srm_hp,lrm_hp,srm_crit,lrm_crit,beam_hits,beam_hp,beam_finish,reached_beams,hull_a,hull_b,interceptors_used,interceptor_kills,pd_kills,loss_reason,final_range_au,drive_disabled_a,drive_disabled_b
+Battleship,24000,240,13110,0,72,84,0,4,-0,37.5,0,0,38,5997.127777777578,true,true,1,0,317,146,5,hull,0.04072122305643943,false,false
+Battleship,24001,240,10725,0,72,84,1,7,0,187.5,0,0,18,3988.395177514727,true,true,1,0.4901581500657434,319,140,7,reactor,0.0760754206390063,false,true
+Battleship,24002,240,10250,0,72,84,0,3,-0,75,0,0,14,5989.166666666565,true,true,1,0,327,141,12,hull,0.08612979609030247,false,true
+Battleship,24003,240,13225,0,72,84,1,3,0,37.5,0,0,39,6032.922222221761,true,true,1,0,338,138,13,hull,0.037812348058354636,false,false
+Battleship,24004,240,9295,0,72,84,0,8,-0,75,0,0,6,2096.2195954503245,true,true,1,0.7389614394575839,326,141,7,reactor,0.10431236114857122,false,true
+Battleship,24005,240,11560,0,72,84,0,4,-0,150,0,0,23,5962.51639108198,true,true,1,0,307,147,5,hull,0.061684131926640046,false,true
+Battleship,24006,240,11080,0,72,84,0,5,-0,0,0,0,21,6013.1944444442515,true,true,1,0,322,143,8,hull,0.07003241213944858,false,true
+Battleship,24007,240,10570,0,72,84,1,11,31.25,150,1,1,16,6013.188888888697,true,true,1,0,327,133,11,hull,0.07665301758127778,false,true

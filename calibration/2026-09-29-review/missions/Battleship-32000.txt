@@ -1,0 +1,1737 @@
+T+     60 min
+  SHIP Transport hull=100.0/100 armour=100.0 screens=0% heat=49.9PJ SRM=0 LRM=0
+  SHIP Battleship hull=8000.0/8000 armour=6000.0 screens=100% heat=405.4PJ SRM=48 LRM=0
+  SHIP Raider Battleship hull=8000.0/8000 armour=6000.0 screens=12% heat=404.4PJ SRM=48 LRM=0
+  FactionId(0) C1 = Raider Battleship err    0.000 ls  2σ    0.162 ls  light age   496 s
+  FactionId(0) C2 = Raider Battleship M1 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C3 = Raider Battleship M2 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C4 = Raider Battleship M3 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C5 = Raider Battleship M4 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C6 = Raider Battleship M5 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C7 = Raider Battleship M6 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C8 = Raider Battleship M7 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C9 = Raider Battleship M8 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C10 = Raider Battleship M9 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C11 = Raider Battleship M10 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C12 = Raider Battleship M11 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C13 = Raider Battleship M12 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C14 = Raider Battleship M13 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C15 = Raider Battleship M14 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C16 = Raider Battleship M15 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C17 = Raider Battleship M16 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C18 = Raider Battleship M17 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C19 = Raider Battleship M18 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C20 = Raider Battleship M19 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C21 = Raider Battleship M20 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C22 = Raider Battleship M21 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C23 = Raider Battleship M22 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C24 = Raider Battleship M23 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C25 = Raider Battleship M24 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C26 = Raider Battleship M25 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C27 = Raider Battleship M26 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C28 = Raider Battleship M27 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C29 = Raider Battleship M28 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C30 = Raider Battleship M29 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C31 = Raider Battleship M30 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C32 = Raider Battleship M31 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C33 = Raider Battleship M32 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C34 = Raider Battleship M33 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C35 = Raider Battleship M34 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C36 = Raider Battleship M35 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C37 = Raider Battleship M36 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C38 = Raider Battleship M37 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C39 = Raider Battleship M38 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C40 = Raider Battleship M39 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C41 = Raider Battleship M40 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C42 = Raider Battleship M41 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C43 = Raider Battleship M42 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C44 = Raider Battleship M43 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C45 = Raider Battleship M44 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C46 = Raider Battleship M45 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C47 = Raider Battleship M46 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C48 = Raider Battleship M47 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(0) C49 = Raider Battleship M48 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C1 = Transport err    0.000 ls  2σ    0.166 ls  light age   500 s
+  FactionId(1) C2 = Battleship err    0.000 ls  2σ    0.163 ls  light age   496 s
+  FactionId(1) C3 = Lunar sensor station err    0.000 ls  2σ    0.168 ls  light age   502 s
+  FactionId(1) C4 = Battleship M1 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C5 = Battleship M2 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C6 = Battleship M3 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C7 = Battleship M4 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C8 = Battleship M5 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C9 = Battleship M6 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C10 = Battleship M7 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C11 = Battleship M8 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C12 = Battleship M9 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C13 = Battleship M10 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C14 = Battleship M11 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C15 = Battleship M12 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C16 = Battleship M13 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C17 = Battleship M14 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C18 = Battleship M15 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C19 = Battleship M16 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C20 = Battleship M17 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C21 = Battleship M18 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C22 = Battleship M19 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C23 = Battleship M20 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C24 = Battleship M21 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C25 = Battleship M22 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C26 = Battleship M23 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C27 = Battleship M24 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C28 = Battleship M25 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C29 = Battleship M26 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C30 = Battleship M27 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C31 = Battleship M28 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C32 = Battleship M29 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C33 = Battleship M30 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C34 = Battleship M31 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C35 = Battleship M32 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C36 = Battleship M33 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C37 = Battleship M34 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C38 = Battleship M35 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C39 = Battleship M36 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C40 = Battleship M37 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C41 = Battleship M38 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C42 = Battleship M39 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C43 = Battleship M40 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C44 = Battleship M41 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C45 = Battleship M42 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C46 = Battleship M43 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C47 = Battleship M44 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C48 = Battleship M45 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C49 = Battleship M46 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C50 = Battleship M47 err    0.000 ls  2σ    0.000 ls  light age     0 s
+  FactionId(1) C51 = Battleship M48 err    0.000 ls  2σ    0.000 ls  light age     0 s
+T+    120 min
+  SHIP Transport hull=100.0/100 armour=100.0 screens=0% heat=80.2PJ SRM=0 LRM=0
+  SHIP Battleship hull=7993.8/8000 armour=5981.2 screens=98% heat=651.6PJ SRM=48 LRM=0
+  SHIP Raider Battleship hull=7923.8/8000 armour=5879.2 screens=5% heat=498.8PJ SRM=48 LRM=0
+  LOST Battleship M2 at 4722 s: point-defence missile
+  LOST Battleship M6 at 4724 s: point-defence missile
+  LOST Battleship M9 at 4832 s: point-defence missile
+  LOST Battleship M12 at 4833 s: point-defence missile
+  LOST Battleship M14 at 4834 s: point-defence missile
+  LOST Battleship M15 at 4835 s: point-defence missile
+  LOST Raider Battleship M3 at 4930 s: point-defence missile
+  LOST Battleship M17 at 4942 s: point-defence missile
+  LOST Battleship M20 at 4943 s: point-defence missile
+  LOST Battleship M21 at 4944 s: point-defence missile
+  LOST Battleship M22 at 4944 s: point-defence missile
+  LOST Battleship M24 at 4945 s: point-defence missile
+  LOST Battleship M3 at 4967 s: point-defence missile
+  LOST Battleship M4 at 4967 s: point-defence missile
+  LOST Battleship M5 at 4967 s: point-defence missile
+  LOST Battleship M1 at 5047 s: point-defence missile
+  LOST Battleship M8 at 5048 s: point-defence missile
+  LOST Battleship M31 at 5062 s: point-defence missile
+  LOST Battleship M32 at 5062 s: point-defence missile
+  LOST Battleship M10 at 5076 s: point-defence missile
+  LOST Battleship M11 at 5156 s: point-defence missile
+  LOST Raider Battleship M1 at 5171 s: point-defence missile
+  LOST Raider Battleship M7 at 5172 s: point-defence missile
+  LOST Raider Battleship M8 at 5172 s: point-defence missile
+  LOST Battleship M35 at 5180 s: point-defence missile
+  LOST Battleship M36 at 5181 s: point-defence missile
+  LOST Battleship M37 at 5181 s: point-defence missile
+  LOST Battleship M19 at 5186 s: point-defence missile
+  LOST Raider Battleship M2 at 5250 s: point-defence missile
+  LOST Raider Battleship M4 at 5250 s: point-defence missile
+  LOST Raider Battleship M5 at 5250 s: point-defence missile
+  LOST Raider Battleship M6 at 5280 s: point-defence laser
+  LOST Battleship M23 at 5287 s: point-defence laser
+  LOST Raider Battleship M11 at 5289 s: point-defence missile
+  LOST Raider Battleship M14 at 5291 s: point-defence missile
+  LOST Battleship M18 at 5291 s: point-defence laser
+  LOST Raider Battleship M15 at 5291 s: point-defence missile
+  LOST Raider Battleship M16 at 5292 s: point-defence missile
+  LOST Battleship M27 at 5302 s: point-defence missile
+  LOST Battleship M47 at 5302 s: point-defence missile
+  LOST Battleship M28 at 5303 s: point-defence missile
+  LOST Battleship M30 at 5303 s: point-defence missile
+  LOST Battleship M25 at 5381 s: point-defence missile
+  LOST Battleship M29 at 5404 s: point-defence laser
+  LOST Battleship M26 at 5407 s: point-defence missile
+  LOST Battleship M33 at 5422 s: point-defence missile
+  LOST Battleship M34 at 5423 s: point-defence missile
+  LOST Battleship M38 at 5423 s: point-defence missile
+  LOST Battleship M40 at 5424 s: point-defence missile
+  LOST Raider Battleship M12 at 5531 s: point-defence missile
+  LOST Raider Battleship M13 at 5531 s: point-defence missile
+  LOST Raider Battleship M9 at 5609 s: point-defence missile
+  LOST Raider Battleship M10 at 5609 s: point-defence missile
+  LOST Battleship M41 at 5622 s: point-defence missile
+  LOST Battleship M42 at 5623 s: point-defence missile
+  LOST Battleship M45 at 5624 s: point-defence missile
+  LOST Battleship M46 at 5624 s: point-defence missile
+  LOST Battleship M48 at 5625 s: point-defence missile
+  LOST Raider Battleship M18 at 5639 s: point-defence missile
+  LOST Raider Battleship M19 at 5639 s: point-defence missile
+  LOST Raider Battleship M20 at 5640 s: point-defence missile
+  LOST Raider Battleship M21 at 5640 s: point-defence missile
+  LOST Raider Battleship M22 at 5641 s: point-defence missile
+  LOST Raider Battleship M24 at 5642 s: point-defence missile
+  LOST Raider Battleship M23 at 5880 s: point-defence missile
+  LOST Raider Battleship M26 at 5964 s: point-defence missile
+  LOST Raider Battleship M27 at 5964 s: point-defence missile
+  LOST Raider Battleship M28 at 5965 s: point-defence missile
+  LOST Raider Battleship M29 at 5965 s: point-defence missile
+  LOST Raider Battleship M25 at 6202 s: point-defence missile
+  LOST Raider Battleship M30 at 6202 s: point-defence missile
+  LOST Raider Battleship M32 at 6280 s: point-defence missile
+  LOST Raider Battleship M34 at 6287 s: point-defence missile
+  LOST Raider Battleship M36 at 6288 s: point-defence missile
+  LOST Raider Battleship M38 at 6289 s: point-defence missile
+  LOST Raider Battleship M31 at 6305 s: point-defence laser
+  LOST Raider Battleship M33 at 6599 s: point-defence missile
+  LOST Raider Battleship M35 at 6600 s: point-defence missile
+  LOST Raider Battleship M47 at 6610 s: point-defence missile
+  LOST Raider Battleship M48 at 6611 s: point-defence missile
+  LOST Raider Battleship M39 at 6629 s: point-defence laser
+  LOST Raider Battleship M37 at 6632 s: point-defence laser
+  LOST Raider Battleship M41 at 6841 s: point-defence missile
+  LOST Raider Battleship M43 at 6842 s: point-defence missile
+  LOST Raider Battleship M46 at 6843 s: point-defence missile
+  LOST Raider Battleship M44 at 6917 s: point-defence missile
+  LOST Raider Battleship M42 at 6936 s: point-defence laser
+  LOST Raider Battleship M45 at 6941 s: point-defence laser
+  FactionId(0) C1 = Raider Battleship err    0.007 ls  2σ    0.128 ls  light age   450 s
+  FactionId(1) C1 = Transport err    0.000 ls  2σ    0.137 ls  light age   463 s
+  FactionId(1) C2 = Battleship err    0.001 ls  2σ    0.123 ls  light age   451 s
+  FactionId(1) C3 = Lunar sensor station err    0.000 ls  2σ    0.151 ls  light age   481 s
+T+    180 min
+  SHIP Transport hull=100.0/100 armour=100.0 screens=0% heat=98.7PJ SRM=0 LRM=0
+  SHIP Battleship hull=8000.0/8000 armour=5981.2 screens=100% heat=800.6PJ SRM=48 LRM=0
+  SHIP Raider Battleship hull=8000.0/8000 armour=5879.2 screens=17% heat=586.6PJ SRM=48 LRM=0
+  LOST Battleship M2 at 4722 s: point-defence missile
+  LOST Battleship M6 at 4724 s: point-defence missile
+  LOST Battleship M9 at 4832 s: point-defence missile
+  LOST Battleship M12 at 4833 s: point-defence missile
+  LOST Battleship M14 at 4834 s: point-defence missile
+  LOST Battleship M15 at 4835 s: point-defence missile
+  LOST Raider Battleship M3 at 4930 s: point-defence missile
+  LOST Battleship M17 at 4942 s: point-defence missile
+  LOST Battleship M20 at 4943 s: point-defence missile
+  LOST Battleship M21 at 4944 s: point-defence missile
+  LOST Battleship M22 at 4944 s: point-defence missile
+  LOST Battleship M24 at 4945 s: point-defence missile
+  LOST Battleship M3 at 4967 s: point-defence missile
+  LOST Battleship M4 at 4967 s: point-defence missile
+  LOST Battleship M5 at 4967 s: point-defence missile
+  LOST Battleship M1 at 5047 s: point-defence missile
+  LOST Battleship M8 at 5048 s: point-defence missile
+  LOST Battleship M31 at 5062 s: point-defence missile
+  LOST Battleship M32 at 5062 s: point-defence missile
+  LOST Battleship M10 at 5076 s: point-defence missile
+  LOST Battleship M11 at 5156 s: point-defence missile
+  LOST Raider Battleship M1 at 5171 s: point-defence missile
+  LOST Raider Battleship M7 at 5172 s: point-defence missile
+  LOST Raider Battleship M8 at 5172 s: point-defence missile
+  LOST Battleship M35 at 5180 s: point-defence missile
+  LOST Battleship M36 at 5181 s: point-defence missile
+  LOST Battleship M37 at 5181 s: point-defence missile
+  LOST Battleship M19 at 5186 s: point-defence missile
+  LOST Raider Battleship M2 at 5250 s: point-defence missile
+  LOST Raider Battleship M4 at 5250 s: point-defence missile
+  LOST Raider Battleship M5 at 5250 s: point-defence missile
+  LOST Raider Battleship M6 at 5280 s: point-defence laser
+  LOST Battleship M23 at 5287 s: point-defence laser
+  LOST Raider Battleship M11 at 5289 s: point-defence missile
+  LOST Raider Battleship M14 at 5291 s: point-defence missile
+  LOST Battleship M18 at 5291 s: point-defence laser
+  LOST Raider Battleship M15 at 5291 s: point-defence missile
+  LOST Raider Battleship M16 at 5292 s: point-defence missile
+  LOST Battleship M27 at 5302 s: point-defence missile
+  LOST Battleship M47 at 5302 s: point-defence missile
+  LOST Battleship M28 at 5303 s: point-defence missile
+  LOST Battleship M30 at 5303 s: point-defence missile
+  LOST Battleship M25 at 5381 s: point-defence missile
+  LOST Battleship M29 at 5404 s: point-defence laser
+  LOST Battleship M26 at 5407 s: point-defence missile
+  LOST Battleship M33 at 5422 s: point-defence missile
+  LOST Battleship M34 at 5423 s: point-defence missile
+  LOST Battleship M38 at 5423 s: point-defence missile
+  LOST Battleship M40 at 5424 s: point-defence missile
+  LOST Raider Battleship M12 at 5531 s: point-defence missile
+  LOST Raider Battleship M13 at 5531 s: point-defence missile
+  LOST Raider Battleship M9 at 5609 s: point-defence missile
+  LOST Raider Battleship M10 at 5609 s: point-defence missile
+  LOST Battleship M41 at 5622 s: point-defence missile
+  LOST Battleship M42 at 5623 s: point-defence missile
+  LOST Battleship M45 at 5624 s: point-defence missile
+  LOST Battleship M46 at 5624 s: point-defence missile
+  LOST Battleship M48 at 5625 s: point-defence missile
+  LOST Raider Battleship M18 at 5639 s: point-defence missile
+  LOST Raider Battleship M19 at 5639 s: point-defence missile
+  LOST Raider Battleship M20 at 5640 s: point-defence missile
+  LOST Raider Battleship M21 at 5640 s: point-defence missile
+  LOST Raider Battleship M22 at 5641 s: point-defence missile
+  LOST Raider Battleship M24 at 5642 s: point-defence missile
+  LOST Raider Battleship M23 at 5880 s: point-defence missile
+  LOST Raider Battleship M26 at 5964 s: point-defence missile
+  LOST Raider Battleship M27 at 5964 s: point-defence missile
+  LOST Raider Battleship M28 at 5965 s: point-defence missile
+  LOST Raider Battleship M29 at 5965 s: point-defence missile
+  LOST Raider Battleship M25 at 6202 s: point-defence missile
+  LOST Raider Battleship M30 at 6202 s: point-defence missile
+  LOST Raider Battleship M32 at 6280 s: point-defence missile
+  LOST Raider Battleship M34 at 6287 s: point-defence missile
+  LOST Raider Battleship M36 at 6288 s: point-defence missile
+  LOST Raider Battleship M38 at 6289 s: point-defence missile
+  LOST Raider Battleship M31 at 6305 s: point-defence laser
+  LOST Raider Battleship M33 at 6599 s: point-defence missile
+  LOST Raider Battleship M35 at 6600 s: point-defence missile
+  LOST Raider Battleship M47 at 6610 s: point-defence missile
+  LOST Raider Battleship M48 at 6611 s: point-defence missile
+  LOST Raider Battleship M39 at 6629 s: point-defence laser
+  LOST Raider Battleship M37 at 6632 s: point-defence laser
+  LOST Raider Battleship M41 at 6841 s: point-defence missile
+  LOST Raider Battleship M43 at 6842 s: point-defence missile
+  LOST Raider Battleship M46 at 6843 s: point-defence missile
+  LOST Raider Battleship M44 at 6917 s: point-defence missile
+  LOST Raider Battleship M42 at 6936 s: point-defence laser
+  LOST Raider Battleship M45 at 6941 s: point-defence laser
+  FactionId(0) C1 = Raider Battleship err    0.000 ls  2σ    0.078 ls  light age   367 s
+  FactionId(1) C1 = Transport err    0.000 ls  2σ    0.094 ls  light age   398 s
+  FactionId(1) C2 = Battleship err    0.002 ls  2σ    0.079 ls  light age   369 s
+  FactionId(1) C3 = Lunar sensor station err    0.000 ls  2σ    0.125 ls  light age   446 s
+T+    240 min
+  SHIP Transport hull=100.0/100 armour=100.0 screens=0% heat=103.4PJ SRM=0 LRM=0
+  SHIP Battleship hull=8000.0/8000 armour=5981.2 screens=100% heat=829.5PJ SRM=48 LRM=0
+  SHIP Raider Battleship hull=8000.0/8000 armour=5879.2 screens=29% heat=761.2PJ SRM=48 LRM=0
+  LOST Battleship M2 at 4722 s: point-defence missile
+  LOST Battleship M6 at 4724 s: point-defence missile
+  LOST Battleship M9 at 4832 s: point-defence missile
+  LOST Battleship M12 at 4833 s: point-defence missile
+  LOST Battleship M14 at 4834 s: point-defence missile
+  LOST Battleship M15 at 4835 s: point-defence missile
+  LOST Raider Battleship M3 at 4930 s: point-defence missile
+  LOST Battleship M17 at 4942 s: point-defence missile
+  LOST Battleship M20 at 4943 s: point-defence missile
+  LOST Battleship M21 at 4944 s: point-defence missile
+  LOST Battleship M22 at 4944 s: point-defence missile
+  LOST Battleship M24 at 4945 s: point-defence missile
+  LOST Battleship M3 at 4967 s: point-defence missile
+  LOST Battleship M4 at 4967 s: point-defence missile
+  LOST Battleship M5 at 4967 s: point-defence missile
+  LOST Battleship M1 at 5047 s: point-defence missile
+  LOST Battleship M8 at 5048 s: point-defence missile
+  LOST Battleship M31 at 5062 s: point-defence missile
+  LOST Battleship M32 at 5062 s: point-defence missile
+  LOST Battleship M10 at 5076 s: point-defence missile
+  LOST Battleship M11 at 5156 s: point-defence missile
+  LOST Raider Battleship M1 at 5171 s: point-defence missile
+  LOST Raider Battleship M7 at 5172 s: point-defence missile
+  LOST Raider Battleship M8 at 5172 s: point-defence missile
+  LOST Battleship M35 at 5180 s: point-defence missile
+  LOST Battleship M36 at 5181 s: point-defence missile
+  LOST Battleship M37 at 5181 s: point-defence missile
+  LOST Battleship M19 at 5186 s: point-defence missile
+  LOST Raider Battleship M2 at 5250 s: point-defence missile
+  LOST Raider Battleship M4 at 5250 s: point-defence missile
+  LOST Raider Battleship M5 at 5250 s: point-defence missile
+  LOST Raider Battleship M6 at 5280 s: point-defence laser
+  LOST Battleship M23 at 5287 s: point-defence laser
+  LOST Raider Battleship M11 at 5289 s: point-defence missile
+  LOST Raider Battleship M14 at 5291 s: point-defence missile
+  LOST Battleship M18 at 5291 s: point-defence laser
+  LOST Raider Battleship M15 at 5291 s: point-defence missile
+  LOST Raider Battleship M16 at 5292 s: point-defence missile
+  LOST Battleship M27 at 5302 s: point-defence missile
+  LOST Battleship M47 at 5302 s: point-defence missile
+  LOST Battleship M28 at 5303 s: point-defence missile
+  LOST Battleship M30 at 5303 s: point-defence missile
+  LOST Battleship M25 at 5381 s: point-defence missile
+  LOST Battleship M29 at 5404 s: point-defence laser
+  LOST Battleship M26 at 5407 s: point-defence missile
+  LOST Battleship M33 at 5422 s: point-defence missile
+  LOST Battleship M34 at 5423 s: point-defence missile
+  LOST Battleship M38 at 5423 s: point-defence missile
+  LOST Battleship M40 at 5424 s: point-defence missile
+  LOST Raider Battleship M12 at 5531 s: point-defence missile
+  LOST Raider Battleship M13 at 5531 s: point-defence missile
+  LOST Raider Battleship M9 at 5609 s: point-defence missile
+  LOST Raider Battleship M10 at 5609 s: point-defence missile
+  LOST Battleship M41 at 5622 s: point-defence missile
+  LOST Battleship M42 at 5623 s: point-defence missile
+  LOST Battleship M45 at 5624 s: point-defence missile
+  LOST Battleship M46 at 5624 s: point-defence missile
+  LOST Battleship M48 at 5625 s: point-defence missile
+  LOST Raider Battleship M18 at 5639 s: point-defence missile
+  LOST Raider Battleship M19 at 5639 s: point-defence missile
+  LOST Raider Battleship M20 at 5640 s: point-defence missile
+  LOST Raider Battleship M21 at 5640 s: point-defence missile
+  LOST Raider Battleship M22 at 5641 s: point-defence missile
+  LOST Raider Battleship M24 at 5642 s: point-defence missile
+  LOST Raider Battleship M23 at 5880 s: point-defence missile
+  LOST Raider Battleship M26 at 5964 s: point-defence missile
+  LOST Raider Battleship M27 at 5964 s: point-defence missile
+  LOST Raider Battleship M28 at 5965 s: point-defence missile
+  LOST Raider Battleship M29 at 5965 s: point-defence missile
+  LOST Raider Battleship M25 at 6202 s: point-defence missile
+  LOST Raider Battleship M30 at 6202 s: point-defence missile
+  LOST Raider Battleship M32 at 6280 s: point-defence missile
+  LOST Raider Battleship M34 at 6287 s: point-defence missile
+  LOST Raider Battleship M36 at 6288 s: point-defence missile
+  LOST Raider Battleship M38 at 6289 s: point-defence missile
+  LOST Raider Battleship M31 at 6305 s: point-defence laser
+  LOST Raider Battleship M33 at 6599 s: point-defence missile
+  LOST Raider Battleship M35 at 6600 s: point-defence missile
+  LOST Raider Battleship M47 at 6610 s: point-defence missile
+  LOST Raider Battleship M48 at 6611 s: point-defence missile
+  LOST Raider Battleship M39 at 6629 s: point-defence laser
+  LOST Raider Battleship M37 at 6632 s: point-defence laser
+  LOST Raider Battleship M41 at 6841 s: point-defence missile
+  LOST Raider Battleship M43 at 6842 s: point-defence missile
+  LOST Raider Battleship M46 at 6843 s: point-defence missile
+  LOST Raider Battleship M44 at 6917 s: point-defence missile
+  LOST Raider Battleship M42 at 6936 s: point-defence laser
+  LOST Raider Battleship M45 at 6941 s: point-defence laser
+  FactionId(0) C1 = Raider Battleship err    0.000 ls  2σ    0.038 ls  light age   274 s
+  FactionId(1) C1 = Transport err    0.000 ls  2σ    0.063 ls  light age   339 s
+  FactionId(1) C2 = Battleship err    0.000 ls  2σ    0.040 ls  light age   279 s
+T+    300 min
+  SHIP Transport hull=100.0/100 armour=100.0 screens=0% heat=103.5PJ SRM=0 LRM=0
+  SHIP Battleship hull=8000.0/8000 armour=5981.2 screens=100% heat=830.3PJ SRM=48 LRM=0
+  SHIP Raider Battleship hull=8000.0/8000 armour=5879.2 screens=41% heat=655.5PJ SRM=48 LRM=0
+  LOST Battleship M2 at 4722 s: point-defence missile
+  LOST Battleship M6 at 4724 s: point-defence missile
+  LOST Battleship M9 at 4832 s: point-defence missile
+  LOST Battleship M12 at 4833 s: point-defence missile
+  LOST Battleship M14 at 4834 s: point-defence missile
+  LOST Battleship M15 at 4835 s: point-defence missile
+  LOST Raider Battleship M3 at 4930 s: point-defence missile
+  LOST Battleship M17 at 4942 s: point-defence missile
+  LOST Battleship M20 at 4943 s: point-defence missile
+  LOST Battleship M21 at 4944 s: point-defence missile
+  LOST Battleship M22 at 4944 s: point-defence missile
+  LOST Battleship M24 at 4945 s: point-defence missile
+  LOST Battleship M3 at 4967 s: point-defence missile
+  LOST Battleship M4 at 4967 s: point-defence missile
+  LOST Battleship M5 at 4967 s: point-defence missile
+  LOST Battleship M1 at 5047 s: point-defence missile
+  LOST Battleship M8 at 5048 s: point-defence missile
+  LOST Battleship M31 at 5062 s: point-defence missile
+  LOST Battleship M32 at 5062 s: point-defence missile
+  LOST Battleship M10 at 5076 s: point-defence missile
+  LOST Battleship M11 at 5156 s: point-defence missile
+  LOST Raider Battleship M1 at 5171 s: point-defence missile
+  LOST Raider Battleship M7 at 5172 s: point-defence missile
+  LOST Raider Battleship M8 at 5172 s: point-defence missile
+  LOST Battleship M35 at 5180 s: point-defence missile
+  LOST Battleship M36 at 5181 s: point-defence missile
+  LOST Battleship M37 at 5181 s: point-defence missile
+  LOST Battleship M19 at 5186 s: point-defence missile
+  LOST Raider Battleship M2 at 5250 s: point-defence missile
+  LOST Raider Battleship M4 at 5250 s: point-defence missile
+  LOST Raider Battleship M5 at 5250 s: point-defence missile
+  LOST Raider Battleship M6 at 5280 s: point-defence laser
+  LOST Battleship M23 at 5287 s: point-defence laser
+  LOST Raider Battleship M11 at 5289 s: point-defence missile
+  LOST Raider Battleship M14 at 5291 s: point-defence missile
+  LOST Battleship M18 at 5291 s: point-defence laser
+  LOST Raider Battleship M15 at 5291 s: point-defence missile
+  LOST Raider Battleship M16 at 5292 s: point-defence missile
+  LOST Battleship M27 at 5302 s: point-defence missile
+  LOST Battleship M47 at 5302 s: point-defence missile
+  LOST Battleship M28 at 5303 s: point-defence missile
+  LOST Battleship M30 at 5303 s: point-defence missile
+  LOST Battleship M25 at 5381 s: point-defence missile
+  LOST Battleship M29 at 5404 s: point-defence laser
+  LOST Battleship M26 at 5407 s: point-defence missile
+  LOST Battleship M33 at 5422 s: point-defence missile
+  LOST Battleship M34 at 5423 s: point-defence missile
+  LOST Battleship M38 at 5423 s: point-defence missile
+  LOST Battleship M40 at 5424 s: point-defence missile
+  LOST Raider Battleship M12 at 5531 s: point-defence missile
+  LOST Raider Battleship M13 at 5531 s: point-defence missile
+  LOST Raider Battleship M9 at 5609 s: point-defence missile
+  LOST Raider Battleship M10 at 5609 s: point-defence missile
+  LOST Battleship M41 at 5622 s: point-defence missile
+  LOST Battleship M42 at 5623 s: point-defence missile
+  LOST Battleship M45 at 5624 s: point-defence missile
+  LOST Battleship M46 at 5624 s: point-defence missile
+  LOST Battleship M48 at 5625 s: point-defence missile
+  LOST Raider Battleship M18 at 5639 s: point-defence missile
+  LOST Raider Battleship M19 at 5639 s: point-defence missile
+  LOST Raider Battleship M20 at 5640 s: point-defence missile
+  LOST Raider Battleship M21 at 5640 s: point-defence missile
+  LOST Raider Battleship M22 at 5641 s: point-defence missile
+  LOST Raider Battleship M24 at 5642 s: point-defence missile
+  LOST Raider Battleship M23 at 5880 s: point-defence missile
+  LOST Raider Battleship M26 at 5964 s: point-defence missile
+  LOST Raider Battleship M27 at 5964 s: point-defence missile
+  LOST Raider Battleship M28 at 5965 s: point-defence missile
+  LOST Raider Battleship M29 at 5965 s: point-defence missile
+  LOST Raider Battleship M25 at 6202 s: point-defence missile
+  LOST Raider Battleship M30 at 6202 s: point-defence missile
+  LOST Raider Battleship M32 at 6280 s: point-defence missile
+  LOST Raider Battleship M34 at 6287 s: point-defence missile
+  LOST Raider Battleship M36 at 6288 s: point-defence missile
+  LOST Raider Battleship M38 at 6289 s: point-defence missile
+  LOST Raider Battleship M31 at 6305 s: point-defence laser
+  LOST Raider Battleship M33 at 6599 s: point-defence missile
+  LOST Raider Battleship M35 at 6600 s: point-defence missile
+  LOST Raider Battleship M47 at 6610 s: point-defence missile
+  LOST Raider Battleship M48 at 6611 s: point-defence missile
+  LOST Raider Battleship M39 at 6629 s: point-defence laser
+  LOST Raider Battleship M37 at 6632 s: point-defence laser
+  LOST Raider Battleship M41 at 6841 s: point-defence missile
+  LOST Raider Battleship M43 at 6842 s: point-defence missile
+  LOST Raider Battleship M46 at 6843 s: point-defence missile
+  LOST Raider Battleship M44 at 6917 s: point-defence missile
+  LOST Raider Battleship M42 at 6936 s: point-defence laser
+  LOST Raider Battleship M45 at 6941 s: point-defence laser
+  FactionId(0) C1 = Raider Battleship err    0.000 ls  2σ    0.014 ls  light age   182 s
+  FactionId(1) C1 = Transport err    0.000 ls  2σ    0.050 ls  light age   305 s
+  FactionId(1) C2 = Battleship err    0.002 ls  2σ    0.015 ls  light age   188 s
+  FactionId(1) C3 = Lunar sensor station err    0.000 ls  2σ    0.109 ls  light age   421 s
+T+    360 min
+  SHIP Transport hull=100.0/100 armour=100.0 screens=0% heat=103.6PJ SRM=0 LRM=0
+  SHIP Battleship hull=8000.0/8000 armour=5981.2 screens=100% heat=830.3PJ SRM=48 LRM=0
+  SHIP Raider Battleship hull=8000.0/8000 armour=5879.2 screens=53% heat=514.8PJ SRM=48 LRM=0
+  LOST Battleship M2 at 4722 s: point-defence missile
+  LOST Battleship M6 at 4724 s: point-defence missile
+  LOST Battleship M9 at 4832 s: point-defence missile
+  LOST Battleship M12 at 4833 s: point-defence missile
+  LOST Battleship M14 at 4834 s: point-defence missile
+  LOST Battleship M15 at 4835 s: point-defence missile
+  LOST Raider Battleship M3 at 4930 s: point-defence missile
+  LOST Battleship M17 at 4942 s: point-defence missile
+  LOST Battleship M20 at 4943 s: point-defence missile
+  LOST Battleship M21 at 4944 s: point-defence missile
+  LOST Battleship M22 at 4944 s: point-defence missile
+  LOST Battleship M24 at 4945 s: point-defence missile
+  LOST Battleship M3 at 4967 s: point-defence missile
+  LOST Battleship M4 at 4967 s: point-defence missile
+  LOST Battleship M5 at 4967 s: point-defence missile
+  LOST Battleship M1 at 5047 s: point-defence missile
+  LOST Battleship M8 at 5048 s: point-defence missile
+  LOST Battleship M31 at 5062 s: point-defence missile
+  LOST Battleship M32 at 5062 s: point-defence missile
+  LOST Battleship M10 at 5076 s: point-defence missile
+  LOST Battleship M11 at 5156 s: point-defence missile
+  LOST Raider Battleship M1 at 5171 s: point-defence missile
+  LOST Raider Battleship M7 at 5172 s: point-defence missile
+  LOST Raider Battleship M8 at 5172 s: point-defence missile
+  LOST Battleship M35 at 5180 s: point-defence missile
+  LOST Battleship M36 at 5181 s: point-defence missile
+  LOST Battleship M37 at 5181 s: point-defence missile
+  LOST Battleship M19 at 5186 s: point-defence missile
+  LOST Raider Battleship M2 at 5250 s: point-defence missile
+  LOST Raider Battleship M4 at 5250 s: point-defence missile
+  LOST Raider Battleship M5 at 5250 s: point-defence missile
+  LOST Raider Battleship M6 at 5280 s: point-defence laser
+  LOST Battleship M23 at 5287 s: point-defence laser
+  LOST Raider Battleship M11 at 5289 s: point-defence missile
+  LOST Raider Battleship M14 at 5291 s: point-defence missile
+  LOST Battleship M18 at 5291 s: point-defence laser
+  LOST Raider Battleship M15 at 5291 s: point-defence missile
+  LOST Raider Battleship M16 at 5292 s: point-defence missile
+  LOST Battleship M27 at 5302 s: point-defence missile
+  LOST Battleship M47 at 5302 s: point-defence missile
+  LOST Battleship M28 at 5303 s: point-defence missile
+  LOST Battleship M30 at 5303 s: point-defence missile
+  LOST Battleship M25 at 5381 s: point-defence missile
+  LOST Battleship M29 at 5404 s: point-defence laser
+  LOST Battleship M26 at 5407 s: point-defence missile
+  LOST Battleship M33 at 5422 s: point-defence missile
+  LOST Battleship M34 at 5423 s: point-defence missile
+  LOST Battleship M38 at 5423 s: point-defence missile
+  LOST Battleship M40 at 5424 s: point-defence missile
+  LOST Raider Battleship M12 at 5531 s: point-defence missile
+  LOST Raider Battleship M13 at 5531 s: point-defence missile
+  LOST Raider Battleship M9 at 5609 s: point-defence missile
+  LOST Raider Battleship M10 at 5609 s: point-defence missile
+  LOST Battleship M41 at 5622 s: point-defence missile
+  LOST Battleship M42 at 5623 s: point-defence missile
+  LOST Battleship M45 at 5624 s: point-defence missile
+  LOST Battleship M46 at 5624 s: point-defence missile
+  LOST Battleship M48 at 5625 s: point-defence missile
+  LOST Raider Battleship M18 at 5639 s: point-defence missile
+  LOST Raider Battleship M19 at 5639 s: point-defence missile
+  LOST Raider Battleship M20 at 5640 s: point-defence missile
+  LOST Raider Battleship M21 at 5640 s: point-defence missile
+  LOST Raider Battleship M22 at 5641 s: point-defence missile
+  LOST Raider Battleship M24 at 5642 s: point-defence missile
+  LOST Raider Battleship M23 at 5880 s: point-defence missile
+  LOST Raider Battleship M26 at 5964 s: point-defence missile
+  LOST Raider Battleship M27 at 5964 s: point-defence missile
+  LOST Raider Battleship M28 at 5965 s: point-defence missile
+  LOST Raider Battleship M29 at 5965 s: point-defence missile
+  LOST Raider Battleship M25 at 6202 s: point-defence missile
+  LOST Raider Battleship M30 at 6202 s: point-defence missile
+  LOST Raider Battleship M32 at 6280 s: point-defence missile
+  LOST Raider Battleship M34 at 6287 s: point-defence missile
+  LOST Raider Battleship M36 at 6288 s: point-defence missile
+  LOST Raider Battleship M38 at 6289 s: point-defence missile
+  LOST Raider Battleship M31 at 6305 s: point-defence laser
+  LOST Raider Battleship M33 at 6599 s: point-defence missile
+  LOST Raider Battleship M35 at 6600 s: point-defence missile
+  LOST Raider Battleship M47 at 6610 s: point-defence missile
+  LOST Raider Battleship M48 at 6611 s: point-defence missile
+  LOST Raider Battleship M39 at 6629 s: point-defence laser
+  LOST Raider Battleship M37 at 6632 s: point-defence laser
+  LOST Raider Battleship M41 at 6841 s: point-defence missile
+  LOST Raider Battleship M43 at 6842 s: point-defence missile
+  LOST Raider Battleship M46 at 6843 s: point-defence missile
+  LOST Raider Battleship M44 at 6917 s: point-defence missile
+  LOST Raider Battleship M42 at 6936 s: point-defence laser
+  LOST Raider Battleship M45 at 6941 s: point-defence laser
+  FactionId(0) C1 = Raider Battleship err    0.000 ls  2σ    0.002 ls  light age    86 s
+  FactionId(1) C1 = Transport err    0.000 ls  2σ    0.050 ls  light age   305 s
+  FactionId(1) C2 = Battleship err    0.000 ls  2σ    0.003 ls  light age    89 s
+  FactionId(1) C3 = Lunar sensor station err    0.000 ls  2σ    0.116 ls  light age   433 s
+T+    420 min
+  SHIP Transport hull=100.0/100 armour=100.0 screens=0% heat=103.6PJ SRM=0 LRM=0
+  SHIP Battleship hull=5204.5/8000 armour=3185.0 screens=1% heat=772.6PJ SRM=0 LRM=0
+  SHIP Raider Battleship hull=7414.3/8000 armour=5281.4 screens=2% heat=552.0PJ SRM=0 LRM=0
+  LOST Battleship M2 at 4722 s: point-defence missile
+  LOST Battleship M6 at 4724 s: point-defence missile
+  LOST Battleship M9 at 4832 s: point-defence missile
+  LOST Battleship M12 at 4833 s: point-defence missile
+  LOST Battleship M14 at 4834 s: point-defence missile
+  LOST Battleship M15 at 4835 s: point-defence missile
+  LOST Raider Battleship M3 at 4930 s: point-defence missile
+  LOST Battleship M17 at 4942 s: point-defence missile
+  LOST Battleship M20 at 4943 s: point-defence missile
+  LOST Battleship M21 at 4944 s: point-defence missile
+  LOST Battleship M22 at 4944 s: point-defence missile
+  LOST Battleship M24 at 4945 s: point-defence missile
+  LOST Battleship M3 at 4967 s: point-defence missile
+  LOST Battleship M4 at 4967 s: point-defence missile
+  LOST Battleship M5 at 4967 s: point-defence missile
+  LOST Battleship M1 at 5047 s: point-defence missile
+  LOST Battleship M8 at 5048 s: point-defence missile
+  LOST Battleship M31 at 5062 s: point-defence missile
+  LOST Battleship M32 at 5062 s: point-defence missile
+  LOST Battleship M10 at 5076 s: point-defence missile
+  LOST Battleship M11 at 5156 s: point-defence missile
+  LOST Raider Battleship M1 at 5171 s: point-defence missile
+  LOST Raider Battleship M7 at 5172 s: point-defence missile
+  LOST Raider Battleship M8 at 5172 s: point-defence missile
+  LOST Battleship M35 at 5180 s: point-defence missile
+  LOST Battleship M36 at 5181 s: point-defence missile
+  LOST Battleship M37 at 5181 s: point-defence missile
+  LOST Battleship M19 at 5186 s: point-defence missile
+  LOST Raider Battleship M2 at 5250 s: point-defence missile
+  LOST Raider Battleship M4 at 5250 s: point-defence missile
+  LOST Raider Battleship M5 at 5250 s: point-defence missile
+  LOST Raider Battleship M6 at 5280 s: point-defence laser
+  LOST Battleship M23 at 5287 s: point-defence laser
+  LOST Raider Battleship M11 at 5289 s: point-defence missile
+  LOST Raider Battleship M14 at 5291 s: point-defence missile
+  LOST Battleship M18 at 5291 s: point-defence laser
+  LOST Raider Battleship M15 at 5291 s: point-defence missile
+  LOST Raider Battleship M16 at 5292 s: point-defence missile
+  LOST Battleship M27 at 5302 s: point-defence missile
+  LOST Battleship M47 at 5302 s: point-defence missile
+  LOST Battleship M28 at 5303 s: point-defence missile
+  LOST Battleship M30 at 5303 s: point-defence missile
+  LOST Battleship M25 at 5381 s: point-defence missile
+  LOST Battleship M29 at 5404 s: point-defence laser
+  LOST Battleship M26 at 5407 s: point-defence missile
+  LOST Battleship M33 at 5422 s: point-defence missile
+  LOST Battleship M34 at 5423 s: point-defence missile
+  LOST Battleship M38 at 5423 s: point-defence missile
+  LOST Battleship M40 at 5424 s: point-defence missile
+  LOST Raider Battleship M12 at 5531 s: point-defence missile
+  LOST Raider Battleship M13 at 5531 s: point-defence missile
+  LOST Raider Battleship M9 at 5609 s: point-defence missile
+  LOST Raider Battleship M10 at 5609 s: point-defence missile
+  LOST Battleship M41 at 5622 s: point-defence missile
+  LOST Battleship M42 at 5623 s: point-defence missile
+  LOST Battleship M45 at 5624 s: point-defence missile
+  LOST Battleship M46 at 5624 s: point-defence missile
+  LOST Battleship M48 at 5625 s: point-defence missile
+  LOST Raider Battleship M18 at 5639 s: point-defence missile
+  LOST Raider Battleship M19 at 5639 s: point-defence missile
+  LOST Raider Battleship M20 at 5640 s: point-defence missile
+  LOST Raider Battleship M21 at 5640 s: point-defence missile
+  LOST Raider Battleship M22 at 5641 s: point-defence missile
+  LOST Raider Battleship M24 at 5642 s: point-defence missile
+  LOST Raider Battleship M23 at 5880 s: point-defence missile
+  LOST Raider Battleship M26 at 5964 s: point-defence missile
+  LOST Raider Battleship M27 at 5964 s: point-defence missile
+  LOST Raider Battleship M28 at 5965 s: point-defence missile
+  LOST Raider Battleship M29 at 5965 s: point-defence missile
+  LOST Raider Battleship M25 at 6202 s: point-defence missile
+  LOST Raider Battleship M30 at 6202 s: point-defence missile
+  LOST Raider Battleship M32 at 6280 s: point-defence missile
+  LOST Raider Battleship M34 at 6287 s: point-defence missile
+  LOST Raider Battleship M36 at 6288 s: point-defence missile
+  LOST Raider Battleship M38 at 6289 s: point-defence missile
+  LOST Raider Battleship M31 at 6305 s: point-defence laser
+  LOST Raider Battleship M33 at 6599 s: point-defence missile
+  LOST Raider Battleship M35 at 6600 s: point-defence missile
+  LOST Raider Battleship M47 at 6610 s: point-defence missile
+  LOST Raider Battleship M48 at 6611 s: point-defence missile
+  LOST Raider Battleship M39 at 6629 s: point-defence laser
+  LOST Raider Battleship M37 at 6632 s: point-defence laser
+  LOST Raider Battleship M41 at 6841 s: point-defence missile
+  LOST Raider Battleship M43 at 6842 s: point-defence missile
+  LOST Raider Battleship M46 at 6843 s: point-defence missile
+  LOST Raider Battleship M44 at 6917 s: point-defence missile
+  LOST Raider Battleship M42 at 6936 s: point-defence laser
+  LOST Raider Battleship M45 at 6941 s: point-defence laser
+  LOST Battleship M57 at 22677 s: point-defence missile
+  LOST Battleship M52 at 22678 s: point-defence missile
+  LOST Battleship M58 at 22679 s: point-defence missile
+  LOST Battleship M51 at 22679 s: point-defence missile
+  LOST Battleship M59 at 22680 s: point-defence missile
+  LOST Battleship M50 at 22681 s: point-defence missile
+  LOST Raider Battleship M52 at 22778 s: point-defence missile
+  LOST Battleship M69 at 22778 s: point-defence missile
+  LOST Raider Battleship M57 at 22779 s: point-defence missile
+  LOST Battleship M64 at 22779 s: point-defence missile
+  LOST Raider Battleship M51 at 22779 s: point-defence missile
+  LOST Battleship M70 at 22780 s: point-defence missile
+  LOST Raider Battleship M58 at 22780 s: point-defence missile
+  LOST Battleship M63 at 22780 s: point-defence missile
+  LOST Raider Battleship M50 at 22781 s: point-defence missile
+  LOST Battleship M71 at 22781 s: point-defence missile
+  LOST Raider Battleship M59 at 22782 s: point-defence missile
+  LOST Battleship M62 at 22782 s: point-defence missile
+  LOST Raider Battleship M49 at 22783 s: point-defence missile
+  LOST Battleship M72 at 22783 s: point-defence missile
+  LOST Raider Battleship M60 at 22783 s: point-defence missile
+  LOST Battleship M61 at 22784 s: point-defence missile
+  LOST Battleship M82 at 22880 s: point-defence missile
+  LOST Battleship M75 at 22881 s: point-defence missile
+  LOST Battleship M83 at 22882 s: point-defence missile
+  LOST Battleship M84 at 22884 s: point-defence missile
+  LOST Battleship M60 at 22954 s: point-defence missile
+  LOST Battleship M49 at 22955 s: point-defence missile
+  LOST Battleship M93 at 22979 s: point-defence missile
+  LOST Battleship M88 at 22980 s: point-defence missile
+  LOST Battleship M94 at 22981 s: point-defence missile
+  LOST Battleship M95 at 22982 s: point-defence missile
+  LOST Battleship M86 at 22983 s: point-defence missile
+  LOST Battleship M96 at 22984 s: point-defence missile
+  LOST Battleship M85 at 22985 s: point-defence missile
+  LOST Battleship M55 at 22992 s: point-defence missile
+  LOST Battleship M54 at 22993 s: point-defence missile
+  LOST Battleship M56 at 22993 s: point-defence missile
+  LOST Battleship M53 at 22994 s: point-defence missile
+  LOST Raider Battleship M54 at 23075 s: point-defence missile
+  LOST Raider Battleship M55 at 23075 s: point-defence missile
+  LOST Raider Battleship M53 at 23076 s: point-defence missile
+  LOST Raider Battleship M56 at 23077 s: point-defence missile
+  LOST Raider Battleship M69 at 23079 s: point-defence missile
+  LOST Raider Battleship M63 at 23080 s: point-defence missile
+  LOST Raider Battleship M70 at 23081 s: point-defence missile
+  LOST Battleship M67 at 23082 s: point-defence missile
+  LOST Raider Battleship M62 at 23082 s: point-defence missile
+  LOST Raider Battleship M71 at 23083 s: point-defence missile
+  LOST Battleship M68 at 23083 s: point-defence missile
+  LOST Battleship M65 at 23083 s: point-defence missile
+  LOST Raider Battleship M61 at 23084 s: point-defence missile
+  LOST Raider Battleship M72 at 23085 s: point-defence missile
+  LOST Battleship M81 at 23135 s: point-defence missile
+  LOST Battleship M76 at 23136 s: point-defence missile
+  LOST Battleship M74 at 23138 s: point-defence missile
+  LOST Battleship M73 at 23139 s: point-defence missile
+  LOST Battleship M79 at 23170 s: point-defence missile
+  LOST Battleship M80 at 23171 s: point-defence missile
+  LOST Battleship M77 at 23172 s: point-defence missile
+  LOST Battleship M66 at 23180 s: point-defence missile
+  LOST Battleship M87 at 23228 s: point-defence missile
+  LOST Battleship M91 at 23259 s: point-defence missile
+  LOST Battleship M90 at 23259 s: point-defence missile
+  LOST Battleship M92 at 23260 s: point-defence missile
+  LOST Battleship M89 at 23261 s: point-defence missile
+  LOST Raider Battleship M64 at 23313 s: point-defence missile
+  LOST Battleship M78 at 23331 s: point-defence laser
+  LOST Raider Battleship M67 at 23342 s: point-defence missile
+  LOST Raider Battleship M65 at 23342 s: point-defence missile
+  LOST Raider Battleship M82 at 23380 s: point-defence missile
+  LOST Raider Battleship M91 at 23381 s: point-defence missile
+  LOST Raider Battleship M89 at 23382 s: point-defence missile
+  LOST Raider Battleship M88 at 23384 s: point-defence missile
+  LOST Raider Battleship M93 at 23385 s: point-defence missile
+  LOST Raider Battleship M83 at 23386 s: point-defence missile
+  LOST Raider Battleship M87 at 23387 s: point-defence missile
+  LOST Raider Battleship M94 at 23387 s: point-defence missile
+  LOST Raider Battleship M73 at 23388 s: point-defence missile
+  LOST Raider Battleship M84 at 23389 s: point-defence missile
+  LOST Raider Battleship M86 at 23390 s: point-defence missile
+  LOST Raider Battleship M95 at 23390 s: point-defence missile
+  LOST Raider Battleship M85 at 23392 s: point-defence missile
+  LOST Raider Battleship M96 at 23392 s: point-defence missile
+  LOST Raider Battleship M66 at 23436 s: point-defence missile
+  LOST Raider Battleship M68 at 23479 s: point-defence missile
+  LOST Raider Battleship M76 at 23583 s: point-defence missile
+  LOST Raider Battleship M75 at 23585 s: point-defence missile
+  LOST Raider Battleship M90 at 23586 s: point-defence missile
+  LOST Raider Battleship M92 at 23587 s: point-defence missile
+  LOST Raider Battleship M74 at 23588 s: point-defence missile
+  LOST Raider Battleship M78 at 23603 s: point-defence missile
+  LOST Raider Battleship M77 at 23604 s: point-defence missile
+  LOST Raider Battleship M79 at 23695 s: point-defence missile
+  LOST Raider Battleship M81 at 23735 s: point-defence missile
+  LOST Raider Battleship M80 at 23739 s: point-defence missile
+  FactionId(0) C1 = Raider Battleship err    0.000 ls  2σ    0.000 ls  light age    14 s
+  FactionId(1) C1 = Transport err    0.000 ls  2σ    0.069 ls  light age   348 s
+  FactionId(1) C2 = Battleship err    0.000 ls  2σ    0.000 ls  light age    13 s
+  FactionId(1) C3 = Lunar sensor station err    0.000 ls  2σ    0.135 ls  light age   459 s
+T+    480 min
+  SHIP Transport hull=100.0/100 armour=100.0 screens=0% heat=103.6PJ SRM=0 LRM=0
+  SHIP Battleship hull=5213.1/8000 armour=3185.0 screens=13% heat=331.5PJ SRM=0 LRM=0
+  SHIP Raider Battleship hull=7460.9/8000 armour=5281.4 screens=14% heat=512.4PJ SRM=0 LRM=0
+  LOST Battleship M2 at 4722 s: point-defence missile
+  LOST Battleship M6 at 4724 s: point-defence missile
+  LOST Battleship M9 at 4832 s: point-defence missile
+  LOST Battleship M12 at 4833 s: point-defence missile
+  LOST Battleship M14 at 4834 s: point-defence missile
+  LOST Battleship M15 at 4835 s: point-defence missile
+  LOST Raider Battleship M3 at 4930 s: point-defence missile
+  LOST Battleship M17 at 4942 s: point-defence missile
+  LOST Battleship M20 at 4943 s: point-defence missile
+  LOST Battleship M21 at 4944 s: point-defence missile
+  LOST Battleship M22 at 4944 s: point-defence missile
+  LOST Battleship M24 at 4945 s: point-defence missile
+  LOST Battleship M3 at 4967 s: point-defence missile
+  LOST Battleship M4 at 4967 s: point-defence missile
+  LOST Battleship M5 at 4967 s: point-defence missile
+  LOST Battleship M1 at 5047 s: point-defence missile
+  LOST Battleship M8 at 5048 s: point-defence missile
+  LOST Battleship M31 at 5062 s: point-defence missile
+  LOST Battleship M32 at 5062 s: point-defence missile
+  LOST Battleship M10 at 5076 s: point-defence missile
+  LOST Battleship M11 at 5156 s: point-defence missile
+  LOST Raider Battleship M1 at 5171 s: point-defence missile
+  LOST Raider Battleship M7 at 5172 s: point-defence missile
+  LOST Raider Battleship M8 at 5172 s: point-defence missile
+  LOST Battleship M35 at 5180 s: point-defence missile
+  LOST Battleship M36 at 5181 s: point-defence missile
+  LOST Battleship M37 at 5181 s: point-defence missile
+  LOST Battleship M19 at 5186 s: point-defence missile
+  LOST Raider Battleship M2 at 5250 s: point-defence missile
+  LOST Raider Battleship M4 at 5250 s: point-defence missile
+  LOST Raider Battleship M5 at 5250 s: point-defence missile
+  LOST Raider Battleship M6 at 5280 s: point-defence laser
+  LOST Battleship M23 at 5287 s: point-defence laser
+  LOST Raider Battleship M11 at 5289 s: point-defence missile
+  LOST Raider Battleship M14 at 5291 s: point-defence missile
+  LOST Battleship M18 at 5291 s: point-defence laser
+  LOST Raider Battleship M15 at 5291 s: point-defence missile
+  LOST Raider Battleship M16 at 5292 s: point-defence missile
+  LOST Battleship M27 at 5302 s: point-defence missile
+  LOST Battleship M47 at 5302 s: point-defence missile
+  LOST Battleship M28 at 5303 s: point-defence missile
+  LOST Battleship M30 at 5303 s: point-defence missile
+  LOST Battleship M25 at 5381 s: point-defence missile
+  LOST Battleship M29 at 5404 s: point-defence laser
+  LOST Battleship M26 at 5407 s: point-defence missile
+  LOST Battleship M33 at 5422 s: point-defence missile
+  LOST Battleship M34 at 5423 s: point-defence missile
+  LOST Battleship M38 at 5423 s: point-defence missile
+  LOST Battleship M40 at 5424 s: point-defence missile
+  LOST Raider Battleship M12 at 5531 s: point-defence missile
+  LOST Raider Battleship M13 at 5531 s: point-defence missile
+  LOST Raider Battleship M9 at 5609 s: point-defence missile
+  LOST Raider Battleship M10 at 5609 s: point-defence missile
+  LOST Battleship M41 at 5622 s: point-defence missile
+  LOST Battleship M42 at 5623 s: point-defence missile
+  LOST Battleship M45 at 5624 s: point-defence missile
+  LOST Battleship M46 at 5624 s: point-defence missile
+  LOST Battleship M48 at 5625 s: point-defence missile
+  LOST Raider Battleship M18 at 5639 s: point-defence missile
+  LOST Raider Battleship M19 at 5639 s: point-defence missile
+  LOST Raider Battleship M20 at 5640 s: point-defence missile
+  LOST Raider Battleship M21 at 5640 s: point-defence missile
+  LOST Raider Battleship M22 at 5641 s: point-defence missile
+  LOST Raider Battleship M24 at 5642 s: point-defence missile
+  LOST Raider Battleship M23 at 5880 s: point-defence missile
+  LOST Raider Battleship M26 at 5964 s: point-defence missile
+  LOST Raider Battleship M27 at 5964 s: point-defence missile
+  LOST Raider Battleship M28 at 5965 s: point-defence missile
+  LOST Raider Battleship M29 at 5965 s: point-defence missile
+  LOST Raider Battleship M25 at 6202 s: point-defence missile
+  LOST Raider Battleship M30 at 6202 s: point-defence missile
+  LOST Raider Battleship M32 at 6280 s: point-defence missile
+  LOST Raider Battleship M34 at 6287 s: point-defence missile
+  LOST Raider Battleship M36 at 6288 s: point-defence missile
+  LOST Raider Battleship M38 at 6289 s: point-defence missile
+  LOST Raider Battleship M31 at 6305 s: point-defence laser
+  LOST Raider Battleship M33 at 6599 s: point-defence missile
+  LOST Raider Battleship M35 at 6600 s: point-defence missile
+  LOST Raider Battleship M47 at 6610 s: point-defence missile
+  LOST Raider Battleship M48 at 6611 s: point-defence missile
+  LOST Raider Battleship M39 at 6629 s: point-defence laser
+  LOST Raider Battleship M37 at 6632 s: point-defence laser
+  LOST Raider Battleship M41 at 6841 s: point-defence missile
+  LOST Raider Battleship M43 at 6842 s: point-defence missile
+  LOST Raider Battleship M46 at 6843 s: point-defence missile
+  LOST Raider Battleship M44 at 6917 s: point-defence missile
+  LOST Raider Battleship M42 at 6936 s: point-defence laser
+  LOST Raider Battleship M45 at 6941 s: point-defence laser
+  LOST Battleship M57 at 22677 s: point-defence missile
+  LOST Battleship M52 at 22678 s: point-defence missile
+  LOST Battleship M58 at 22679 s: point-defence missile
+  LOST Battleship M51 at 22679 s: point-defence missile
+  LOST Battleship M59 at 22680 s: point-defence missile
+  LOST Battleship M50 at 22681 s: point-defence missile
+  LOST Raider Battleship M52 at 22778 s: point-defence missile
+  LOST Battleship M69 at 22778 s: point-defence missile
+  LOST Raider Battleship M57 at 22779 s: point-defence missile
+  LOST Battleship M64 at 22779 s: point-defence missile
+  LOST Raider Battleship M51 at 22779 s: point-defence missile
+  LOST Battleship M70 at 22780 s: point-defence missile
+  LOST Raider Battleship M58 at 22780 s: point-defence missile
+  LOST Battleship M63 at 22780 s: point-defence missile
+  LOST Raider Battleship M50 at 22781 s: point-defence missile
+  LOST Battleship M71 at 22781 s: point-defence missile
+  LOST Raider Battleship M59 at 22782 s: point-defence missile
+  LOST Battleship M62 at 22782 s: point-defence missile
+  LOST Raider Battleship M49 at 22783 s: point-defence missile
+  LOST Battleship M72 at 22783 s: point-defence missile
+  LOST Raider Battleship M60 at 22783 s: point-defence missile
+  LOST Battleship M61 at 22784 s: point-defence missile
+  LOST Battleship M82 at 22880 s: point-defence missile
+  LOST Battleship M75 at 22881 s: point-defence missile
+  LOST Battleship M83 at 22882 s: point-defence missile
+  LOST Battleship M84 at 22884 s: point-defence missile
+  LOST Battleship M60 at 22954 s: point-defence missile
+  LOST Battleship M49 at 22955 s: point-defence missile
+  LOST Battleship M93 at 22979 s: point-defence missile
+  LOST Battleship M88 at 22980 s: point-defence missile
+  LOST Battleship M94 at 22981 s: point-defence missile
+  LOST Battleship M95 at 22982 s: point-defence missile
+  LOST Battleship M86 at 22983 s: point-defence missile
+  LOST Battleship M96 at 22984 s: point-defence missile
+  LOST Battleship M85 at 22985 s: point-defence missile
+  LOST Battleship M55 at 22992 s: point-defence missile
+  LOST Battleship M54 at 22993 s: point-defence missile
+  LOST Battleship M56 at 22993 s: point-defence missile
+  LOST Battleship M53 at 22994 s: point-defence missile
+  LOST Raider Battleship M54 at 23075 s: point-defence missile
+  LOST Raider Battleship M55 at 23075 s: point-defence missile
+  LOST Raider Battleship M53 at 23076 s: point-defence missile
+  LOST Raider Battleship M56 at 23077 s: point-defence missile
+  LOST Raider Battleship M69 at 23079 s: point-defence missile
+  LOST Raider Battleship M63 at 23080 s: point-defence missile
+  LOST Raider Battleship M70 at 23081 s: point-defence missile
+  LOST Battleship M67 at 23082 s: point-defence missile
+  LOST Raider Battleship M62 at 23082 s: point-defence missile
+  LOST Raider Battleship M71 at 23083 s: point-defence missile
+  LOST Battleship M68 at 23083 s: point-defence missile
+  LOST Battleship M65 at 23083 s: point-defence missile
+  LOST Raider Battleship M61 at 23084 s: point-defence missile
+  LOST Raider Battleship M72 at 23085 s: point-defence missile
+  LOST Battleship M81 at 23135 s: point-defence missile
+  LOST Battleship M76 at 23136 s: point-defence missile
+  LOST Battleship M74 at 23138 s: point-defence missile
+  LOST Battleship M73 at 23139 s: point-defence missile
+  LOST Battleship M79 at 23170 s: point-defence missile
+  LOST Battleship M80 at 23171 s: point-defence missile
+  LOST Battleship M77 at 23172 s: point-defence missile
+  LOST Battleship M66 at 23180 s: point-defence missile
+  LOST Battleship M87 at 23228 s: point-defence missile
+  LOST Battleship M91 at 23259 s: point-defence missile
+  LOST Battleship M90 at 23259 s: point-defence missile
+  LOST Battleship M92 at 23260 s: point-defence missile
+  LOST Battleship M89 at 23261 s: point-defence missile
+  LOST Raider Battleship M64 at 23313 s: point-defence missile
+  LOST Battleship M78 at 23331 s: point-defence laser
+  LOST Raider Battleship M67 at 23342 s: point-defence missile
+  LOST Raider Battleship M65 at 23342 s: point-defence missile
+  LOST Raider Battleship M82 at 23380 s: point-defence missile
+  LOST Raider Battleship M91 at 23381 s: point-defence missile
+  LOST Raider Battleship M89 at 23382 s: point-defence missile
+  LOST Raider Battleship M88 at 23384 s: point-defence missile
+  LOST Raider Battleship M93 at 23385 s: point-defence missile
+  LOST Raider Battleship M83 at 23386 s: point-defence missile
+  LOST Raider Battleship M87 at 23387 s: point-defence missile
+  LOST Raider Battleship M94 at 23387 s: point-defence missile
+  LOST Raider Battleship M73 at 23388 s: point-defence missile
+  LOST Raider Battleship M84 at 23389 s: point-defence missile
+  LOST Raider Battleship M86 at 23390 s: point-defence missile
+  LOST Raider Battleship M95 at 23390 s: point-defence missile
+  LOST Raider Battleship M85 at 23392 s: point-defence missile
+  LOST Raider Battleship M96 at 23392 s: point-defence missile
+  LOST Raider Battleship M66 at 23436 s: point-defence missile
+  LOST Raider Battleship M68 at 23479 s: point-defence missile
+  LOST Raider Battleship M76 at 23583 s: point-defence missile
+  LOST Raider Battleship M75 at 23585 s: point-defence missile
+  LOST Raider Battleship M90 at 23586 s: point-defence missile
+  LOST Raider Battleship M92 at 23587 s: point-defence missile
+  LOST Raider Battleship M74 at 23588 s: point-defence missile
+  LOST Raider Battleship M78 at 23603 s: point-defence missile
+  LOST Raider Battleship M77 at 23604 s: point-defence missile
+  LOST Raider Battleship M79 at 23695 s: point-defence missile
+  LOST Raider Battleship M81 at 23735 s: point-defence missile
+  LOST Raider Battleship M80 at 23739 s: point-defence missile
+  FactionId(0) C1 = Raider Battleship err    0.000 ls  2σ    0.004 ls  light age   107 s
+  FactionId(1) C1 = Transport err    0.000 ls  2σ    0.113 ls  light age   427 s
+  FactionId(1) C2 = Battleship err    0.000 ls  2σ    0.004 ls  light age   101 s
+  FactionId(1) C3 = Lunar sensor station err    0.000 ls  2σ    0.167 ls  light age   502 s
+T+    540 min
+  SHIP Transport hull=100.0/100 armour=100.0 screens=0% heat=103.6PJ SRM=0 LRM=0
+  SHIP Battleship hull=5261.7/8000 armour=3185.0 screens=25% heat=65.9PJ SRM=0 LRM=0
+  SHIP Raider Battleship hull=7540.9/8000 armour=5281.4 screens=26% heat=503.8PJ SRM=0 LRM=0
+  LOST Battleship M2 at 4722 s: point-defence missile
+  LOST Battleship M6 at 4724 s: point-defence missile
+  LOST Battleship M9 at 4832 s: point-defence missile
+  LOST Battleship M12 at 4833 s: point-defence missile
+  LOST Battleship M14 at 4834 s: point-defence missile
+  LOST Battleship M15 at 4835 s: point-defence missile
+  LOST Raider Battleship M3 at 4930 s: point-defence missile
+  LOST Battleship M17 at 4942 s: point-defence missile
+  LOST Battleship M20 at 4943 s: point-defence missile
+  LOST Battleship M21 at 4944 s: point-defence missile
+  LOST Battleship M22 at 4944 s: point-defence missile
+  LOST Battleship M24 at 4945 s: point-defence missile
+  LOST Battleship M3 at 4967 s: point-defence missile
+  LOST Battleship M4 at 4967 s: point-defence missile
+  LOST Battleship M5 at 4967 s: point-defence missile
+  LOST Battleship M1 at 5047 s: point-defence missile
+  LOST Battleship M8 at 5048 s: point-defence missile
+  LOST Battleship M31 at 5062 s: point-defence missile
+  LOST Battleship M32 at 5062 s: point-defence missile
+  LOST Battleship M10 at 5076 s: point-defence missile
+  LOST Battleship M11 at 5156 s: point-defence missile
+  LOST Raider Battleship M1 at 5171 s: point-defence missile
+  LOST Raider Battleship M7 at 5172 s: point-defence missile
+  LOST Raider Battleship M8 at 5172 s: point-defence missile
+  LOST Battleship M35 at 5180 s: point-defence missile
+  LOST Battleship M36 at 5181 s: point-defence missile
+  LOST Battleship M37 at 5181 s: point-defence missile
+  LOST Battleship M19 at 5186 s: point-defence missile
+  LOST Raider Battleship M2 at 5250 s: point-defence missile
+  LOST Raider Battleship M4 at 5250 s: point-defence missile
+  LOST Raider Battleship M5 at 5250 s: point-defence missile
+  LOST Raider Battleship M6 at 5280 s: point-defence laser
+  LOST Battleship M23 at 5287 s: point-defence laser
+  LOST Raider Battleship M11 at 5289 s: point-defence missile
+  LOST Raider Battleship M14 at 5291 s: point-defence missile
+  LOST Battleship M18 at 5291 s: point-defence laser
+  LOST Raider Battleship M15 at 5291 s: point-defence missile
+  LOST Raider Battleship M16 at 5292 s: point-defence missile
+  LOST Battleship M27 at 5302 s: point-defence missile
+  LOST Battleship M47 at 5302 s: point-defence missile
+  LOST Battleship M28 at 5303 s: point-defence missile
+  LOST Battleship M30 at 5303 s: point-defence missile
+  LOST Battleship M25 at 5381 s: point-defence missile
+  LOST Battleship M29 at 5404 s: point-defence laser
+  LOST Battleship M26 at 5407 s: point-defence missile
+  LOST Battleship M33 at 5422 s: point-defence missile
+  LOST Battleship M34 at 5423 s: point-defence missile
+  LOST Battleship M38 at 5423 s: point-defence missile
+  LOST Battleship M40 at 5424 s: point-defence missile
+  LOST Raider Battleship M12 at 5531 s: point-defence missile
+  LOST Raider Battleship M13 at 5531 s: point-defence missile
+  LOST Raider Battleship M9 at 5609 s: point-defence missile
+  LOST Raider Battleship M10 at 5609 s: point-defence missile
+  LOST Battleship M41 at 5622 s: point-defence missile
+  LOST Battleship M42 at 5623 s: point-defence missile
+  LOST Battleship M45 at 5624 s: point-defence missile
+  LOST Battleship M46 at 5624 s: point-defence missile
+  LOST Battleship M48 at 5625 s: point-defence missile
+  LOST Raider Battleship M18 at 5639 s: point-defence missile
+  LOST Raider Battleship M19 at 5639 s: point-defence missile
+  LOST Raider Battleship M20 at 5640 s: point-defence missile
+  LOST Raider Battleship M21 at 5640 s: point-defence missile
+  LOST Raider Battleship M22 at 5641 s: point-defence missile
+  LOST Raider Battleship M24 at 5642 s: point-defence missile
+  LOST Raider Battleship M23 at 5880 s: point-defence missile
+  LOST Raider Battleship M26 at 5964 s: point-defence missile
+  LOST Raider Battleship M27 at 5964 s: point-defence missile
+  LOST Raider Battleship M28 at 5965 s: point-defence missile
+  LOST Raider Battleship M29 at 5965 s: point-defence missile
+  LOST Raider Battleship M25 at 6202 s: point-defence missile
+  LOST Raider Battleship M30 at 6202 s: point-defence missile
+  LOST Raider Battleship M32 at 6280 s: point-defence missile
+  LOST Raider Battleship M34 at 6287 s: point-defence missile
+  LOST Raider Battleship M36 at 6288 s: point-defence missile
+  LOST Raider Battleship M38 at 6289 s: point-defence missile
+  LOST Raider Battleship M31 at 6305 s: point-defence laser
+  LOST Raider Battleship M33 at 6599 s: point-defence missile
+  LOST Raider Battleship M35 at 6600 s: point-defence missile
+  LOST Raider Battleship M47 at 6610 s: point-defence missile
+  LOST Raider Battleship M48 at 6611 s: point-defence missile
+  LOST Raider Battleship M39 at 6629 s: point-defence laser
+  LOST Raider Battleship M37 at 6632 s: point-defence laser
+  LOST Raider Battleship M41 at 6841 s: point-defence missile
+  LOST Raider Battleship M43 at 6842 s: point-defence missile
+  LOST Raider Battleship M46 at 6843 s: point-defence missile
+  LOST Raider Battleship M44 at 6917 s: point-defence missile
+  LOST Raider Battleship M42 at 6936 s: point-defence laser
+  LOST Raider Battleship M45 at 6941 s: point-defence laser
+  LOST Battleship M57 at 22677 s: point-defence missile
+  LOST Battleship M52 at 22678 s: point-defence missile
+  LOST Battleship M58 at 22679 s: point-defence missile
+  LOST Battleship M51 at 22679 s: point-defence missile
+  LOST Battleship M59 at 22680 s: point-defence missile
+  LOST Battleship M50 at 22681 s: point-defence missile
+  LOST Raider Battleship M52 at 22778 s: point-defence missile
+  LOST Battleship M69 at 22778 s: point-defence missile
+  LOST Raider Battleship M57 at 22779 s: point-defence missile
+  LOST Battleship M64 at 22779 s: point-defence missile
+  LOST Raider Battleship M51 at 22779 s: point-defence missile
+  LOST Battleship M70 at 22780 s: point-defence missile
+  LOST Raider Battleship M58 at 22780 s: point-defence missile
+  LOST Battleship M63 at 22780 s: point-defence missile
+  LOST Raider Battleship M50 at 22781 s: point-defence missile
+  LOST Battleship M71 at 22781 s: point-defence missile
+  LOST Raider Battleship M59 at 22782 s: point-defence missile
+  LOST Battleship M62 at 22782 s: point-defence missile
+  LOST Raider Battleship M49 at 22783 s: point-defence missile
+  LOST Battleship M72 at 22783 s: point-defence missile
+  LOST Raider Battleship M60 at 22783 s: point-defence missile
+  LOST Battleship M61 at 22784 s: point-defence missile
+  LOST Battleship M82 at 22880 s: point-defence missile
+  LOST Battleship M75 at 22881 s: point-defence missile
+  LOST Battleship M83 at 22882 s: point-defence missile
+  LOST Battleship M84 at 22884 s: point-defence missile
+  LOST Battleship M60 at 22954 s: point-defence missile
+  LOST Battleship M49 at 22955 s: point-defence missile
+  LOST Battleship M93 at 22979 s: point-defence missile
+  LOST Battleship M88 at 22980 s: point-defence missile
+  LOST Battleship M94 at 22981 s: point-defence missile
+  LOST Battleship M95 at 22982 s: point-defence missile
+  LOST Battleship M86 at 22983 s: point-defence missile
+  LOST Battleship M96 at 22984 s: point-defence missile
+  LOST Battleship M85 at 22985 s: point-defence missile
+  LOST Battleship M55 at 22992 s: point-defence missile
+  LOST Battleship M54 at 22993 s: point-defence missile
+  LOST Battleship M56 at 22993 s: point-defence missile
+  LOST Battleship M53 at 22994 s: point-defence missile
+  LOST Raider Battleship M54 at 23075 s: point-defence missile
+  LOST Raider Battleship M55 at 23075 s: point-defence missile
+  LOST Raider Battleship M53 at 23076 s: point-defence missile
+  LOST Raider Battleship M56 at 23077 s: point-defence missile
+  LOST Raider Battleship M69 at 23079 s: point-defence missile
+  LOST Raider Battleship M63 at 23080 s: point-defence missile
+  LOST Raider Battleship M70 at 23081 s: point-defence missile
+  LOST Battleship M67 at 23082 s: point-defence missile
+  LOST Raider Battleship M62 at 23082 s: point-defence missile
+  LOST Raider Battleship M71 at 23083 s: point-defence missile
+  LOST Battleship M68 at 23083 s: point-defence missile
+  LOST Battleship M65 at 23083 s: point-defence missile
+  LOST Raider Battleship M61 at 23084 s: point-defence missile
+  LOST Raider Battleship M72 at 23085 s: point-defence missile
+  LOST Battleship M81 at 23135 s: point-defence missile
+  LOST Battleship M76 at 23136 s: point-defence missile
+  LOST Battleship M74 at 23138 s: point-defence missile
+  LOST Battleship M73 at 23139 s: point-defence missile
+  LOST Battleship M79 at 23170 s: point-defence missile
+  LOST Battleship M80 at 23171 s: point-defence missile
+  LOST Battleship M77 at 23172 s: point-defence missile
+  LOST Battleship M66 at 23180 s: point-defence missile
+  LOST Battleship M87 at 23228 s: point-defence missile
+  LOST Battleship M91 at 23259 s: point-defence missile
+  LOST Battleship M90 at 23259 s: point-defence missile
+  LOST Battleship M92 at 23260 s: point-defence missile
+  LOST Battleship M89 at 23261 s: point-defence missile
+  LOST Raider Battleship M64 at 23313 s: point-defence missile
+  LOST Battleship M78 at 23331 s: point-defence laser
+  LOST Raider Battleship M67 at 23342 s: point-defence missile
+  LOST Raider Battleship M65 at 23342 s: point-defence missile
+  LOST Raider Battleship M82 at 23380 s: point-defence missile
+  LOST Raider Battleship M91 at 23381 s: point-defence missile
+  LOST Raider Battleship M89 at 23382 s: point-defence missile
+  LOST Raider Battleship M88 at 23384 s: point-defence missile
+  LOST Raider Battleship M93 at 23385 s: point-defence missile
+  LOST Raider Battleship M83 at 23386 s: point-defence missile
+  LOST Raider Battleship M87 at 23387 s: point-defence missile
+  LOST Raider Battleship M94 at 23387 s: point-defence missile
+  LOST Raider Battleship M73 at 23388 s: point-defence missile
+  LOST Raider Battleship M84 at 23389 s: point-defence missile
+  LOST Raider Battleship M86 at 23390 s: point-defence missile
+  LOST Raider Battleship M95 at 23390 s: point-defence missile
+  LOST Raider Battleship M85 at 23392 s: point-defence missile
+  LOST Raider Battleship M96 at 23392 s: point-defence missile
+  LOST Raider Battleship M66 at 23436 s: point-defence missile
+  LOST Raider Battleship M68 at 23479 s: point-defence missile
+  LOST Raider Battleship M76 at 23583 s: point-defence missile
+  LOST Raider Battleship M75 at 23585 s: point-defence missile
+  LOST Raider Battleship M90 at 23586 s: point-defence missile
+  LOST Raider Battleship M92 at 23587 s: point-defence missile
+  LOST Raider Battleship M74 at 23588 s: point-defence missile
+  LOST Raider Battleship M78 at 23603 s: point-defence missile
+  LOST Raider Battleship M77 at 23604 s: point-defence missile
+  LOST Raider Battleship M79 at 23695 s: point-defence missile
+  LOST Raider Battleship M81 at 23735 s: point-defence missile
+  LOST Raider Battleship M80 at 23739 s: point-defence missile
+  FactionId(0) C1 = Raider Battleship err    0.000 ls  2σ    0.015 ls  light age   184 s
+  FactionId(1) C1 = Transport err    0.000 ls  2σ    0.192 ls  light age   531 s
+  FactionId(1) C2 = Battleship err    0.001 ls  2σ    0.013 ls  light age   174 s
+  FactionId(1) C3 = Lunar sensor station err    0.000 ls  2σ    0.218 ls  light age   560 s
+T+    600 min
+  SHIP Transport hull=100.0/100 armour=100.0 screens=0% heat=103.6PJ SRM=0 LRM=0
+  SHIP Battleship hull=5341.7/8000 armour=3185.0 screens=37% heat=247.3PJ SRM=0 LRM=0
+  SHIP Raider Battleship hull=7620.9/8000 armour=5281.4 screens=38% heat=503.2PJ SRM=0 LRM=0
+  LOST Battleship M2 at 4722 s: point-defence missile
+  LOST Battleship M6 at 4724 s: point-defence missile
+  LOST Battleship M9 at 4832 s: point-defence missile
+  LOST Battleship M12 at 4833 s: point-defence missile
+  LOST Battleship M14 at 4834 s: point-defence missile
+  LOST Battleship M15 at 4835 s: point-defence missile
+  LOST Raider Battleship M3 at 4930 s: point-defence missile
+  LOST Battleship M17 at 4942 s: point-defence missile
+  LOST Battleship M20 at 4943 s: point-defence missile
+  LOST Battleship M21 at 4944 s: point-defence missile
+  LOST Battleship M22 at 4944 s: point-defence missile
+  LOST Battleship M24 at 4945 s: point-defence missile
+  LOST Battleship M3 at 4967 s: point-defence missile
+  LOST Battleship M4 at 4967 s: point-defence missile
+  LOST Battleship M5 at 4967 s: point-defence missile
+  LOST Battleship M1 at 5047 s: point-defence missile
+  LOST Battleship M8 at 5048 s: point-defence missile
+  LOST Battleship M31 at 5062 s: point-defence missile
+  LOST Battleship M32 at 5062 s: point-defence missile
+  LOST Battleship M10 at 5076 s: point-defence missile
+  LOST Battleship M11 at 5156 s: point-defence missile
+  LOST Raider Battleship M1 at 5171 s: point-defence missile
+  LOST Raider Battleship M7 at 5172 s: point-defence missile
+  LOST Raider Battleship M8 at 5172 s: point-defence missile
+  LOST Battleship M35 at 5180 s: point-defence missile
+  LOST Battleship M36 at 5181 s: point-defence missile
+  LOST Battleship M37 at 5181 s: point-defence missile
+  LOST Battleship M19 at 5186 s: point-defence missile
+  LOST Raider Battleship M2 at 5250 s: point-defence missile
+  LOST Raider Battleship M4 at 5250 s: point-defence missile
+  LOST Raider Battleship M5 at 5250 s: point-defence missile
+  LOST Raider Battleship M6 at 5280 s: point-defence laser
+  LOST Battleship M23 at 5287 s: point-defence laser
+  LOST Raider Battleship M11 at 5289 s: point-defence missile
+  LOST Raider Battleship M14 at 5291 s: point-defence missile
+  LOST Battleship M18 at 5291 s: point-defence laser
+  LOST Raider Battleship M15 at 5291 s: point-defence missile
+  LOST Raider Battleship M16 at 5292 s: point-defence missile
+  LOST Battleship M27 at 5302 s: point-defence missile
+  LOST Battleship M47 at 5302 s: point-defence missile
+  LOST Battleship M28 at 5303 s: point-defence missile
+  LOST Battleship M30 at 5303 s: point-defence missile
+  LOST Battleship M25 at 5381 s: point-defence missile
+  LOST Battleship M29 at 5404 s: point-defence laser
+  LOST Battleship M26 at 5407 s: point-defence missile
+  LOST Battleship M33 at 5422 s: point-defence missile
+  LOST Battleship M34 at 5423 s: point-defence missile
+  LOST Battleship M38 at 5423 s: point-defence missile
+  LOST Battleship M40 at 5424 s: point-defence missile
+  LOST Raider Battleship M12 at 5531 s: point-defence missile
+  LOST Raider Battleship M13 at 5531 s: point-defence missile
+  LOST Raider Battleship M9 at 5609 s: point-defence missile
+  LOST Raider Battleship M10 at 5609 s: point-defence missile
+  LOST Battleship M41 at 5622 s: point-defence missile
+  LOST Battleship M42 at 5623 s: point-defence missile
+  LOST Battleship M45 at 5624 s: point-defence missile
+  LOST Battleship M46 at 5624 s: point-defence missile
+  LOST Battleship M48 at 5625 s: point-defence missile
+  LOST Raider Battleship M18 at 5639 s: point-defence missile
+  LOST Raider Battleship M19 at 5639 s: point-defence missile
+  LOST Raider Battleship M20 at 5640 s: point-defence missile
+  LOST Raider Battleship M21 at 5640 s: point-defence missile
+  LOST Raider Battleship M22 at 5641 s: point-defence missile
+  LOST Raider Battleship M24 at 5642 s: point-defence missile
+  LOST Raider Battleship M23 at 5880 s: point-defence missile
+  LOST Raider Battleship M26 at 5964 s: point-defence missile
+  LOST Raider Battleship M27 at 5964 s: point-defence missile
+  LOST Raider Battleship M28 at 5965 s: point-defence missile
+  LOST Raider Battleship M29 at 5965 s: point-defence missile
+  LOST Raider Battleship M25 at 6202 s: point-defence missile
+  LOST Raider Battleship M30 at 6202 s: point-defence missile
+  LOST Raider Battleship M32 at 6280 s: point-defence missile
+  LOST Raider Battleship M34 at 6287 s: point-defence missile
+  LOST Raider Battleship M36 at 6288 s: point-defence missile
+  LOST Raider Battleship M38 at 6289 s: point-defence missile
+  LOST Raider Battleship M31 at 6305 s: point-defence laser
+  LOST Raider Battleship M33 at 6599 s: point-defence missile
+  LOST Raider Battleship M35 at 6600 s: point-defence missile
+  LOST Raider Battleship M47 at 6610 s: point-defence missile
+  LOST Raider Battleship M48 at 6611 s: point-defence missile
+  LOST Raider Battleship M39 at 6629 s: point-defence laser
+  LOST Raider Battleship M37 at 6632 s: point-defence laser
+  LOST Raider Battleship M41 at 6841 s: point-defence missile
+  LOST Raider Battleship M43 at 6842 s: point-defence missile
+  LOST Raider Battleship M46 at 6843 s: point-defence missile
+  LOST Raider Battleship M44 at 6917 s: point-defence missile
+  LOST Raider Battleship M42 at 6936 s: point-defence laser
+  LOST Raider Battleship M45 at 6941 s: point-defence laser
+  LOST Battleship M57 at 22677 s: point-defence missile
+  LOST Battleship M52 at 22678 s: point-defence missile
+  LOST Battleship M58 at 22679 s: point-defence missile
+  LOST Battleship M51 at 22679 s: point-defence missile
+  LOST Battleship M59 at 22680 s: point-defence missile
+  LOST Battleship M50 at 22681 s: point-defence missile
+  LOST Raider Battleship M52 at 22778 s: point-defence missile
+  LOST Battleship M69 at 22778 s: point-defence missile
+  LOST Raider Battleship M57 at 22779 s: point-defence missile
+  LOST Battleship M64 at 22779 s: point-defence missile
+  LOST Raider Battleship M51 at 22779 s: point-defence missile
+  LOST Battleship M70 at 22780 s: point-defence missile
+  LOST Raider Battleship M58 at 22780 s: point-defence missile
+  LOST Battleship M63 at 22780 s: point-defence missile
+  LOST Raider Battleship M50 at 22781 s: point-defence missile
+  LOST Battleship M71 at 22781 s: point-defence missile
+  LOST Raider Battleship M59 at 22782 s: point-defence missile
+  LOST Battleship M62 at 22782 s: point-defence missile
+  LOST Raider Battleship M49 at 22783 s: point-defence missile
+  LOST Battleship M72 at 22783 s: point-defence missile
+  LOST Raider Battleship M60 at 22783 s: point-defence missile
+  LOST Battleship M61 at 22784 s: point-defence missile
+  LOST Battleship M82 at 22880 s: point-defence missile
+  LOST Battleship M75 at 22881 s: point-defence missile
+  LOST Battleship M83 at 22882 s: point-defence missile
+  LOST Battleship M84 at 22884 s: point-defence missile
+  LOST Battleship M60 at 22954 s: point-defence missile
+  LOST Battleship M49 at 22955 s: point-defence missile
+  LOST Battleship M93 at 22979 s: point-defence missile
+  LOST Battleship M88 at 22980 s: point-defence missile
+  LOST Battleship M94 at 22981 s: point-defence missile
+  LOST Battleship M95 at 22982 s: point-defence missile
+  LOST Battleship M86 at 22983 s: point-defence missile
+  LOST Battleship M96 at 22984 s: point-defence missile
+  LOST Battleship M85 at 22985 s: point-defence missile
+  LOST Battleship M55 at 22992 s: point-defence missile
+  LOST Battleship M54 at 22993 s: point-defence missile
+  LOST Battleship M56 at 22993 s: point-defence missile
+  LOST Battleship M53 at 22994 s: point-defence missile
+  LOST Raider Battleship M54 at 23075 s: point-defence missile
+  LOST Raider Battleship M55 at 23075 s: point-defence missile
+  LOST Raider Battleship M53 at 23076 s: point-defence missile
+  LOST Raider Battleship M56 at 23077 s: point-defence missile
+  LOST Raider Battleship M69 at 23079 s: point-defence missile
+  LOST Raider Battleship M63 at 23080 s: point-defence missile
+  LOST Raider Battleship M70 at 23081 s: point-defence missile
+  LOST Battleship M67 at 23082 s: point-defence missile
+  LOST Raider Battleship M62 at 23082 s: point-defence missile
+  LOST Raider Battleship M71 at 23083 s: point-defence missile
+  LOST Battleship M68 at 23083 s: point-defence missile
+  LOST Battleship M65 at 23083 s: point-defence missile
+  LOST Raider Battleship M61 at 23084 s: point-defence missile
+  LOST Raider Battleship M72 at 23085 s: point-defence missile
+  LOST Battleship M81 at 23135 s: point-defence missile
+  LOST Battleship M76 at 23136 s: point-defence missile
+  LOST Battleship M74 at 23138 s: point-defence missile
+  LOST Battleship M73 at 23139 s: point-defence missile
+  LOST Battleship M79 at 23170 s: point-defence missile
+  LOST Battleship M80 at 23171 s: point-defence missile
+  LOST Battleship M77 at 23172 s: point-defence missile
+  LOST Battleship M66 at 23180 s: point-defence missile
+  LOST Battleship M87 at 23228 s: point-defence missile
+  LOST Battleship M91 at 23259 s: point-defence missile
+  LOST Battleship M90 at 23259 s: point-defence missile
+  LOST Battleship M92 at 23260 s: point-defence missile
+  LOST Battleship M89 at 23261 s: point-defence missile
+  LOST Raider Battleship M64 at 23313 s: point-defence missile
+  LOST Battleship M78 at 23331 s: point-defence laser
+  LOST Raider Battleship M67 at 23342 s: point-defence missile
+  LOST Raider Battleship M65 at 23342 s: point-defence missile
+  LOST Raider Battleship M82 at 23380 s: point-defence missile
+  LOST Raider Battleship M91 at 23381 s: point-defence missile
+  LOST Raider Battleship M89 at 23382 s: point-defence missile
+  LOST Raider Battleship M88 at 23384 s: point-defence missile
+  LOST Raider Battleship M93 at 23385 s: point-defence missile
+  LOST Raider Battleship M83 at 23386 s: point-defence missile
+  LOST Raider Battleship M87 at 23387 s: point-defence missile
+  LOST Raider Battleship M94 at 23387 s: point-defence missile
+  LOST Raider Battleship M73 at 23388 s: point-defence missile
+  LOST Raider Battleship M84 at 23389 s: point-defence missile
+  LOST Raider Battleship M86 at 23390 s: point-defence missile
+  LOST Raider Battleship M95 at 23390 s: point-defence missile
+  LOST Raider Battleship M85 at 23392 s: point-defence missile
+  LOST Raider Battleship M96 at 23392 s: point-defence missile
+  LOST Raider Battleship M66 at 23436 s: point-defence missile
+  LOST Raider Battleship M68 at 23479 s: point-defence missile
+  LOST Raider Battleship M76 at 23583 s: point-defence missile
+  LOST Raider Battleship M75 at 23585 s: point-defence missile
+  LOST Raider Battleship M90 at 23586 s: point-defence missile
+  LOST Raider Battleship M92 at 23587 s: point-defence missile
+  LOST Raider Battleship M74 at 23588 s: point-defence missile
+  LOST Raider Battleship M78 at 23603 s: point-defence missile
+  LOST Raider Battleship M77 at 23604 s: point-defence missile
+  LOST Raider Battleship M79 at 23695 s: point-defence missile
+  LOST Raider Battleship M81 at 23735 s: point-defence missile
+  LOST Raider Battleship M80 at 23739 s: point-defence missile
+  FactionId(0) C1 = Raider Battleship err    0.000 ls  2σ    0.029 ls  light age   242 s
+  FactionId(1) C1 = Transport err    0.000 ls  2σ    0.318 ls  light age   653 s
+  FactionId(1) C2 = Battleship err    0.000 ls  2σ    0.025 ls  light age   229 s
+  FactionId(1) C3 = Lunar sensor station err    0.016 ls  2σ    0.292 ls  light age   634 s
+T+    660 min
+  SHIP Transport hull=100.0/100 armour=100.0 screens=0% heat=103.6PJ SRM=0 LRM=0
+  SHIP Battleship hull=5421.7/8000 armour=3185.0 screens=49% heat=555.4PJ SRM=0 LRM=0
+  SHIP Raider Battleship hull=7700.9/8000 armour=5281.4 screens=50% heat=503.2PJ SRM=0 LRM=0
+  LOST Battleship M2 at 4722 s: point-defence missile
+  LOST Battleship M6 at 4724 s: point-defence missile
+  LOST Battleship M9 at 4832 s: point-defence missile
+  LOST Battleship M12 at 4833 s: point-defence missile
+  LOST Battleship M14 at 4834 s: point-defence missile
+  LOST Battleship M15 at 4835 s: point-defence missile
+  LOST Raider Battleship M3 at 4930 s: point-defence missile
+  LOST Battleship M17 at 4942 s: point-defence missile
+  LOST Battleship M20 at 4943 s: point-defence missile
+  LOST Battleship M21 at 4944 s: point-defence missile
+  LOST Battleship M22 at 4944 s: point-defence missile
+  LOST Battleship M24 at 4945 s: point-defence missile
+  LOST Battleship M3 at 4967 s: point-defence missile
+  LOST Battleship M4 at 4967 s: point-defence missile
+  LOST Battleship M5 at 4967 s: point-defence missile
+  LOST Battleship M1 at 5047 s: point-defence missile
+  LOST Battleship M8 at 5048 s: point-defence missile
+  LOST Battleship M31 at 5062 s: point-defence missile
+  LOST Battleship M32 at 5062 s: point-defence missile
+  LOST Battleship M10 at 5076 s: point-defence missile
+  LOST Battleship M11 at 5156 s: point-defence missile
+  LOST Raider Battleship M1 at 5171 s: point-defence missile
+  LOST Raider Battleship M7 at 5172 s: point-defence missile
+  LOST Raider Battleship M8 at 5172 s: point-defence missile
+  LOST Battleship M35 at 5180 s: point-defence missile
+  LOST Battleship M36 at 5181 s: point-defence missile
+  LOST Battleship M37 at 5181 s: point-defence missile
+  LOST Battleship M19 at 5186 s: point-defence missile
+  LOST Raider Battleship M2 at 5250 s: point-defence missile
+  LOST Raider Battleship M4 at 5250 s: point-defence missile
+  LOST Raider Battleship M5 at 5250 s: point-defence missile
+  LOST Raider Battleship M6 at 5280 s: point-defence laser
+  LOST Battleship M23 at 5287 s: point-defence laser
+  LOST Raider Battleship M11 at 5289 s: point-defence missile
+  LOST Raider Battleship M14 at 5291 s: point-defence missile
+  LOST Battleship M18 at 5291 s: point-defence laser
+  LOST Raider Battleship M15 at 5291 s: point-defence missile
+  LOST Raider Battleship M16 at 5292 s: point-defence missile
+  LOST Battleship M27 at 5302 s: point-defence missile
+  LOST Battleship M47 at 5302 s: point-defence missile
+  LOST Battleship M28 at 5303 s: point-defence missile
+  LOST Battleship M30 at 5303 s: point-defence missile
+  LOST Battleship M25 at 5381 s: point-defence missile
+  LOST Battleship M29 at 5404 s: point-defence laser
+  LOST Battleship M26 at 5407 s: point-defence missile
+  LOST Battleship M33 at 5422 s: point-defence missile
+  LOST Battleship M34 at 5423 s: point-defence missile
+  LOST Battleship M38 at 5423 s: point-defence missile
+  LOST Battleship M40 at 5424 s: point-defence missile
+  LOST Raider Battleship M12 at 5531 s: point-defence missile
+  LOST Raider Battleship M13 at 5531 s: point-defence missile
+  LOST Raider Battleship M9 at 5609 s: point-defence missile
+  LOST Raider Battleship M10 at 5609 s: point-defence missile
+  LOST Battleship M41 at 5622 s: point-defence missile
+  LOST Battleship M42 at 5623 s: point-defence missile
+  LOST Battleship M45 at 5624 s: point-defence missile
+  LOST Battleship M46 at 5624 s: point-defence missile
+  LOST Battleship M48 at 5625 s: point-defence missile
+  LOST Raider Battleship M18 at 5639 s: point-defence missile
+  LOST Raider Battleship M19 at 5639 s: point-defence missile
+  LOST Raider Battleship M20 at 5640 s: point-defence missile
+  LOST Raider Battleship M21 at 5640 s: point-defence missile
+  LOST Raider Battleship M22 at 5641 s: point-defence missile
+  LOST Raider Battleship M24 at 5642 s: point-defence missile
+  LOST Raider Battleship M23 at 5880 s: point-defence missile
+  LOST Raider Battleship M26 at 5964 s: point-defence missile
+  LOST Raider Battleship M27 at 5964 s: point-defence missile
+  LOST Raider Battleship M28 at 5965 s: point-defence missile
+  LOST Raider Battleship M29 at 5965 s: point-defence missile
+  LOST Raider Battleship M25 at 6202 s: point-defence missile
+  LOST Raider Battleship M30 at 6202 s: point-defence missile
+  LOST Raider Battleship M32 at 6280 s: point-defence missile
+  LOST Raider Battleship M34 at 6287 s: point-defence missile
+  LOST Raider Battleship M36 at 6288 s: point-defence missile
+  LOST Raider Battleship M38 at 6289 s: point-defence missile
+  LOST Raider Battleship M31 at 6305 s: point-defence laser
+  LOST Raider Battleship M33 at 6599 s: point-defence missile
+  LOST Raider Battleship M35 at 6600 s: point-defence missile
+  LOST Raider Battleship M47 at 6610 s: point-defence missile
+  LOST Raider Battleship M48 at 6611 s: point-defence missile
+  LOST Raider Battleship M39 at 6629 s: point-defence laser
+  LOST Raider Battleship M37 at 6632 s: point-defence laser
+  LOST Raider Battleship M41 at 6841 s: point-defence missile
+  LOST Raider Battleship M43 at 6842 s: point-defence missile
+  LOST Raider Battleship M46 at 6843 s: point-defence missile
+  LOST Raider Battleship M44 at 6917 s: point-defence missile
+  LOST Raider Battleship M42 at 6936 s: point-defence laser
+  LOST Raider Battleship M45 at 6941 s: point-defence laser
+  LOST Battleship M57 at 22677 s: point-defence missile
+  LOST Battleship M52 at 22678 s: point-defence missile
+  LOST Battleship M58 at 22679 s: point-defence missile
+  LOST Battleship M51 at 22679 s: point-defence missile
+  LOST Battleship M59 at 22680 s: point-defence missile
+  LOST Battleship M50 at 22681 s: point-defence missile
+  LOST Raider Battleship M52 at 22778 s: point-defence missile
+  LOST Battleship M69 at 22778 s: point-defence missile
+  LOST Raider Battleship M57 at 22779 s: point-defence missile
+  LOST Battleship M64 at 22779 s: point-defence missile
+  LOST Raider Battleship M51 at 22779 s: point-defence missile
+  LOST Battleship M70 at 22780 s: point-defence missile
+  LOST Raider Battleship M58 at 22780 s: point-defence missile
+  LOST Battleship M63 at 22780 s: point-defence missile
+  LOST Raider Battleship M50 at 22781 s: point-defence missile
+  LOST Battleship M71 at 22781 s: point-defence missile
+  LOST Raider Battleship M59 at 22782 s: point-defence missile
+  LOST Battleship M62 at 22782 s: point-defence missile
+  LOST Raider Battleship M49 at 22783 s: point-defence missile
+  LOST Battleship M72 at 22783 s: point-defence missile
+  LOST Raider Battleship M60 at 22783 s: point-defence missile
+  LOST Battleship M61 at 22784 s: point-defence missile
+  LOST Battleship M82 at 22880 s: point-defence missile
+  LOST Battleship M75 at 22881 s: point-defence missile
+  LOST Battleship M83 at 22882 s: point-defence missile
+  LOST Battleship M84 at 22884 s: point-defence missile
+  LOST Battleship M60 at 22954 s: point-defence missile
+  LOST Battleship M49 at 22955 s: point-defence missile
+  LOST Battleship M93 at 22979 s: point-defence missile
+  LOST Battleship M88 at 22980 s: point-defence missile
+  LOST Battleship M94 at 22981 s: point-defence missile
+  LOST Battleship M95 at 22982 s: point-defence missile
+  LOST Battleship M86 at 22983 s: point-defence missile
+  LOST Battleship M96 at 22984 s: point-defence missile
+  LOST Battleship M85 at 22985 s: point-defence missile
+  LOST Battleship M55 at 22992 s: point-defence missile
+  LOST Battleship M54 at 22993 s: point-defence missile
+  LOST Battleship M56 at 22993 s: point-defence missile
+  LOST Battleship M53 at 22994 s: point-defence missile
+  LOST Raider Battleship M54 at 23075 s: point-defence missile
+  LOST Raider Battleship M55 at 23075 s: point-defence missile
+  LOST Raider Battleship M53 at 23076 s: point-defence missile
+  LOST Raider Battleship M56 at 23077 s: point-defence missile
+  LOST Raider Battleship M69 at 23079 s: point-defence missile
+  LOST Raider Battleship M63 at 23080 s: point-defence missile
+  LOST Raider Battleship M70 at 23081 s: point-defence missile
+  LOST Battleship M67 at 23082 s: point-defence missile
+  LOST Raider Battleship M62 at 23082 s: point-defence missile
+  LOST Raider Battleship M71 at 23083 s: point-defence missile
+  LOST Battleship M68 at 23083 s: point-defence missile
+  LOST Battleship M65 at 23083 s: point-defence missile
+  LOST Raider Battleship M61 at 23084 s: point-defence missile
+  LOST Raider Battleship M72 at 23085 s: point-defence missile
+  LOST Battleship M81 at 23135 s: point-defence missile
+  LOST Battleship M76 at 23136 s: point-defence missile
+  LOST Battleship M74 at 23138 s: point-defence missile
+  LOST Battleship M73 at 23139 s: point-defence missile
+  LOST Battleship M79 at 23170 s: point-defence missile
+  LOST Battleship M80 at 23171 s: point-defence missile
+  LOST Battleship M77 at 23172 s: point-defence missile
+  LOST Battleship M66 at 23180 s: point-defence missile
+  LOST Battleship M87 at 23228 s: point-defence missile
+  LOST Battleship M91 at 23259 s: point-defence missile
+  LOST Battleship M90 at 23259 s: point-defence missile
+  LOST Battleship M92 at 23260 s: point-defence missile
+  LOST Battleship M89 at 23261 s: point-defence missile
+  LOST Raider Battleship M64 at 23313 s: point-defence missile
+  LOST Battleship M78 at 23331 s: point-defence laser
+  LOST Raider Battleship M67 at 23342 s: point-defence missile
+  LOST Raider Battleship M65 at 23342 s: point-defence missile
+  LOST Raider Battleship M82 at 23380 s: point-defence missile
+  LOST Raider Battleship M91 at 23381 s: point-defence missile
+  LOST Raider Battleship M89 at 23382 s: point-defence missile
+  LOST Raider Battleship M88 at 23384 s: point-defence missile
+  LOST Raider Battleship M93 at 23385 s: point-defence missile
+  LOST Raider Battleship M83 at 23386 s: point-defence missile
+  LOST Raider Battleship M87 at 23387 s: point-defence missile
+  LOST Raider Battleship M94 at 23387 s: point-defence missile
+  LOST Raider Battleship M73 at 23388 s: point-defence missile
+  LOST Raider Battleship M84 at 23389 s: point-defence missile
+  LOST Raider Battleship M86 at 23390 s: point-defence missile
+  LOST Raider Battleship M95 at 23390 s: point-defence missile
+  LOST Raider Battleship M85 at 23392 s: point-defence missile
+  LOST Raider Battleship M96 at 23392 s: point-defence missile
+  LOST Raider Battleship M66 at 23436 s: point-defence missile
+  LOST Raider Battleship M68 at 23479 s: point-defence missile
+  LOST Raider Battleship M76 at 23583 s: point-defence missile
+  LOST Raider Battleship M75 at 23585 s: point-defence missile
+  LOST Raider Battleship M90 at 23586 s: point-defence missile
+  LOST Raider Battleship M92 at 23587 s: point-defence missile
+  LOST Raider Battleship M74 at 23588 s: point-defence missile
+  LOST Raider Battleship M78 at 23603 s: point-defence missile
+  LOST Raider Battleship M77 at 23604 s: point-defence missile
+  LOST Raider Battleship M79 at 23695 s: point-defence missile
+  LOST Raider Battleship M81 at 23735 s: point-defence missile
+  LOST Raider Battleship M80 at 23739 s: point-defence missile
+  FactionId(0) C1 = Raider Battleship err    0.000 ls  2σ    0.035 ls  light age   264 s
+  FactionId(1) C1 = Transport err    0.000 ls  2σ    0.504 ls  light age   789 s
+  FactionId(1) C2 = Battleship err    0.000 ls  2σ    0.031 ls  light age   249 s
+  FactionId(1) C3 = Lunar sensor station err    0.001 ls  2σ    0.412 ls  light age   725 s
+T+    720 min
+  SHIP Transport hull=100.0/100 armour=100.0 screens=0% heat=103.6PJ SRM=0 LRM=0
+  SHIP Battleship hull=5501.7/8000 armour=3185.0 screens=61% heat=742.3PJ SRM=0 LRM=0
+  SHIP Raider Battleship hull=7780.9/8000 armour=5281.4 screens=62% heat=503.2PJ SRM=0 LRM=0
+  LOST Battleship M2 at 4722 s: point-defence missile
+  LOST Battleship M6 at 4724 s: point-defence missile
+  LOST Battleship M9 at 4832 s: point-defence missile
+  LOST Battleship M12 at 4833 s: point-defence missile
+  LOST Battleship M14 at 4834 s: point-defence missile
+  LOST Battleship M15 at 4835 s: point-defence missile
+  LOST Raider Battleship M3 at 4930 s: point-defence missile
+  LOST Battleship M17 at 4942 s: point-defence missile
+  LOST Battleship M20 at 4943 s: point-defence missile
+  LOST Battleship M21 at 4944 s: point-defence missile
+  LOST Battleship M22 at 4944 s: point-defence missile
+  LOST Battleship M24 at 4945 s: point-defence missile
+  LOST Battleship M3 at 4967 s: point-defence missile
+  LOST Battleship M4 at 4967 s: point-defence missile
+  LOST Battleship M5 at 4967 s: point-defence missile
+  LOST Battleship M1 at 5047 s: point-defence missile
+  LOST Battleship M8 at 5048 s: point-defence missile
+  LOST Battleship M31 at 5062 s: point-defence missile
+  LOST Battleship M32 at 5062 s: point-defence missile
+  LOST Battleship M10 at 5076 s: point-defence missile
+  LOST Battleship M11 at 5156 s: point-defence missile
+  LOST Raider Battleship M1 at 5171 s: point-defence missile
+  LOST Raider Battleship M7 at 5172 s: point-defence missile
+  LOST Raider Battleship M8 at 5172 s: point-defence missile
+  LOST Battleship M35 at 5180 s: point-defence missile
+  LOST Battleship M36 at 5181 s: point-defence missile
+  LOST Battleship M37 at 5181 s: point-defence missile
+  LOST Battleship M19 at 5186 s: point-defence missile
+  LOST Raider Battleship M2 at 5250 s: point-defence missile
+  LOST Raider Battleship M4 at 5250 s: point-defence missile
+  LOST Raider Battleship M5 at 5250 s: point-defence missile
+  LOST Raider Battleship M6 at 5280 s: point-defence laser
+  LOST Battleship M23 at 5287 s: point-defence laser
+  LOST Raider Battleship M11 at 5289 s: point-defence missile
+  LOST Raider Battleship M14 at 5291 s: point-defence missile
+  LOST Battleship M18 at 5291 s: point-defence laser
+  LOST Raider Battleship M15 at 5291 s: point-defence missile
+  LOST Raider Battleship M16 at 5292 s: point-defence missile
+  LOST Battleship M27 at 5302 s: point-defence missile
+  LOST Battleship M47 at 5302 s: point-defence missile
+  LOST Battleship M28 at 5303 s: point-defence missile
+  LOST Battleship M30 at 5303 s: point-defence missile
+  LOST Battleship M25 at 5381 s: point-defence missile
+  LOST Battleship M29 at 5404 s: point-defence laser
+  LOST Battleship M26 at 5407 s: point-defence missile
+  LOST Battleship M33 at 5422 s: point-defence missile
+  LOST Battleship M34 at 5423 s: point-defence missile
+  LOST Battleship M38 at 5423 s: point-defence missile
+  LOST Battleship M40 at 5424 s: point-defence missile
+  LOST Raider Battleship M12 at 5531 s: point-defence missile
+  LOST Raider Battleship M13 at 5531 s: point-defence missile
+  LOST Raider Battleship M9 at 5609 s: point-defence missile
+  LOST Raider Battleship M10 at 5609 s: point-defence missile
+  LOST Battleship M41 at 5622 s: point-defence missile
+  LOST Battleship M42 at 5623 s: point-defence missile
+  LOST Battleship M45 at 5624 s: point-defence missile
+  LOST Battleship M46 at 5624 s: point-defence missile
+  LOST Battleship M48 at 5625 s: point-defence missile
+  LOST Raider Battleship M18 at 5639 s: point-defence missile
+  LOST Raider Battleship M19 at 5639 s: point-defence missile
+  LOST Raider Battleship M20 at 5640 s: point-defence missile
+  LOST Raider Battleship M21 at 5640 s: point-defence missile
+  LOST Raider Battleship M22 at 5641 s: point-defence missile
+  LOST Raider Battleship M24 at 5642 s: point-defence missile
+  LOST Raider Battleship M23 at 5880 s: point-defence missile
+  LOST Raider Battleship M26 at 5964 s: point-defence missile
+  LOST Raider Battleship M27 at 5964 s: point-defence missile
+  LOST Raider Battleship M28 at 5965 s: point-defence missile
+  LOST Raider Battleship M29 at 5965 s: point-defence missile
+  LOST Raider Battleship M25 at 6202 s: point-defence missile
+  LOST Raider Battleship M30 at 6202 s: point-defence missile
+  LOST Raider Battleship M32 at 6280 s: point-defence missile
+  LOST Raider Battleship M34 at 6287 s: point-defence missile
+  LOST Raider Battleship M36 at 6288 s: point-defence missile
+  LOST Raider Battleship M38 at 6289 s: point-defence missile
+  LOST Raider Battleship M31 at 6305 s: point-defence laser
+  LOST Raider Battleship M33 at 6599 s: point-defence missile
+  LOST Raider Battleship M35 at 6600 s: point-defence missile
+  LOST Raider Battleship M47 at 6610 s: point-defence missile
+  LOST Raider Battleship M48 at 6611 s: point-defence missile
+  LOST Raider Battleship M39 at 6629 s: point-defence laser
+  LOST Raider Battleship M37 at 6632 s: point-defence laser
+  LOST Raider Battleship M41 at 6841 s: point-defence missile
+  LOST Raider Battleship M43 at 6842 s: point-defence missile
+  LOST Raider Battleship M46 at 6843 s: point-defence missile
+  LOST Raider Battleship M44 at 6917 s: point-defence missile
+  LOST Raider Battleship M42 at 6936 s: point-defence laser
+  LOST Raider Battleship M45 at 6941 s: point-defence laser
+  LOST Battleship M57 at 22677 s: point-defence missile
+  LOST Battleship M52 at 22678 s: point-defence missile
+  LOST Battleship M58 at 22679 s: point-defence missile
+  LOST Battleship M51 at 22679 s: point-defence missile
+  LOST Battleship M59 at 22680 s: point-defence missile
+  LOST Battleship M50 at 22681 s: point-defence missile
+  LOST Raider Battleship M52 at 22778 s: point-defence missile
+  LOST Battleship M69 at 22778 s: point-defence missile
+  LOST Raider Battleship M57 at 22779 s: point-defence missile
+  LOST Battleship M64 at 22779 s: point-defence missile
+  LOST Raider Battleship M51 at 22779 s: point-defence missile
+  LOST Battleship M70 at 22780 s: point-defence missile
+  LOST Raider Battleship M58 at 22780 s: point-defence missile
+  LOST Battleship M63 at 22780 s: point-defence missile
+  LOST Raider Battleship M50 at 22781 s: point-defence missile
+  LOST Battleship M71 at 22781 s: point-defence missile
+  LOST Raider Battleship M59 at 22782 s: point-defence missile
+  LOST Battleship M62 at 22782 s: point-defence missile
+  LOST Raider Battleship M49 at 22783 s: point-defence missile
+  LOST Battleship M72 at 22783 s: point-defence missile
+  LOST Raider Battleship M60 at 22783 s: point-defence missile
+  LOST Battleship M61 at 22784 s: point-defence missile
+  LOST Battleship M82 at 22880 s: point-defence missile
+  LOST Battleship M75 at 22881 s: point-defence missile
+  LOST Battleship M83 at 22882 s: point-defence missile
+  LOST Battleship M84 at 22884 s: point-defence missile
+  LOST Battleship M60 at 22954 s: point-defence missile
+  LOST Battleship M49 at 22955 s: point-defence missile
+  LOST Battleship M93 at 22979 s: point-defence missile
+  LOST Battleship M88 at 22980 s: point-defence missile
+  LOST Battleship M94 at 22981 s: point-defence missile
+  LOST Battleship M95 at 22982 s: point-defence missile
+  LOST Battleship M86 at 22983 s: point-defence missile
+  LOST Battleship M96 at 22984 s: point-defence missile
+  LOST Battleship M85 at 22985 s: point-defence missile
+  LOST Battleship M55 at 22992 s: point-defence missile
+  LOST Battleship M54 at 22993 s: point-defence missile
+  LOST Battleship M56 at 22993 s: point-defence missile
+  LOST Battleship M53 at 22994 s: point-defence missile
+  LOST Raider Battleship M54 at 23075 s: point-defence missile
+  LOST Raider Battleship M55 at 23075 s: point-defence missile
+  LOST Raider Battleship M53 at 23076 s: point-defence missile
+  LOST Raider Battleship M56 at 23077 s: point-defence missile
+  LOST Raider Battleship M69 at 23079 s: point-defence missile
+  LOST Raider Battleship M63 at 23080 s: point-defence missile
+  LOST Raider Battleship M70 at 23081 s: point-defence missile
+  LOST Battleship M67 at 23082 s: point-defence missile
+  LOST Raider Battleship M62 at 23082 s: point-defence missile
+  LOST Raider Battleship M71 at 23083 s: point-defence missile
+  LOST Battleship M68 at 23083 s: point-defence missile
+  LOST Battleship M65 at 23083 s: point-defence missile
+  LOST Raider Battleship M61 at 23084 s: point-defence missile
+  LOST Raider Battleship M72 at 23085 s: point-defence missile
+  LOST Battleship M81 at 23135 s: point-defence missile
+  LOST Battleship M76 at 23136 s: point-defence missile
+  LOST Battleship M74 at 23138 s: point-defence missile
+  LOST Battleship M73 at 23139 s: point-defence missile
+  LOST Battleship M79 at 23170 s: point-defence missile
+  LOST Battleship M80 at 23171 s: point-defence missile
+  LOST Battleship M77 at 23172 s: point-defence missile
+  LOST Battleship M66 at 23180 s: point-defence missile
+  LOST Battleship M87 at 23228 s: point-defence missile
+  LOST Battleship M91 at 23259 s: point-defence missile
+  LOST Battleship M90 at 23259 s: point-defence missile
+  LOST Battleship M92 at 23260 s: point-defence missile
+  LOST Battleship M89 at 23261 s: point-defence missile
+  LOST Raider Battleship M64 at 23313 s: point-defence missile
+  LOST Battleship M78 at 23331 s: point-defence laser
+  LOST Raider Battleship M67 at 23342 s: point-defence missile
+  LOST Raider Battleship M65 at 23342 s: point-defence missile
+  LOST Raider Battleship M82 at 23380 s: point-defence missile
+  LOST Raider Battleship M91 at 23381 s: point-defence missile
+  LOST Raider Battleship M89 at 23382 s: point-defence missile
+  LOST Raider Battleship M88 at 23384 s: point-defence missile
+  LOST Raider Battleship M93 at 23385 s: point-defence missile
+  LOST Raider Battleship M83 at 23386 s: point-defence missile
+  LOST Raider Battleship M87 at 23387 s: point-defence missile
+  LOST Raider Battleship M94 at 23387 s: point-defence missile
+  LOST Raider Battleship M73 at 23388 s: point-defence missile
+  LOST Raider Battleship M84 at 23389 s: point-defence missile
+  LOST Raider Battleship M86 at 23390 s: point-defence missile
+  LOST Raider Battleship M95 at 23390 s: point-defence missile
+  LOST Raider Battleship M85 at 23392 s: point-defence missile
+  LOST Raider Battleship M96 at 23392 s: point-defence missile
+  LOST Raider Battleship M66 at 23436 s: point-defence missile
+  LOST Raider Battleship M68 at 23479 s: point-defence missile
+  LOST Raider Battleship M76 at 23583 s: point-defence missile
+  LOST Raider Battleship M75 at 23585 s: point-defence missile
+  LOST Raider Battleship M90 at 23586 s: point-defence missile
+  LOST Raider Battleship M92 at 23587 s: point-defence missile
+  LOST Raider Battleship M74 at 23588 s: point-defence missile
+  LOST Raider Battleship M78 at 23603 s: point-defence missile
+  LOST Raider Battleship M77 at 23604 s: point-defence missile
+  LOST Raider Battleship M79 at 23695 s: point-defence missile
+  LOST Raider Battleship M81 at 23735 s: point-defence missile
+  LOST Raider Battleship M80 at 23739 s: point-defence missile
+  FactionId(0) C1 = Raider Battleship err    0.000 ls  2σ    0.030 ls  light age   247 s
+  FactionId(1) C1 = Transport err    0.003 ls  2σ    0.768 ls  light age   936 s
+  FactionId(1) C2 = Battleship err    0.000 ls  2σ    0.026 ls  light age   233 s
+  FactionId(1) C3 = Lunar sensor station err    0.000 ls  2σ    0.580 ls  light age   833 s
+
+simulated 12.00 h in 37.82 s wall (1142× real time)

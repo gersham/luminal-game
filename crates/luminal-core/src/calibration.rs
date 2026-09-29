@@ -284,29 +284,42 @@ pub struct ClassBattle {
     pub beam_hits:usize,pub beam_hp:f64,pub beam_finish:bool,pub reached_beams:bool,
     pub loss_reason:&'static str,
     pub hull:[f64;2],pub interceptors_used:u32,pub interceptor_kills:usize,pub pd_kills:usize,
+    pub final_range_au:f64,pub propulsion_disabled:[bool;2],
 }
 pub fn class_battle(class:ShipClass,seed:u64,depth:Option<u32>,range_au:f64)->ClassBattle {
     assert!(range_au.is_finite() && range_au>0.0);
     let closing=std::env::var("LUMINAL_DUEL_CLOSURE_KMS").ok().and_then(|s|s.parse::<f64>().ok()).unwrap_or(2000.0);
     assert!(closing.is_finite() && closing.abs()<0.5*C);
     let beams_only=std::env::var("LUMINAL_DUEL_MISSILES").as_deref()==Ok("off");
-    let source=crate::scenario::transport_intercept_class(seed,class);
+    // Review-only controls leave production fits and doctrine unchanged.
+    let opponent=std::env::var("LUMINAL_DUEL_OPPONENT").ok().map(|name|
+        ShipClass::COMBAT.into_iter().find(|c|c.name().eq_ignore_ascii_case(&name)).expect("opponent class")).unwrap_or(class);
+    let classes=[class,opponent];
+    let sources=classes.map(|c|crate::scenario::transport_intercept_class(seed,c));
+    let ping=std::env::var("LUMINAL_DUEL_PING").as_deref()!=Ok("off");
+    let initial_track=std::env::var("LUMINAL_DUEL_INITIAL_TRACK").as_deref()!=Ok("off");
+    let evade=std::env::var("LUMINAL_DUEL_EVADE").as_deref()!=Ok("off");
+    let envelope_fire=std::env::var("LUMINAL_DUEL_FIRE_RANGE").as_deref()==Ok("envelope");
+    let tactic=std::env::var("LUMINAL_DUEL_TACTIC").unwrap_or_else(|_|"staged".into());
+    assert!(["staged","rush","kite","retreat"].contains(&tactic.as_str()));
     let system=System {bodies:vec![]};
     let base=Vec2::new(20.0*AU,0.0);
     let specs=(0..2).map(|i|BodySpec {name:format!("{} {i}",class.name()),kind:BodyKind::Ship,faction:FactionId(i),
         state:State {pos:base+Vec2::new(0.0,i as f64*range_au*AU),vel:Vec2::new(0.0,if i==0 {closing*0.5} else {-closing*0.5})},
         thrust:Vec2::ZERO,magazine:0}).collect();
     let mut w=World::new(system,specs,100_000.0,seed);
-    let depth=depth.unwrap_or(class.interceptors());
+    let depths=classes.map(|c|depth.unwrap_or(c.interceptors()));
+    let depth=depths[0];
     for i in 0..2 {
         let original=w.bodies[i].clone();
-        let mut body=source.bodies[1].clone();body.faction=FactionId(i as u8);body.name=original.name;
+        let mut body=sources[i].bodies[1].clone();body.faction=FactionId(i as u8);body.name=original.name;
         body.trajectory=original.trajectory;body.autopilot=None;body.route=None;body.commanded=Vec2::ZERO;
         body.beam_auto=false;body.beam_target=None;body.controllable=true;
         body.controls=controls::Controls::default();body.controls.screens=controls::Mode::On;
         body.screen_up=true;body.thermal.field=1.0;
         if beams_only {body.magazine=[0,0];}
-        body.interceptor_battery.as_mut().unwrap().rounds=depth;
+        body.interceptor_battery.as_mut().unwrap().rounds=depths[i];
+        if !evade {body.controls.evade=controls::Mode::Off;}
         body.facing=if i==0 {std::f64::consts::FRAC_PI_2} else {-std::f64::consts::FRAC_PI_2};body.turn_target=body.facing;
         w.bodies[i]=body;
         w.scheduler.schedule(0.0,Event::PointDefence(BodyId(i as u32)));
@@ -314,7 +327,7 @@ pub fn class_battle(class:ShipClass,seed:u64,depth:Option<u32>,range_au:f64)->Cl
     }
     let contacts:Vec<_>=(0..2).map(|i| {
         let id=BodyId(i);let other=BodyId(1-i);let faction=FactionId(i as u8);
-        let c=w.contact_id(faction,other);let origin=w.state(id,0.0).unwrap().pos;let seen=w.state(other,0.0).unwrap();let rel=seen.pos-origin;
+        let c=w.contact_id(faction,other);if !initial_track {return c;}let origin=w.state(id,0.0).unwrap().pos;let seen=w.state(other,0.0).unwrap();let rel=seen.pos-origin;
         w.perceptions.get_mut(&faction).unwrap().ingest(Observation {contact:c,sensor:id,origin,emitted_at:0.0,sensor_received_at:0.0,decider_received_at:0.0,
             source:Source::Emission,detection:sensors::DetectionLevel::Resolved,snr:1e12,
             measurement:Measurement::BearingRange {range:rel.length(),bearing:bearing_of(rel),sigma_range:0.001,sigma_bearing:1e-10}},&w.system);
@@ -329,23 +342,28 @@ pub fn class_battle(class:ShipClass,seed:u64,depth:Option<u32>,range_au:f64)->Cl
     while w.time()<limit && w.bodies[..2].iter().all(|b|b.alive_at(w.time())) {
         for (i,&c) in contacts.iter().enumerate() {
             let id=BodyId(i as u32);let b=&w.bodies[i];
-            let Some(tr)=w.received_picture(id).and_then(|p|p.contacts.get(&c)).and_then(|c|c.estimate(w.time(),&w.system)) else {let _=w.ping(id);continue;};
+            let Some(tr)=w.received_picture(id).and_then(|p|p.contacts.get(&c)).and_then(|c|c.estimate(w.time(),&w.system)) else {if ping {let _=w.ping(id);}continue;};
             let range=(tr.pos()-w.state(id,w.time()).unwrap().pos).length();
             let payload=if b.magazine[0]>0 {Payload::Kinetic} else {Payload::Beam};
-            let desired=autopilot::weapon_standoff(payload);
+            let desired=if i==0 {match tactic.as_str() {
+                "rush"=>autopilot::weapon_standoff(Payload::Beam),
+                "kite"=>0.1*AU,
+                "retreat"=>2.0*AU,
+                _=>autopilot::weapon_standoff(payload),
+            }} else {autopilot::weapon_standoff(payload)};
             if b.autopilot.is_none_or(|ap|!matches!(ap.order,Order::KeepRange(_,range) if (range-desired).abs()<1.0)) {
                 let _=w.set_tactical_range(id,InterceptTarget::Contact(c),Some(desired));
             }
             let heat=w.bodies[i].thermal;
             if !heat.dumping && heat.heat_fraction()>1.0 {let _=w.set_heat_dump(id,true);}
             else if heat.dumping && heat.heat_fraction()<0.25 {let _=w.set_heat_dump(id,false);}
-            if class!=ShipClass::Picket && !w.bodies[i].beam_auto {let _=w.arm_beams(id);}
+            if classes[i]!=ShipClass::Picket && !w.bodies[i].beam_auto {let _=w.arm_beams(id);}
             for p in Payload::ALL {
-                if range<=if p==Payload::Kinetic {2.0*autopilot::weapon_standoff(p)} else {p.engagement_range()} && w.bodies[i].missile_queued[p.index()]==0 && w.time()>=w.bodies[i].missile_ready_at[p.index()] {
+                if range<=if p==Payload::Kinetic && !envelope_fire {2.0*autopilot::weapon_standoff(p)} else {p.engagement_range()} && w.bodies[i].missile_queued[p.index()]==0 && w.time()>=w.bodies[i].missile_ready_at[p.index()] {
                     let _=w.queue_launch(id,c,p);
                 }
             }
-            if (w.time() as u64).is_multiple_of(60) {let _=w.ping(id);}
+            if ping && (w.time() as u64).is_multiple_of(60) {let _=w.ping(id);}
         }
         w.advance_to(w.time()+5.0);
         if (w.time() as u64).is_multiple_of(300) {
@@ -368,7 +386,11 @@ pub fn class_battle(class:ShipClass,seed:u64,depth:Option<u32>,range_au:f64)->Cl
             assert!(!w.bodies[loss.body.0 as usize].alive_at(w.time()),"lost body remains alive");
         }
     }
-    ClassBattle {class,seed,depth,time:w.time(),winner:match (w.bodies[0].alive_at(w.time()),w.bodies[1].alive_at(w.time())) {(true,false)=>0,(false,true)=>1,(false,false)=>2,_=>-1},
+    ClassBattle {class,seed,depth,time:w.time(),
+        final_range_au:(w.bodies[0].trajectory.last().state_at(w.time()).pos-w.bodies[1].trajectory.last().state_at(w.time()).pos).length()/AU,
+        propulsion_disabled:std::array::from_fn(|i|w.bodies[i].operating_effectiveness(crate::damage::System::Propulsion)==0.0
+            || w.bodies[i].operating_effectiveness(crate::damage::System::Power)==0.0),
+        winner:match (w.bodies[0].alive_at(w.time()),w.bodies[1].alive_at(w.time())) {(true,false)=>0,(false,true)=>1,(false,false)=>2,_=>-1},
         launched:std::array::from_fn(|j|w.bodies.iter().filter(|b|b.missile.is_some_and(|m|m.payload==Payload::ALL[j])).count() as u32),
         missile_hits:std::array::from_fn(|j|w.hits.iter().filter(|h|h.payload==Payload::ALL[j]).count()),
         missile_hp:std::array::from_fn(|j|w.hits.iter().filter(|h|h.payload==Payload::ALL[j]).map(|h|h.hull_damage+h.armour_damage).sum()),
@@ -391,11 +413,23 @@ pub struct EnvelopeTrial {
     pub engine_reversals:u32,
 }
 pub fn envelope_trial(payload:Payload,range_au:f64,closure:f64,evade:bool,active:bool,seed:u64)->EnvelopeTrial {
+    envelope_trial_with_burn(payload,range_au,closure,evade,active,seed,0.0)
+}
+/// Positive burn accelerates the target away; negative burn accelerates toward the launcher.
+pub fn envelope_trial_with_burn(payload:Payload,range_au:f64,closure:f64,evade:bool,active:bool,seed:u64,target_g:f64)->EnvelopeTrial {
+    envelope_trial_for_class(payload,range_au,closure,evade,active,seed,target_g,ShipClass::Frigate)
+}
+pub fn envelope_trial_for_class(payload:Payload,range_au:f64,closure:f64,evade:bool,active:bool,seed:u64,target_g:f64,class:ShipClass)->EnvelopeTrial {
     let specs=vec![
         BodySpec {name:"Launcher".into(),kind:BodyKind::Ship,faction:FactionId(0),state:State {pos:Vec2::ZERO,vel:Vec2::ZERO},thrust:Vec2::ZERO,magazine:10},
         BodySpec {name:"Target".into(),kind:BodyKind::Ship,faction:FactionId(1),state:State {pos:Vec2::new(range_au*AU,0.0),vel:Vec2::new(-closure,0.0)},thrust:Vec2::ZERO,magazine:0},
     ];
     let mut w=World::new(System {bodies:vec![]},specs,1000.0,seed);
+    // Isolate class manoeuvrability/heat from defensive weapons and ECM.
+    w.bodies[1].ship_class=Some(class);
+    w.bodies[1].thermal.capacity_scale=class.scale();
+    w.bodies[1].damage.hull_max=crate::damage::FRIGATE_HULL_HP*class.scale();
+    w.bodies[1].damage.hull=w.bodies[1].damage.hull_max;
     for b in &mut w.bodies {b.controls.ecm=controls::Mode::Off;b.controls.screens=controls::Mode::Off;b.controls.evade=controls::Mode::Off;}
     w.bodies[1].controls.evade=if evade {controls::Mode::Auto} else {controls::Mode::Off};
     if active {w.bodies[0].controls.active=controls::Mode::Auto;}
@@ -406,6 +440,7 @@ pub fn envelope_trial(payload:Payload,range_au:f64,closure:f64,evade:bool,active
     let tr=w.perceptions.get_mut(&FactionId(0)).unwrap().contacts.get_mut(&c).unwrap().track.as_mut().unwrap();
     tr.x[2]=-closure;tr.p[2][2]=1e-4;tr.p[3][3]=1e-4;
     let id=w.launch(BodyId(0),c,payload).unwrap();
+    if target_g!=0.0 {w.set_thrust(BodyId(1),Vec2::new(target_g*G0,0.0)).unwrap();}
     // Known boost track isolates maneuver benefit from stealth acquisition.
     w.refresh_missile_contact(FactionId(1),id);
     let mut boost_au=0.0;let mut terminal_au=0.0;let mut previous=Phase::Burn;

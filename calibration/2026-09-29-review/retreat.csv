@@ -1,0 +1,9 @@
+class,seed,depth,time,winner,srm_launched,lrm_launched,srm_hits,lrm_hits,srm_hp,lrm_hp,srm_crit,lrm_crit,beam_hits,beam_hp,beam_finish,reached_beams,hull_a,hull_b,interceptors_used,interceptor_kills,pd_kills,loss_reason,final_range_au,drive_disabled_a,drive_disabled_b
+Cruiser,24000,200,28800,-1,48,72,0,5,-0,0,0,0,131,1.0342523661402083,false,false,1,1,273,106,8,timeout,0.010154636535011852,false,false
+Cruiser,24001,200,28800,-1,48,72,0,3,-0,0,0,0,104,0.806862678269681,false,false,1,1,274,108,8,timeout,0.010505118514677678,false,false
+Cruiser,24002,200,28800,-1,48,72,0,3,-0,37.5,0,0,120,0.2589344530415474,false,false,1,1,287,102,11,timeout,0.01030044776240883,false,false
+Cruiser,24003,200,28800,-1,48,72,0,2,-0,0,0,0,119,0.2253912694702649,false,false,1,1,255,109,7,timeout,0.010312275097705659,false,false
+Cruiser,24004,200,28800,-1,48,72,1,5,0,37.5,0,1,112,1.1255726445297114,false,false,1,1,279,107,6,timeout,0.010400267442761754,false,false
+Cruiser,24005,200,28800,-1,48,72,0,6,-0,37.5,0,0,170,1.1569715780226488,false,false,1,1,279,108,4,timeout,0.009644741389361715,false,false
+Cruiser,24006,200,28800,-1,48,72,0,5,-0,112.5,0,0,120,0.8562192294773467,false,false,1,1,268,107,5,timeout,0.010303823432014324,false,false
+Cruiser,24007,200,24320,1,48,72,0,4,-0,75,0,1,277,2040.6803627351487,true,true,0.7452047813716852,1,263,111,5,reactor,0.007188579366923965,true,false

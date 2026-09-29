@@ -1,0 +1,9 @@
+class,seed,hours,outcome
+Frigate,32000,12.00,FactionId(0): Raider Frigate was destroyed
+Frigate,32001,12.00,No outcome by 12 hours
+Destroyer,32000,6.00,FactionId(0): Raider Destroyer was destroyed
+Destroyer,32001,12.00,No outcome by 12 hours
+Cruiser,32000,12.00,No outcome by 12 hours
+Cruiser,32001,12.00,No outcome by 12 hours
+Battleship,32000,12.00,No outcome by 12 hours
+Battleship,32001,12.00,No outcome by 12 hours

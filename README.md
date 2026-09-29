@@ -577,3 +577,7 @@ powered trajectory, including motion during light delay. It must still reach the
 100 km kill envelope with its limited correction fuel before rolling for a kill.
 See [the interceptor calibration](calibration/2026-09-28-interceptors/report.md)
 for accelerating-target tests and SRM salvo comparisons.
+The [broader balance review](calibration/2026-09-29-review/report.md) covers
+10,240 isolated missile shots, class matchups, defensive ammunition, evasion,
+active sensors, alternate tactics and mission pacing, with reproducible runners
+and raw results. Its proposed magazine changes have not been applied.

@@ -11,18 +11,43 @@ use std::time::Instant;
 fn main() {
     let mut args = std::env::args().skip(1);
     let first = args.next();
-    if first.as_deref()==Some("--missile-envelope") {
+    if matches!(first.as_deref(),Some("--missile-envelope"|"--edge-envelope")) {
         let seeds=args.next().and_then(|s|s.parse::<u64>().ok()).unwrap_or(32);
         println!("payload,range_au,closure_kms,evade,active,seed,hit,time,fuel,boost_au,terminal_au,reversals");
         for p in luminal_core::missile::Payload::ALL {
             let nominal=p.engagement_range()/luminal_core::units::AU;
-            for (fraction,closure,evade,active) in [(0.1,0.0,false,false),(0.1,0.0,true,false),(1.0,0.0,false,false),
-                (1.0,0.0,true,false),(1.0,0.0,false,true),(1.1,0.0,false,false),(1.2,0.0,false,false),(1.2,0.0,true,false),(1.0,5000.0,false,false),(1.0,-5000.0,false,false)] {
+            let cases=if first.as_deref()==Some("--edge-envelope") {
+                vec![(1.25,0.0,false,false),(1.25,0.0,true,false),(1.3,0.0,false,false),(1.3,0.0,true,false),(1.5,0.0,false,false),(1.5,0.0,true,false)]
+            } else {vec![(0.1,0.0,false,false),(0.1,0.0,true,false),(1.0,0.0,false,false),
+                (1.0,0.0,true,false),(1.0,0.0,false,true),(1.1,0.0,false,false),(1.2,0.0,false,false),(1.2,0.0,true,false),(1.0,5000.0,false,false),(1.0,-5000.0,false,false)]};
+            for (fraction,closure,evade,active) in cases {
                 for seed in 0..seeds {
                     let r=luminal_core::world::calibration::envelope_trial(p,nominal*fraction,closure,evade,active,5000+seed);
                     println!("{},{},{},{},{},{},{},{},{},{},{},{}",p.name(),nominal*fraction,closure,evade,active,seed,r.hit,r.time,r.fuel,r.boost_au,r.terminal_au,r.engine_reversals);
                 }
             }
+        }
+        return;
+    }
+    if first.as_deref()==Some("--class-evasion") {
+        let seeds=args.next().and_then(|s|s.parse::<u64>().ok()).unwrap_or(64);
+        println!("class,payload,evade,seed,hit,time");
+        for class in luminal_core::world::ShipClass::COMBAT {for p in luminal_core::missile::Payload::ALL {for evade in [false,true] {for seed in 0..seeds {
+            let r=luminal_core::world::calibration::envelope_trial_for_class(p,p.engagement_range()/luminal_core::units::AU,0.0,evade,false,36000+seed,0.0,class);
+            println!("{},{},{evade},{seed},{},{}",class.name(),p.name(),r.hit,r.time);
+        }}}}
+        return;
+    }
+    if first.as_deref()==Some("--maneuver-envelope") {
+        let seeds=args.next().and_then(|s|s.parse::<u64>().ok()).unwrap_or(128);
+        println!("payload,fraction,closure_kms,target_g,seed,hit,time,fuel");
+        for p in luminal_core::missile::Payload::ALL {
+            for fraction in [0.5,1.0,1.1] {for (closure,burn) in [(5000.0,-100.0),(0.0,0.0),(-5000.0,100.0)] {
+                for seed in 0..seeds {
+                    let r=luminal_core::world::calibration::envelope_trial_with_burn(p,p.engagement_range()/luminal_core::units::AU*fraction,closure,false,false,20000+seed,burn);
+                    println!("{},{fraction},{closure},{burn},{seed},{},{},{}",p.name(),r.hit,r.time,r.fuel);
+                }
+            }}
         }
         return;
     }
@@ -32,13 +57,13 @@ fn main() {
         let depths=args.next().unwrap_or_else(||"stock".into());
         let range=args.next().and_then(|s|s.parse().ok()).unwrap_or(0.35);
         let first_seed=args.next().and_then(|s|s.parse::<u64>().ok()).unwrap_or(1000);
-        println!("class,seed,depth,time,winner,srm_launched,lrm_launched,srm_hits,lrm_hits,srm_hp,lrm_hp,srm_crit,lrm_crit,beam_hits,beam_hp,beam_finish,reached_beams,hull_a,hull_b,interceptors_used,interceptor_kills,pd_kills,loss_reason");
+        println!("class,seed,depth,time,winner,srm_launched,lrm_launched,srm_hits,lrm_hits,srm_hp,lrm_hp,srm_crit,lrm_crit,beam_hits,beam_hp,beam_finish,reached_beams,hull_a,hull_b,interceptors_used,interceptor_kills,pd_kills,loss_reason,final_range_au,drive_disabled_a,drive_disabled_b");
         for class in luminal_core::world::ShipClass::COMBAT {
             if selection!="all" && !class.name().eq_ignore_ascii_case(&selection) {continue;}
             for depth in depths.split(',').map(|s|if s=="stock" {None} else {Some(s.parse().expect("interceptor depth"))}) {
                 for seed in first_seed..first_seed+seeds {
                     let r=luminal_core::world::calibration::class_battle(class,seed,depth,range);
-                    println!("{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}",class.name(),r.seed,r.depth,r.time,r.winner,r.launched[0],r.launched[1],r.missile_hits[0],r.missile_hits[1],r.missile_hp[0],r.missile_hp[1],r.missile_crit[0],r.missile_crit[1],r.beam_hits,r.beam_hp,r.beam_finish,r.reached_beams,r.hull[0],r.hull[1],r.interceptors_used,r.interceptor_kills,r.pd_kills,r.loss_reason);
+                    println!("{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}",class.name(),r.seed,r.depth,r.time,r.winner,r.launched[0],r.launched[1],r.missile_hits[0],r.missile_hits[1],r.missile_hp[0],r.missile_hp[1],r.missile_crit[0],r.missile_crit[1],r.beam_hits,r.beam_hp,r.beam_finish,r.reached_beams,r.hull[0],r.hull[1],r.interceptors_used,r.interceptor_kills,r.pd_kills,r.loss_reason,r.final_range_au,r.propulsion_disabled[0],r.propulsion_disabled[1]);
                 }
             }
         }

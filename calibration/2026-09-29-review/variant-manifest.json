@@ -1,0 +1,299 @@
+[
+  {
+    "name": "paired-stock",
+    "argv": [
+      "/home/gersham/Sources/personal/luminal-game/target/release/luminal-cli",
+      "--class-balance",
+      "8",
+      "Cruiser",
+      "stock",
+      ".35",
+      "24000"
+    ],
+    "env": {
+      "LUMINAL_DUEL_FIRE_RANGE": "envelope"
+    }
+  },
+  {
+    "name": "legacy-paired",
+    "argv": [
+      "/home/gersham/Sources/personal/luminal-game/target/release/luminal-cli",
+      "--class-balance",
+      "8",
+      "Cruiser",
+      "stock",
+      ".35",
+      "24000"
+    ],
+    "env": {
+      "LUMINAL_DUEL_FIRE_RANGE": "legacy"
+    }
+  },
+  {
+    "name": "depleted",
+    "argv": [
+      "/home/gersham/Sources/personal/luminal-game/target/release/luminal-cli",
+      "--class-balance",
+      "8",
+      "Cruiser",
+      "30",
+      ".35",
+      "24000"
+    ],
+    "env": {
+      "LUMINAL_DUEL_FIRE_RANGE": "envelope"
+    }
+  },
+  {
+    "name": "depth-80",
+    "argv": [
+      "/home/gersham/Sources/personal/luminal-game/target/release/luminal-cli",
+      "--class-balance",
+      "8",
+      "Cruiser",
+      "80",
+      ".35",
+      "24000"
+    ],
+    "env": {
+      "LUMINAL_DUEL_FIRE_RANGE": "envelope"
+    }
+  },
+  {
+    "name": "depth-120",
+    "argv": [
+      "/home/gersham/Sources/personal/luminal-game/target/release/luminal-cli",
+      "--class-balance",
+      "8",
+      "Cruiser",
+      "120",
+      ".35",
+      "24000"
+    ],
+    "env": {
+      "LUMINAL_DUEL_FIRE_RANGE": "envelope"
+    }
+  },
+  {
+    "name": "no-interceptors",
+    "argv": [
+      "/home/gersham/Sources/personal/luminal-game/target/release/luminal-cli",
+      "--class-balance",
+      "8",
+      "Cruiser",
+      "0",
+      ".35",
+      "24000"
+    ],
+    "env": {
+      "LUMINAL_DUEL_FIRE_RANGE": "envelope"
+    }
+  },
+  {
+    "name": "no-evade",
+    "argv": [
+      "/home/gersham/Sources/personal/luminal-game/target/release/luminal-cli",
+      "--class-balance",
+      "8",
+      "Cruiser",
+      "stock",
+      ".35",
+      "24000"
+    ],
+    "env": {
+      "LUMINAL_DUEL_FIRE_RANGE": "envelope",
+      "LUMINAL_DUEL_EVADE": "off"
+    }
+  },
+  {
+    "name": "no-ping",
+    "argv": [
+      "/home/gersham/Sources/personal/luminal-game/target/release/luminal-cli",
+      "--class-balance",
+      "8",
+      "Cruiser",
+      "stock",
+      ".35",
+      "24000"
+    ],
+    "env": {
+      "LUMINAL_DUEL_FIRE_RANGE": "envelope",
+      "LUMINAL_DUEL_PING": "off"
+    }
+  },
+  {
+    "name": "natural-tracks",
+    "argv": [
+      "/home/gersham/Sources/personal/luminal-game/target/release/luminal-cli",
+      "--class-balance",
+      "8",
+      "Cruiser",
+      "stock",
+      ".35",
+      "24000"
+    ],
+    "env": {
+      "LUMINAL_DUEL_FIRE_RANGE": "envelope",
+      "LUMINAL_DUEL_INITIAL_TRACK": "off"
+    }
+  },
+  {
+    "name": "natural-tracks-no-ping",
+    "argv": [
+      "/home/gersham/Sources/personal/luminal-game/target/release/luminal-cli",
+      "--class-balance",
+      "8",
+      "Cruiser",
+      "stock",
+      ".35",
+      "24000"
+    ],
+    "env": {
+      "LUMINAL_DUEL_FIRE_RANGE": "envelope",
+      "LUMINAL_DUEL_INITIAL_TRACK": "off",
+      "LUMINAL_DUEL_PING": "off"
+    }
+  },
+  {
+    "name": "rush",
+    "argv": [
+      "/home/gersham/Sources/personal/luminal-game/target/release/luminal-cli",
+      "--class-balance",
+      "8",
+      "Cruiser",
+      "stock",
+      ".35",
+      "24000"
+    ],
+    "env": {
+      "LUMINAL_DUEL_FIRE_RANGE": "envelope",
+      "LUMINAL_DUEL_TACTIC": "rush"
+    }
+  },
+  {
+    "name": "kite",
+    "argv": [
+      "/home/gersham/Sources/personal/luminal-game/target/release/luminal-cli",
+      "--class-balance",
+      "8",
+      "Cruiser",
+      "stock",
+      ".35",
+      "24000"
+    ],
+    "env": {
+      "LUMINAL_DUEL_FIRE_RANGE": "envelope",
+      "LUMINAL_DUEL_TACTIC": "kite"
+    }
+  },
+  {
+    "name": "retreat",
+    "argv": [
+      "/home/gersham/Sources/personal/luminal-game/target/release/luminal-cli",
+      "--class-balance",
+      "8",
+      "Cruiser",
+      "stock",
+      ".35",
+      "24000"
+    ],
+    "env": {
+      "LUMINAL_DUEL_FIRE_RANGE": "envelope",
+      "LUMINAL_DUEL_TACTIC": "retreat"
+    }
+  },
+  {
+    "name": "opening-lrm",
+    "argv": [
+      "/home/gersham/Sources/personal/luminal-game/target/release/luminal-cli",
+      "--class-balance",
+      "8",
+      "Cruiser",
+      "stock",
+      "1.4",
+      "24000"
+    ],
+    "env": {
+      "LUMINAL_DUEL_FIRE_RANGE": "envelope"
+    }
+  },
+  {
+    "name": "opening-srm",
+    "argv": [
+      "/home/gersham/Sources/personal/luminal-game/target/release/luminal-cli",
+      "--class-balance",
+      "8",
+      "Cruiser",
+      "stock",
+      ".1",
+      "24000"
+    ],
+    "env": {
+      "LUMINAL_DUEL_FIRE_RANGE": "envelope"
+    }
+  },
+  {
+    "name": "frigate-destroyer",
+    "argv": [
+      "/home/gersham/Sources/personal/luminal-game/target/release/luminal-cli",
+      "--class-balance",
+      "8",
+      "Frigate",
+      "stock",
+      ".35",
+      "24000"
+    ],
+    "env": {
+      "LUMINAL_DUEL_FIRE_RANGE": "envelope",
+      "LUMINAL_DUEL_OPPONENT": "Destroyer"
+    }
+  },
+  {
+    "name": "destroyer-cruiser",
+    "argv": [
+      "/home/gersham/Sources/personal/luminal-game/target/release/luminal-cli",
+      "--class-balance",
+      "8",
+      "Destroyer",
+      "stock",
+      ".35",
+      "24000"
+    ],
+    "env": {
+      "LUMINAL_DUEL_FIRE_RANGE": "envelope",
+      "LUMINAL_DUEL_OPPONENT": "Cruiser"
+    }
+  },
+  {
+    "name": "cruiser-battleship",
+    "argv": [
+      "/home/gersham/Sources/personal/luminal-game/target/release/luminal-cli",
+      "--class-balance",
+      "8",
+      "Cruiser",
+      "stock",
+      ".35",
+      "24000"
+    ],
+    "env": {
+      "LUMINAL_DUEL_FIRE_RANGE": "envelope",
+      "LUMINAL_DUEL_OPPONENT": "Battleship"
+    }
+  },
+  {
+    "name": "battleship-cruiser",
+    "argv": [
+      "/home/gersham/Sources/personal/luminal-game/target/release/luminal-cli",
+      "--class-balance",
+      "8",
+      "Battleship",
+      "stock",
+      ".35",
+      "24000"
+    ],
+    "env": {
+      "LUMINAL_DUEL_FIRE_RANGE": "envelope",
+      "LUMINAL_DUEL_OPPONENT": "Cruiser"
+    }
+  }
+]
