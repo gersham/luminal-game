@@ -4,6 +4,8 @@ mod weapon_effects;
 mod jump_effects;
 mod theme;
 mod startup;
+mod roster;
+mod ship_art;
 
 use luminal_core::world::jump::{JumpState, MAX_SOL_RADIUS_AU};
 use eframe::egui::{self, Color32, Pos2, Rect, Sense, Shape, Stroke, StrokeKind, Vec2 as EVec2};
@@ -486,7 +488,7 @@ mod tests {
 
     #[test]
     fn chevrons_require_a_fresh_resolved_course() {
-        let mut c=ContactView {detection:sensors::DetectionLevel::Resolved,ping_remaining:0.0,active_fire_control:0.0,reporting_sensor:None,resolved_class:None,resolved_interceptor:false,damage:None,id:ContactId(1),resolved_kind:Some(BodyKind::Ship),resolved_missile:false,
+        let mut c=ContactView {identified_name:None,display_class:None,detection:sensors::DetectionLevel::Resolved,ping_remaining:0.0,active_fire_control:0.0,reporting_sensor:None,resolved_class:None,resolved_interceptor:false,damage:None,id:ContactId(1),resolved_kind:Some(BodyKind::Ship),resolved_missile:false,
             quality:"position resolution",stale:false,bearings:vec![],
             track:Some(luminal_core::session::TrackView {velocity_sigma:1.0,pos:Vec2::ZERO,vel:Vec2::new(1.0,0.0),accel:Vec2::ZERO,
                 cov:[[1.0,0.0],[0.0,1.0]],updated_at:0.0,updates:4}),
@@ -682,10 +684,10 @@ mod tests {
         }
         use luminal_core::world::ShipClass;
         for class in [ShipClass::Picket,ShipClass::Frigate] {
-            let mut app=LuminalApp::new_with_class(class);let ctx=egui::Context::default();
+            let mut app=LuminalApp::new_with_theme(class,theme::Theme::Luminal);let ctx=egui::Context::default();
             assert!(text_position(&frame(&mut app,&ctx,false,vec![]),"JUMP DRIVE").is_none());
         }
-        let mut app=LuminalApp::new_with_class(ShipClass::Destroyer);let ctx=egui::Context::default();
+        let mut app=LuminalApp::new_with_theme(ShipClass::Destroyer,theme::Theme::Luminal);let ctx=egui::Context::default();
         let output=frame(&mut app,&ctx,false,vec![]);let button=text_position(&output,"JUMP DRIVE").unwrap();
         click(&mut app,&ctx,false,button);assert_eq!(app.jump_select,Some(BodyId(1)));
         app.fit_pending=false;app.track_player=false;app.camera=Camera {center:Vec2::new(2.0*AU,0.0),km_per_px:AU/100.0};
@@ -893,6 +895,7 @@ struct LuminalApp {
     selection_pending:bool,
     chosen_class:luminal_core::world::ShipClass,
     theme:theme::Theme,
+    ship_art:ship_art::ShipArt,
     tactical_log:TacticalLog,
     weapon_effects:weapon_effects::WeaponEffects,
     jump_effects:jump_effects::JumpEffects,
@@ -943,7 +946,9 @@ impl LuminalApp {
             sub_header(ui,&format!("FIRE CONTROL · {}",self.theme.name().to_uppercase()),Some(("PRE-DEFENCE",TEXT_MUTED)));
             if let Some(ship)=own {self.compact_weapons(ui,view,ship);}
             let ui=&mut columns[1];
-            sub_header(ui,"OWN SHIP",own.and_then(|b|if b.damage.damage.lifeless() {Some(("LIFELESS HULK",TEXT_MUTED))} else if b.damage.damage.state(System::Mind)==Condition::Destroyed {Some(("MIND OFFLINE",TEXT_MUTED))} else {None}));
+            let mind_offline=format!("{} OFFLINE",self.theme.system(System::Mind).to_uppercase());
+            sub_header(ui,"OWN SHIP",own.and_then(|b|if b.damage.damage.lifeless() {Some(("LIFELESS HULK",TEXT_MUTED))} else if b.damage.damage.state(System::Mind)==Condition::Destroyed {Some((mind_offline.as_str(),TEXT_MUTED))} else {None}));
+            if let Some(b)=own {ui.label(egui::RichText::new(&b.name).strong().color(FRIEND));ui.small(b.display_class.as_deref().unwrap_or("Ship"));}
             compact_status(ui,own.map(|b|&b.damage),own.map(|b|b.thrust.length()/G0),own.and_then(|b|b.ship_class).map(|c|c.max_g()),false);
             compact_systems(ui,"own_deck",own.map(|b|b.damage),self.theme);
             if let Some(ship)=own {self.repair_controls(ui,ship);}
@@ -952,6 +957,7 @@ impl LuminalApp {
             let systems=target.and_then(|c|target_system_report(c,view));
             let label=if systems.is_some_and(|r|r.damage.lifeless()) {"LIFELESS HULK"} else if target.is_some_and(|c|c.damage.is_some()) && systems.is_none() {"STALE ECHO"} else {"LAST ECHO"};
             sub_header(ui,"TARGET",Some((label,CONTACT)));
+            if let Some(c)=target {ui.label(egui::RichText::new(contact_label(c)).strong().color(CONTACT));ui.small(contact_class(c));}
             let thrust=target.filter(|c|contact_has_course(c)).and_then(|c|c.track.as_ref()).map(|t|t.accel.length()/G0)
                 .filter(|_|systems.is_some_and(|r|r.operating_effectiveness(System::Propulsion)>0.0));
             compact_status(ui,target.and_then(|c|c.damage.as_ref()),thrust,target.and_then(|c|c.resolved_class).map(|c|c.max_g()),true);
@@ -1245,12 +1251,18 @@ Shift + right click: extend route").monospace().size(9.0).color(TEXT_MUTED));
         Self::new_with_class(chosen)
     }
     fn new_with_class(chosen:luminal_core::world::ShipClass) -> Self {
+        let theme=std::env::var("LUMINAL_THEME").ok().and_then(|name|theme::Theme::ALL.into_iter().find(|t|t.name().eq_ignore_ascii_case(&name))).unwrap_or_default();
+        Self::new_with_theme(chosen,theme)
+    }
+    fn new_with_theme(chosen:luminal_core::world::ShipClass,theme:theme::Theme) -> Self {
         let seed = std::env::var("LUMINAL_SEED").ok().and_then(|s|s.parse().ok()).unwrap_or_else(|| {
             if cfg!(test) || std::env::var_os("LUMINAL_SCREENSHOT").is_some() {42} else {
                 std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos() as u64
             }
         });
-        let mut session=LocalSession::new(scenario::transport_intercept_class(seed,chosen));
+        let mut world=scenario::transport_intercept_class(seed,chosen);
+        theme.name_scenario(&mut world,seed);
+        let mut session=LocalSession::new(world);
         let log_path=std::path::PathBuf::from("logs/latest.log");
         let log_error=if cfg!(test) || std::env::var_os("LUMINAL_SCREENSHOT").is_some() {None} else {
             std::fs::create_dir_all("logs").and_then(|_|session.enable_debug_log(&log_path)).err()
@@ -1279,7 +1291,7 @@ Shift + right click: extend route").monospace().size(9.0).color(TEXT_MUTED));
             ship_headings: BTreeMap::new(),
             selection_pending:!cfg!(test) && (std::env::var_os("LUMINAL_SCREENSHOT").is_none() || std::env::var_os("LUMINAL_SHIP_SELECT").is_some()),
             chosen_class:chosen,
-            theme:std::env::var("LUMINAL_THEME").ok().and_then(|name|theme::Theme::ALL.into_iter().find(|t|t.name().eq_ignore_ascii_case(&name))).unwrap_or_default(),
+            theme,ship_art:ship_art::ShipArt::default(),
             tactical_log:TacticalLog::default(),
             weapon_effects:weapon_effects::WeaponEffects::default(),
             jump_effects:jump_effects::JumpEffects::default(),
@@ -1301,7 +1313,7 @@ Shift + right click: extend route").monospace().size(9.0).color(TEXT_MUTED));
         let volume=self.audio.volume;
         let music_volume=self.audio.music_volume;
         let muted=self.audio.muted;
-        *self=Self::new_with_class(self.chosen_class);
+        *self=Self::new_with_theme(self.chosen_class,theme);
         self.theme=theme;
         self.audio.volume=volume;self.audio.music_volume=music_volume;self.audio.muted=muted;self.audio.settings_changed();
     }
@@ -1546,6 +1558,7 @@ fn contact_label(c: &ContactView) -> String {
     if c.resolved_interceptor {format!("Interceptor {}",c.id.0)}
     else if c.resolved_missile {format!("Missile {}",c.id.0)}
     else if c.resolved_kind==Some(BodyKind::Probe) {format!("Probe {}",c.id.0)}
+    else if let Some(name)=&c.identified_name {name.clone()}
     else if c.resolved_kind==Some(BodyKind::Station) {format!("Station {}",c.id.0)}
     else if let Some(class)=c.resolved_class {format!("{}{}",class.designator(),c.id.0)}
     else {format!("T{}",c.id.0)}
@@ -1700,7 +1713,7 @@ impl eframe::App for LuminalApp {
         self.weapon_effects.observe(&view,self.own_faction(),ui.input(|i|i.time));
         self.audio.observe(&view,match self.selected {Some(Selection::Body(id))=>Some(id),_=>None});
         if ui.input(|i|i.pointer.button_clicked(egui::PointerButton::Primary)) {self.audio.play(audio::Cue::Click);}
-        let deck_height=(ui.available_height()*0.26).clamp(292.0,308.0);
+        let deck_height=(ui.available_height()*0.26).clamp(332.0,348.0);
         let frame=panel_frame().inner_margin(egui::Margin {left:0,right:0,top:5,bottom:4});
         egui::Panel::bottom("command_deck").exact_size(deck_height).resizable(false).frame(frame).show(ui, |ui| {
             panel_style(ui);
@@ -2770,7 +2783,7 @@ impl LuminalApp {
 fn contact_details(ui: &mut egui::Ui, view: &View, c: &ContactView) {
     ui.separator();
     ui.heading(contact_label(c));
-    ui.label(format!("{}. Identity unknown.", track_quality(c).0));
+    ui.label(format!("{} · {} · {}",contact_class(c),track_quality(c).0,if c.identified_name.is_some() {"Identity confirmed"} else {"Identity unknown"}));
     ui.label(format!(
         "Last seen by {} · light emitted T+ {}, reached flagship T+ {}",
         match c.last_source {
@@ -3693,7 +3706,8 @@ fn payload_tile(ui: &mut egui::Ui, width: f32, name: &str, available: u32, queue
     resp.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
-fn contact_class(c: &ContactView) -> &'static str {
+fn contact_class(c: &ContactView) -> &str {
+    if let Some(class)=c.display_class.as_deref() {return class;}
     if c.resolved_missile {
         return "MISSILE";
     }
@@ -3893,7 +3907,7 @@ fn compact_systems(ui:&mut egui::Ui,salt:&str,report:Option<Report>,theme:theme:
         for (i,system) in systems.iter().enumerate() {
             let cell=Rect::from_min_size(Pos2::new(rect.left()+i as f32*(w+3.0),top+8.0),EVec2::new(w,13.0));
             let chip=Chip::of(report,*system);
-            paint_chip(ui.painter(),cell,system.code(),chip);
+            paint_chip(ui.painter(),cell,theme.system_code(*system),chip);
             let repair=paint_repair_progress(ui.painter(),cell,report,*system);
             ui.interact(cell,ui.id().with((salt,*system as usize)),Sense::hover()).on_hover_text(format!("{} [{}] · {}{repair}",theme.system(*system),system.code(),chip.describe()));
         }
@@ -3941,7 +3955,7 @@ fn system_matrix(ui: &mut egui::Ui, salt: &str, report: Option<Report>,theme:the
             for (i, &system) in systems.iter().enumerate() {
                 let cell = Rect::from_min_size(Pos2::new(x + i as f32 * (chip_w + gap), y + label_h + 2.0), EVec2::new(chip_w, chip_h));
                 let chip = Chip::of(report, system);
-                paint_chip(&p, cell, system.code(), chip);
+                paint_chip(&p, cell, theme.system_code(system), chip);
                 let repair=paint_repair_progress(&p,cell,report,system);
                 ui.interact(cell, ui.id().with(("system_chip", salt, system as usize)), Sense::hover()).on_hover_text(format!(
                     "{}\n{}{}{repair}",

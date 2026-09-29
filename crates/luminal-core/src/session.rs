@@ -123,6 +123,7 @@ impl From<OrderError> for Rejection {
 /// Command-ship state, delayed friendly telemetry, or truth for the spectator.
 #[derive(Clone, Debug)]
 pub struct BodyView {
+    pub display_class:Option<String>,
     pub withdrawing:bool,
     pub jump:Option<crate::world::jump::JumpState>,
     pub ship_class:Option<crate::world::ShipClass>,
@@ -212,9 +213,12 @@ pub struct BearingView {
     pub emitted_at: f64,
 }
 
-/// Something the faction has sensed. Identity and truth are not included.
+/// Something the faction has sensed. Only received identity is included; no truth IDs.
 #[derive(Clone, Debug)]
 pub struct ContactView {
+    /// Remembered name only after an identity-level observation arrives.
+    pub identified_name:Option<String>,
+    pub display_class:Option<String>,
     pub detection:crate::sensors::DetectionLevel,
     pub reporting_sensor:Option<BodyId>,
     pub ping_remaining:f64,
@@ -607,7 +611,7 @@ impl LocalSession {
                     thermal: b.thermal,
                     thermal_rated_accel:b.heat_rated_accel(),
                     id: BodyId(i as u32),
-                    name: b.name.clone(),
+                    name: b.name.clone(),display_class:b.display_class.clone(),
                     kind: b.kind,
                     faction: b.faction,
                     pos: s.pos,
@@ -677,6 +681,8 @@ impl LocalSession {
                             Measurement::Bearing { .. } => None,
                         };
                         ContactView {
+                            identified_name:if c.identified {w.body_for_contact(f,c.id).and_then(|id|w.body(id)).filter(|b|matches!(b.kind,BodyKind::Ship|BodyKind::Station)).map(|b|b.name.clone())} else {None},
+                            display_class:if c.resolved {w.body_for_contact(f,c.id).and_then(|id|w.body(id)).and_then(|b|b.display_class.clone())} else {None},
                             detection,reporting_sensor:c.best_evidence(t).map(|o|o.sensor),ping_remaining:c.ping_remaining(t),active_fire_control:c.active_fire_control(t,|sensor|w.body(sensor).is_some_and(|b|matches!(b.kind,BodyKind::Ship|BodyKind::Station))),
                             resolved_class:if c.resolved {w.body_for_contact(f,c.id).and_then(|id|w.bodies[id.0 as usize].ship_class)} else {None},
                             resolved_interceptor:c.resolved && w.body_for_contact(f,c.id).is_some_and(|id|w.bodies[id.0 as usize].interceptor.is_some()),
@@ -781,6 +787,30 @@ mod tests {
         w.bodies[2].trajectory=crate::kinematics::Trajectory::new(-2000.0,crate::kinematics::State {pos:own.pos+Vec2::new(3.0*crate::units::LIGHT_SECOND,0.0),vel:Vec2::ZERO});
         for b in &mut w.bodies {b.beam_auto=false;}
         w
+    }
+
+    #[test]
+    fn ship_names_require_received_identity_without_revealing_remote_truth() {
+        use crate::world::BodySpec;
+        use crate::kinematics::State;
+        let specs=(0..2).map(|i|BodySpec {name:format!("Ship {i}"),kind:BodyKind::Ship,faction:FactionId(i),
+            state:State {pos:Vec2::new(i as f64*30.0*crate::units::LIGHT_SECOND,0.0),vel:Vec2::ZERO},thrust:Vec2::ZERO,magazine:0}).collect();
+        let mut world=World::new(crate::celestial::System {bodies:vec![]},specs,0.0,42);
+        world.set_platform_identity(BodyId(1),"Vow of Iron".into(),"Sword Escort".into());
+        let mut session=LocalSession::new(world);let role=Role::Faction(FactionId(0));
+        session.world.advance_to(29.0);
+        assert!(session.view(role).contacts.iter().all(|c|c.identified_name.is_none()));
+        session.world.advance_to(45.0);
+        let view=session.view(role);
+        let contact=view.contacts.iter().find(|c|c.identified_name.as_deref()==Some("Vow of Iron")).expect("identity report after light delay");
+        assert_eq!(contact.display_class.as_deref(),Some("Sword Escort"));
+        assert!(view.bodies.iter().all(|b|b.faction==FactionId(0)),"no foreign truth body");
+        let id=contact.id;
+        let mut old=session.world.perception(FactionId(0)).unwrap().contacts[&id].last;
+        old.detection=crate::sensors::DetectionLevel::Approximate;old.emitted_at=50.0;old.sensor_received_at=80.0;old.decider_received_at=80.0;
+        let mut perception=session.world.perception(FactionId(0)).unwrap().clone();
+        perception.ingest(old,&session.world.system);
+        assert!(perception.contacts[&id].identified,"identity is remembered independently of current sensor precision");
     }
 
     #[test]

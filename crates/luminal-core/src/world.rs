@@ -127,6 +127,8 @@ pub struct Autopilot {
 
 #[derive(Clone, Debug)]
 pub struct Body {
+    /// Cosmetic class title; the ship_class enum alone determines capabilities.
+    pub display_class:Option<String>,
     pub withdrawing:bool,
     step_generation:u64,
     pub jump:Option<jump::JumpState>,
@@ -565,7 +567,7 @@ impl World {
             .into_iter()
             .map(|spec| {
                 let trajectory = ballistic_history(&system, spec.state, spec.thrust, history_s);
-                Body {withdrawing:false,
+                Body {display_class:None,withdrawing:false,
                     jump:None,step_generation:0,
                     controls:controls::Controls::default(),last_missile_launch:None,
                     ship_class: (spec.kind==BodyKind::Ship).then_some(ShipClass::Frigate),
@@ -658,6 +660,14 @@ impl World {
 
     pub fn body(&self, id: BodyId) -> Option<&Body> {
         self.bodies.get(id.0 as usize)
+    }
+
+    /// Assign presentation identity during scenario setup. Does not use RNG or
+    /// alter the mechanical class, loadout, faction, trajectory or control state.
+    pub fn set_platform_identity(&mut self,id:BodyId,name:String,class_title:String) {
+        let Some(body)=self.bodies.get_mut(id.0 as usize).filter(|b|matches!(b.kind,BodyKind::Ship|BodyKind::Station)) else {return;};
+        body.name=name.clone();body.display_class=Some(class_title.clone());
+        self.rename_telemetry(id,&name,&class_title);
     }
 
     pub fn perception(&self, f: FactionId) -> Option<&Perception> {
@@ -957,7 +967,7 @@ impl World {
         let mut start = b.trajectory.state_at(t).expect("alive");start.pos=start.pos+offset;
         let dv = payload.delta_v();
         let mid = BodyId(self.bodies.len() as u32);
-        self.bodies.push(Body {withdrawing:false,
+        self.bodies.push(Body {display_class:None,withdrawing:false,
             jump:None,step_generation:0,
             controls:controls::Controls::default(),last_missile_launch:None,
             ship_class: None,facing:0.0,turn_target:0.0,facing_at:0.0,spinal_ready_at:0.0,spinal_tracking:None,

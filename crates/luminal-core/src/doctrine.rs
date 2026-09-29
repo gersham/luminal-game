@@ -232,7 +232,7 @@ mod tests {
         view.objective.as_mut().unwrap().center=Vec2::new(10.0*AU,0.0);
         let ship=view.bodies.iter_mut().find(|b|b.controllable).unwrap();
         ship.pos=Vec2::ZERO;ship.vel=Vec2::ZERO;
-        view.contacts=(1..=2).map(|id|ContactView {detection:crate::sensors::DetectionLevel::Resolved,
+        view.contacts=(1..=2).map(|id|ContactView {identified_name:None,display_class:None,detection:crate::sensors::DetectionLevel::Resolved,
             ping_remaining:0.0,active_fire_control:0.0,reporting_sensor:None,
             resolved_class:Some(if id==1 {ShipClass::Transport} else {ShipClass::Frigate}),
             resolved_interceptor:false,damage:None,id:ContactId(id),resolved_kind:Some(BodyKind::Ship),
@@ -304,7 +304,7 @@ mod tests {
         let mut view=session.view(Role::Faction(crate::scenario::RAIDER));
         view.objective.as_mut().unwrap().sensor_site=None;
         let ship=view.bodies.iter().find(|b|b.controllable).unwrap().clone();
-        view.contacts=(1..=2).map(|id|ContactView {detection:crate::sensors::DetectionLevel::Resolved,ping_remaining:0.0,active_fire_control:0.0,reporting_sensor:None,resolved_class:None,
+        view.contacts=(1..=2).map(|id|ContactView {identified_name:None,display_class:None,detection:crate::sensors::DetectionLevel::Resolved,ping_remaining:0.0,active_fire_control:0.0,reporting_sensor:None,resolved_class:None,
             resolved_interceptor:false,
             damage:None,
             id:ContactId(id),resolved_kind:Some(BodyKind::Ship),resolved_missile:false,

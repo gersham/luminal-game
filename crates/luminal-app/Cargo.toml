@@ -8,3 +8,4 @@ license.workspace = true
 luminal-core = { path = "../luminal-core" }
 eframe = "0.36"
 rodio = { version = "0.21", default-features = false, features = ["playback", "wav"] }
+image = { version = "0.25.10", default-features = false, features = ["png"] }

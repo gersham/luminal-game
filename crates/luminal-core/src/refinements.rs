@@ -103,6 +103,13 @@ impl Refinements {
 }
 
 impl World {
+    /// Cosmetic identity must not resample heat/signature or alter sensing history.
+    pub(super) fn rename_telemetry(&mut self,id:BodyId,name:&str,class_title:&str) {
+        if let Some(history)=self.refinement.telemetry.get_mut(&id) {
+            for (_,body) in history {body.name=name.into();body.display_class=Some(class_title.into());}
+        }
+    }
+
     pub fn enable_debug_log(&mut self, path:&std::path::Path)->std::io::Result<()> {
         let file=std::fs::OpenOptions::new().write(true).create(true).truncate(true).open(path)?;
         self.refinement.logfile=Some(file);

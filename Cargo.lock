@@ -1832,6 +1832,7 @@ name = "luminal-app"
 version = "0.1.0"
 dependencies = [
  "eframe",
+ "image",
  "luminal-core",
  "rodio",
 ]

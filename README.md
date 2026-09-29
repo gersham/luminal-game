@@ -605,9 +605,9 @@ for behavior, screenshots, regression coverage and the 20-mission survey.
 ### Fleet vocabulary
 
 The startup screen uses selectable WWII-style naval recognition cards with live
-class stats. Choose Luminal, Starfleet, Grim Dark, Imperium or Culture vocabulary
+class stats. Choose Luminal, Grim Dark, Imperium or Culture (the default) vocabulary
 before deploying. Theme choices change display terms only; classes, weapons,
 flight rules and balance are identical. Choices survive scenario restart.
 See [theme vocabulary and future styling ideas](docs/THEMES.md).
-For previews, `LUMINAL_THEME=Starfleet` selects a vocabulary and
+For previews, `LUMINAL_THEME=Culture` selects a vocabulary and
 `LUMINAL_SHIP_SELECT=1` includes startup in the screenshot workflow.

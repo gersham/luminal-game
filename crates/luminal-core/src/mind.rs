@@ -298,6 +298,8 @@ pub struct Contact {
     /// Identification requires a direct passive localisation or a usable echo,
     /// not triangulated bearings or interception of the target's ping.
     pub resolved: bool,
+    /// A received identity is remembered without keeping precision telemetry live.
+    pub identified:bool,
     systematic_floor: Option<(f64,[[f64;2];2])>,
     pub id: ContactId,
     pub track: Option<Track>,
@@ -411,7 +413,7 @@ impl Perception {
         let c = self
             .contacts
             .entry(obs.contact)
-            .or_insert_with(|| Contact { region_offset:None,evidence:BTreeMap::new(),resolved:false, systematic_floor:None,id: obs.contact, track: None, bearings: BTreeMap::new(), last: obs });
+            .or_insert_with(|| Contact { region_offset:None,evidence:BTreeMap::new(),resolved:false,identified:false, systematic_floor:None,id: obs.contact, track: None, bearings: BTreeMap::new(), last: obs });
         let mut obs=obs;
         if matches!(obs.measurement,Measurement::Bearing {..}) {obs.detection=obs.detection.min(crate::sensors::DetectionLevel::Bearing);}
         let key=(obs.sensor,obs.source as u8);
@@ -425,7 +427,10 @@ impl Perception {
         }
         match obs.measurement {
             Measurement::BearingRange { bearing, sigma_bearing, range, sigma_range } => {
-                if matches!(obs.source, Source::Emission | Source::Echo) && obs.detection>=crate::sensors::DetectionLevel::Resolved { c.resolved = true; }
+                if matches!(obs.source, Source::Emission | Source::Echo) {
+                    if obs.detection>=crate::sensors::DetectionLevel::Resolved {c.resolved=true;}
+                    if obs.detection==crate::sensors::DetectionLevel::Identity {c.identified=true;}
+                }
                 if c.bearings.get(&obs.sensor).is_none_or(|old|obs.emitted_at>=old.emitted_at) {
                     c.bearings.insert(obs.sensor, Observation {detection:crate::sensors::DetectionLevel::Resolved,measurement:Measurement::Bearing {bearing,sigma:sigma_bearing},..obs});
                 }
