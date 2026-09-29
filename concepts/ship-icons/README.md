@@ -1,6 +1,6 @@
 # Ship marker concept — review only
 
-Generated raster concept sheets, not used by the game. Open `ship-class-colours-serious.png`
+Generated raster concept sheets, not used by the game. Open `ship-class-recognition.png`
 in an image editor. The black background is part of this review sheet; production
 sprites would need transparent backgrounds and small-size readability checks.
 
@@ -18,3 +18,11 @@ Current prompt: `serious-prompt.txt`. The original `ship-class-colours.png` and
 `prompt.txt` are the rejected, overly cartoonish first direction. The revision
 uses restrained flat silhouettes, muted colours and minimal structural lines. Output: 1536 × 1024 RGB PNG.
 Sanitized command: `curds -no-tui -provider openai -aspect-ratio 3:2 -quality high -prompt <prompt text> -output <ship-class-colours-serious.png>`.
+
+## Recognition-chart revision
+
+`ship-class-recognition.png` is the third direction: thin coloured outlines,
+black interiors and industrial hull geometry. The first two sheets were rejected.
+Prompt: `recognition-prompt.txt`. Curds / OpenAI `gpt-image-2.5-flare`;
+1536 × 1024 RGB PNG, verified and visually reviewed. Still not integrated.
+Sanitized command: `curds -no-tui -provider openai -aspect-ratio 3:2 -quality high -prompt <recognition prompt> -output <ship-class-recognition.png>`.
