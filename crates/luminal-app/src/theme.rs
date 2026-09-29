@@ -29,5 +29,11 @@ impl Theme {
     pub fn system_code(self,s:System)->&'static str {
         if s==System::Mind {match self {Self::GrimDark=>"SERV",Self::Imperium=>"AI",_=>s.code()}} else {s.code()}
     }
+    pub fn projector(self)->&'static str {match self {Self::Culture=>"EFFECTOR",Self::GrimDark=>"VOX-SCOURGE",Self::Imperium=>"ELECTRONIC ATTACK",Self::Luminal=>"DIRECTED JAMMER"}}
+    pub fn fitted_weapon(self,p:Payload,class:luminal_core::world::ShipClass)->&'static str {
+        if p==Payload::Beam && class.beam_pulses()>1 {match self {Self::Culture=>"COHERENT BURST",Self::GrimDark=>"LANCE BATTERY",Self::Imperium=>"PULSE LASERS",Self::Luminal=>"PULSE BATTERY"}}
+        else if p==Payload::Kinetic {match self {Self::Culture=>"SHARD SWARM",Self::GrimDark=>"FRAG TORPEDO",Self::Imperium=>"CANISTER MISSILE",Self::Luminal=>"FLECHETTE BUS"}}
+        else {self.weapon(p)}
+    }
     pub fn range(self,mode:MovementMode)->String {match mode {MovementMode::Long=>format!("{} RANGE",self.weapon(Payload::Nuclear)),MovementMode::Medium=>format!("{} RANGE",self.weapon(Payload::Kinetic)),MovementMode::Short=>format!("{} RANGE",self.weapon(Payload::Beam)),_=>mode.label().into()}}
 }

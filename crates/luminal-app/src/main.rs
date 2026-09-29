@@ -75,7 +75,7 @@ impl TacticalLog {
                         else {"SHIP".into()};
                     self.push(format!("ship-destroyed-{:?}",key(event)),format!("{name} · DESTROYED"),DANGER,event.received_at);
                 },
-                CombatKind::WithdrawalStarted|CombatKind::WithdrawalCancelled|CombatKind::Withdrawn|CombatKind::Surrendered=>{
+                CombatKind::InterferencePulse|CombatKind::FireControlDisrupted|CombatKind::WithdrawalStarted|CombatKind::WithdrawalCancelled|CombatKind::Withdrawn|CombatKind::Surrendered=>{
                     let name=event.own_body.and_then(|id|view.bodies.iter().find(|b|b.id==id)).map(|b|b.name.clone())
                         .or_else(||event.contact.map(|c|format!("T{}",c.0))).unwrap_or_else(||"SHIP".into());
                     self.push(format!("exit-{:?}",key(event)),format!("{name} · {}",event.kind.label().to_uppercase()),ACCENT,event.received_at);
@@ -361,7 +361,7 @@ mod tests {
         let mut view=app.session.view(Role::Faction(ESCORT));
         view.contacts.clear();
         view.combat=[CombatKind::Destroyed,CombatKind::MissileHit,CombatKind::MissileMiss,CombatKind::BeamPulse].into_iter().enumerate().map(|(i,kind)|
-            luminal_core::world::CombatEvent {target:None,velocity:None,subject_kind:Some(BodyKind::Missile),impact_strength:0.0,damage:None,contact:None,aim:None,pos:None,kind,own_body:Some(BodyId(1)),emitted_at:i as f64,received_at:i as f64}).collect();
+            luminal_core::world::CombatEvent {weapon_visual:luminal_core::world::weapon_fit::WeaponVisual::Standard,target:None,velocity:None,subject_kind:Some(BodyKind::Missile),impact_strength:0.0,damage:None,contact:None,aim:None,pos:None,kind,own_body:Some(BodyId(1)),emitted_at:i as f64,received_at:i as f64}).collect();
         let mut log=TacticalLog::default();
         log.observe(&view,Some(BodyId(1)),0.0);
         assert_eq!(log.lines.len(),3);
@@ -391,7 +391,7 @@ mod tests {
         let app=LuminalApp::new();let mut view=app.session.view(Role::Faction(ESCORT));
         view.bodies.clear();view.contacts.clear();
         view.combat=[Some(BodyKind::Ship),Some(BodyKind::Ship),Some(BodyKind::Missile),Some(BodyKind::Missile),None].into_iter().enumerate().map(|(i,subject_kind)|
-            luminal_core::world::CombatEvent {target:None,velocity:None,subject_kind,impact_strength:0.0,damage:None,
+            luminal_core::world::CombatEvent {weapon_visual:luminal_core::world::weapon_fit::WeaponVisual::Standard,target:None,velocity:None,subject_kind,impact_strength:0.0,damage:None,
                 contact:if i==1 {Some(ContactId(1))} else {None},own_body:if i==0 {Some(BodyId(1))} else {None},
                 aim:None,pos:None,kind:CombatKind::Destroyed,emitted_at:i as f64,received_at:10.0+i as f64}).collect();
         let mut log=TacticalLog::default();log.observe(&view,Some(BodyId(1)),0.0);
@@ -426,7 +426,7 @@ mod tests {
         let mut view=app.session.view(Role::Faction(ESCORT));
         let mut log=TacticalLog::default();
         log.observe(&view,Some(BodyId(1)),0.0);
-        view.combat=(1..=2).map(|i|luminal_core::world::CombatEvent {target:None,velocity:None,
+        view.combat=(1..=2).map(|i|luminal_core::world::CombatEvent {weapon_visual:luminal_core::world::weapon_fit::WeaponVisual::Standard,target:None,velocity:None,
             subject_kind:Some(BodyKind::Ship),
             impact_strength:0.65,
             damage:Some(if i==1 {"SCREEN +3.00 TJ"} else {"HULL -2.00 · PROP DAMAGED"}.into()),
@@ -951,7 +951,7 @@ impl LuminalApp {
             if let Some(b)=own {ui.label(egui::RichText::new(&b.name).strong().color(FRIEND));ui.small(b.display_class.as_deref().unwrap_or("Ship"));}
             compact_status(ui,own.map(|b|&b.damage),own.map(|b|b.thrust.length()/G0),own.and_then(|b|b.ship_class).map(|c|c.max_g()),false);
             compact_systems(ui,"own_deck",own.map(|b|b.damage),self.theme);
-            if let Some(ship)=own {self.repair_controls(ui,ship);}
+            if let Some(ship)=own {self.repair_controls(ui,ship);if ship.interference_remaining>0.0 {ui.small(egui::RichText::new(format!("FIRE CONTROL -15% · {:.0}s",ship.interference_remaining)).color(WARM));}}
             self.central_controls(&mut columns[2],own,view);
             let ui=&mut columns[3];
             let systems=target.and_then(|c|target_system_report(c,view));
@@ -1157,7 +1157,8 @@ Shift + right click: extend route").monospace().size(9.0).color(TEXT_MUTED));
             let r=Rect::from_min_size(Pos2::new(area.left(),top+row as f32*(height+4.0)),EVec2::new(area.width(),height));
             ui.painter().rect_filled(r,3.0,Color32::from_rgb(12,22,33));
             let left=r.left()+7.0;let right=r.right()-7.0;
-            let label=self.theme.weapon(p);
+            let class=b.ship_class.unwrap_or(luminal_core::world::ShipClass::Frigate);
+            let label=if p==Payload::Beam && b.beam_mode==luminal_core::world::weapon_fit::BeamMode::Interference {self.theme.projector()} else {self.theme.fitted_weapon(p,class)};
             ui.painter().text(Pos2::new(left,r.top()+5.0),egui::Align2::LEFT_TOP,label,mono(12.0),TEXT);
             if p!=Payload::Beam {
                 let chance=missile_hit_estimate(b,target,p);
@@ -1196,20 +1197,31 @@ Shift + right click: extend route").monospace().size(9.0).color(TEXT_MUTED));
                 let reload=(b.beam_ready_at-view.time).max(0.0);
                 let status=if b.jump.is_some() {"OFF: JUMP".into()} else if !fitted {"NOT FITTED".into()} else if b.damage.operating_effectiveness(System::Beam)<=0.0 {"DISABLED".into()}
                     else if b.thermal.dumping {"DUMPING".into()} else if !b.thermal.can_fire_energy(energy) {"POWER / HEAT".into()}
+                    else if b.beam_mode==luminal_core::world::weapon_fit::BeamMode::Interference && b.damage.operating_effectiveness(System::Ecm)<=0.0 {"ECM DISABLED".into()}
+                    else if b.beam_mode==luminal_core::world::weapon_fit::BeamMode::Interference && solution.is_some_and(|s|s.range_km>luminal_core::world::weapon_fit::INTERFERENCE_RANGE_LS*luminal_core::units::LIGHT_SECOND) {"OUT OF RANGE".into()}
                     else if solution.is_none() {"NO SOLUTION".into()} else if reload>0.0 {format!("RELOAD {reload:.0}s")}
                     else if solution.is_some_and(|s|!s.worth_firing) {"AUTO HOLDS".into()} else {"READY".into()};
                 ui.painter().text(Pos2::new(right,r.top()+5.0),egui::Align2::RIGHT_TOP,&status,mono(10.0),if status=="READY" {SYS_OK} else {WARM});
-                let detail=solution.filter(|_|fitted).map_or_else(||"Expected energy — · coupling —".into(),|s|format!("EXP {} / pulse · {:.1}% coupled",fmt_energy(s.expected_j),100.0*s.coupled_fraction));
+                let detail=if b.beam_mode==luminal_core::world::weapon_fit::BeamMode::Interference {"6 LS · -15% offensive beam coupling · 8s".into()} else {solution.filter(|_|fitted).map_or_else(||"Expected energy — · coupling —".into(),|s|format!("EXP {} / pulse · {:.1}% coupled",fmt_energy(s.expected_j),100.0*s.coupled_fraction))};
                 ui.painter().text(Pos2::new(left,r.top()+20.0),egui::Align2::LEFT_TOP,detail,mono(9.0),TEXT_MUTED);
                 let aim=solution.map_or_else(||"Aim uncertainty — · beam radius —".into(),|s|format!("Aim ±{:.2} km · radius {:.2} km",s.aim_sigma_km,s.spot_km));
                 ui.painter().text(Pos2::new(left,r.top()+31.0),egui::Align2::LEFT_TOP,aim,mono(9.0),TEXT_MUTED);
                 let buttons=Rect::from_min_max(Pos2::new(left,r.bottom()-24.0),Pos2::new(right,r.bottom()-4.0));
                 let mut child=ui.new_child(egui::UiBuilder::new().id_salt("beam_modes").max_rect(buttons));
                 child.horizontal(|ui| {
-                    let w=(buttons.width()-2.0*ui.spacing().item_spacing.x)/3.0;
+                    let support=class.has_projector();
+                    let n=if support {4.0} else {3.0};
+                    let w=(buttons.width()-(n-1.0)*ui.spacing().item_spacing.x)/n;
                     if tac_button(ui,"AUTO",EVec2::new(w,20.0),ACCENT,b.beam_auto,fitted).clicked() {self.command(Command::ArmBeams {body:b.id});}
                     if tac_button(ui,"DIRECT",EVec2::new(w,20.0),ACCENT,!b.beam_auto && b.beam_target.is_some(),fitted && target.is_some_and(|c|c.track.is_some() && !c.stale)).on_hover_text("Assign this target; permits risky shots that AUTO would hold.").clicked() {self.command(Command::EngageBeam {body:b.id,target:target.map(|c|c.id)});}
                     if tac_button(ui,"HOLD",EVec2::new(w,20.0),ACCENT,!b.beam_auto && b.beam_target.is_none(),fitted).clicked() {self.command(Command::EngageBeam {body:b.id,target:None});}
+                    if support {
+                        use luminal_core::world::weapon_fit::BeamMode;
+                        let active=b.beam_mode==BeamMode::Interference;
+                        if tac_button(ui,if active {"DISRUPT"} else {"DAMAGE"},EVec2::new(w,20.0),ACCENT,active,fitted).on_hover_text(format!("{}: toggle the main beam between damage and electronic attack. Uses the same energy, heat and recharge; needs functioning beam and ECM systems. Requires a ship within 6 LS. Eight seconds of 15% weaker offensive beam coupling, no stacking, no hull damage. PD and missiles are unaffected.",self.theme.projector())).clicked() {
+                            self.command(Command::SetBeamMode {body:b.id,mode:if active {BeamMode::Damage} else {BeamMode::Interference}});
+                        }
+                    }
                 });
                 ui.interact(r,ui.id().with("beam_prediction"),Sense::hover()).on_hover_text("Expected energy uses the same received-track prediction as AUTO fire control, before screens and armour. Aim ± is one standard deviation at pulse arrival, including pointing error. Coupling is expected energy delivered, not hit probability.");
             }
@@ -2405,13 +2417,14 @@ impl LuminalApp {
         // Observed combat flashes only: enemy effects arrive after light travel.
         for e in &view.combat {
             use luminal_core::world::CombatKind;
-            if matches!(e.kind,CombatKind::JumpSpool|CombatKind::JumpCancelled|CombatKind::JumpDeparture|CombatKind::JumpArrival|CombatKind::WithdrawalStarted|CombatKind::WithdrawalCancelled|CombatKind::Withdrawn|CombatKind::Surrendered|CombatKind::Destroyed|CombatKind::Expended|CombatKind::Impact|CombatKind::MissileHit|CombatKind::MissileMiss|CombatKind::NuclearBurst) {continue;}
+            if matches!(e.kind,CombatKind::FireControlDisrupted|CombatKind::JumpSpool|CombatKind::JumpCancelled|CombatKind::JumpDeparture|CombatKind::JumpArrival|CombatKind::WithdrawalStarted|CombatKind::WithdrawalCancelled|CombatKind::Withdrawn|CombatKind::Surrendered|CombatKind::Destroyed|CombatKind::Expended|CombatKind::Impact|CombatKind::MissileHit|CombatKind::MissileMiss|CombatKind::NuclearBurst) {continue;}
             let age=(view.time-e.received_at).max(0.0);
             let Some(pos)=e.pos else {continue};
             let p=to_screen(&cam,rect,pos);
-            if matches!(e.kind,CombatKind::BeamPulse|CombatKind::SpinalPulse|CombatKind::PointDefence) {
+            if matches!(e.kind,CombatKind::BeamPulse|CombatKind::SpinalPulse|CombatKind::PointDefence|CombatKind::InterferencePulse) {
                 let spinal=e.kind==CombatKind::SpinalPulse;
-                let duration=if spinal {1.0_f64.max(view.warp*0.45)} else {0.5_f64.max(view.warp*0.2)};
+                let burst=matches!(e.weapon_visual,luminal_core::world::weapon_fit::WeaponVisual::Pulse(_));
+                let duration=if spinal {1.0_f64.max(view.warp*0.45)} else if burst {0.75_f64.max(view.warp*0.6)} else {0.5_f64.max(view.warp*0.2)};
                 if age>=duration {continue;}
                 if let Some(aim)=e.aim {
                     let start=e.own_body.and_then(|id|view.bodies.iter().find(|b|b.id==id).map(|b|b.pos))
@@ -2429,7 +2442,15 @@ impl LuminalApp {
                         painter.line_segment(line,Stroke::new(1.8,Color32::from_rgb(255,250,185).gamma_multiply(alpha)));
                         painter.circle_filled(line[0],7.0*alpha,Color32::from_rgb(255,235,95).gamma_multiply(alpha));
                     } else {
-                        painter.line_segment(line,Stroke::new(1.5,Color32::from_rgb(150,225,255).gamma_multiply(alpha)));
+                        if e.kind==CombatKind::InterferencePulse {
+                            painter.line_segment(line,Stroke::new(3.0,Color32::from_rgb(185,110,255).gamma_multiply(alpha*0.7)));
+                            painter.circle_stroke(line[0],6.0+12.0*(1.0-alpha),Stroke::new(1.5,Color32::from_rgb(185,110,255).gamma_multiply(alpha)));
+                        } else {
+                            let pulses=match e.weapon_visual {luminal_core::world::weapon_fit::WeaponVisual::Pulse(n)=>n,_=>1};
+                            let phase=(age/duration*pulses as f64).fract() as f32;
+                            let brightness=if pulses>1 {if phase<0.65 {1.0} else {0.12}} else {1.0};
+                            painter.line_segment(line,Stroke::new(if pulses>1 {2.3} else {1.5},Color32::from_rgb(150,225,255).gamma_multiply(alpha*brightness)));
+                        }
                     }
                 }
             } else {

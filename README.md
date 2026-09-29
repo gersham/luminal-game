@@ -611,3 +611,6 @@ flight rules and balance are identical. Choices survive scenario restart.
 See [theme vocabulary and future styling ideas](docs/THEMES.md).
 For previews, `LUMINAL_THEME=Culture` selects a vocabulary and
 `LUMINAL_SHIP_SELECT=1` includes startup in the screenshot workflow.
+
+Class-specific pulse batteries, canister effects and the frigate's optional
+support projector are described in [weapon fits and fleet roles](docs/WEAPON_FITS.md).

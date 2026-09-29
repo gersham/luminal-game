@@ -83,7 +83,7 @@ mod tests {
     fn endpoint_bursts_are_fixed_in_space_and_last_four_real_seconds() {
         let app=LuminalApp::new();let mut view=app.session.view(app.role);view.jump_events.clear();
         let mut effects=JumpEffects::default();effects.observe(&view,0.0);
-        let event=luminal_core::world::CombatEvent {velocity:None,subject_kind:Some(BodyKind::Ship),impact_strength:0.0,damage:None,contact:None,target:None,aim:None,emitted_at:600.0,received_at:600.0,pos:Some(Vec2::ZERO),kind:CombatKind::JumpDeparture,own_body:Some(BodyId(1))};
+        let event=luminal_core::world::CombatEvent {weapon_visual:luminal_core::world::weapon_fit::WeaponVisual::Standard,velocity:None,subject_kind:Some(BodyKind::Ship),impact_strength:0.0,damage:None,contact:None,target:None,aim:None,emitted_at:600.0,received_at:600.0,pos:Some(Vec2::ZERO),kind:CombatKind::JumpDeparture,own_body:Some(BodyId(1))};
         view.jump_events=vec![event.clone(),luminal_core::world::CombatEvent {kind:CombatKind::JumpArrival,pos:Some(Vec2::new(AU,0.0)),..event}];
         view.warp=10000.0;effects.observe(&view,1.0);assert_eq!(effects.bursts.len(),2);
         view.paused=true;effects.observe(&view,4.9);assert_eq!(effects.bursts.len(),2);

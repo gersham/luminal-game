@@ -1,0 +1,15 @@
+   Compiling luminal-core v0.1.0 (/home/gersham/Sources/personal/luminal-game/crates/luminal-core)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 6.68s
+     Running unittests src/lib.rs (target/debug/deps/luminal_core-7bf8d5bd83581798)
+
+running 1 test
+range_ls,trials,disruptions
+1,100,100
+3,100,100
+5,100,99
+6,100,88
+6.1,100,0
+test world::weapon_fit::tests::projector_range_survey ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 302 filtered out; finished in 0.01s
+

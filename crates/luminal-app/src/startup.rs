@@ -1,7 +1,7 @@
 //! Theme-specific spacecraft recognition cards; mechanics come from class definitions.
 use super::*;
 use luminal_core::world::ShipClass;
-fn role(class:ShipClass)->&'static str {match class {ShipClass::Picket=>"SCREEN & PURSUE",ShipClass::Frigate=>"FLEXIBLE ESCORT",ShipClass::Destroyer=>"LINE COMBATANT",ShipClass::Cruiser=>"MISSILE ARTILLERY",_=>"HEAVY BATTLE LINE"}}
+
 impl LuminalApp {
     pub(super) fn deploy_selected(&mut self) {
         self.restart_scenario();self.selection_pending=false;
@@ -41,7 +41,7 @@ impl LuminalApp {
                         p.rect_filled(r,5.0,if selected {Color32::from_rgb(18,39,51)} else {Color32::from_rgb(12,20,29)});
                         p.rect_stroke(r,5.0,Stroke::new(if selected {2.0} else {1.0},if response.hovered() {TEXT} else {col.gamma_multiply(0.6)}),StrokeKind::Inside);
                         p.text(r.left_top()+EVec2::new(12.0,12.0),egui::Align2::LEFT_TOP,format!("0{}  {}",i+1,self.theme.class_name(class,false).to_uppercase()),mono(15.0),if selected {ACCENT} else {TEXT});
-                        p.text(r.left_top()+EVec2::new(12.0,41.0),egui::Align2::LEFT_TOP,role(class),mono(11.0),TEXT_MUTED);
+                        p.text(r.left_top()+EVec2::new(12.0,41.0),egui::Align2::LEFT_TOP,class.fleet_role(),mono(10.0),TEXT_MUTED);
                         self.ship_art.draw(ui.ctx(),p,Rect::from_min_size(r.min+EVec2::new(12.0,76.0),EVec2::new(card_width-24.0,85.0)),self.theme,class,col);
                         let mag=class.magazine();
                         for (row,line) in [format!("HULL {:.0}  /  ARMOUR {:.0}",1000.0*class.scale(),500.0*class.protection()),format!("SRM {}  /  LRM {}",mag[0],mag[1]),format!("PD {}  /  INTERCEPTORS {}",class.pd_lasers(),class.interceptors()),format!("{:.0} G  /  TURN {:.0}s",class.max_g(),class.turn_seconds()),if class.has_jump_drive() {self.theme.jump().into()} else {"SUBLIGHT ONLY".into()}].iter().enumerate() {
@@ -55,6 +55,7 @@ impl LuminalApp {
                 ui.add_space(14.0);
                 if self.chosen_class==ShipClass::Battleship {ui.label(format!("{} · 60 LS · 10× beam energy · 120s cycle · forward 2° arc",self.theme.spinal()));}
                 else {ui.label(format!("{} · sensors {:.0} · {} short / {} long launchers",self.theme.class_name(self.chosen_class,false),self.chosen_class.sensor_rating(),self.chosen_class.launchers(Payload::Kinetic),self.chosen_class.launchers(Payload::Nuclear)));}
+                ui.label(format!("Fit: {} · {}{}",self.theme.fitted_weapon(Payload::Kinetic,self.chosen_class),if self.chosen_class.beam_pulses()>1 {"pulse battery"} else if self.chosen_class.beam_pulses()==1 {"single lance"} else {"no offensive beam"},if self.chosen_class.has_projector() {format!(" · optional {}",self.theme.projector())} else {String::new()}));
                 ui.label(format!("Opponent: {} · {}",self.theme.adversary(),self.theme.class_name(self.chosen_class,true)));
                 ui.add_space(10.0);
                 start=tac_button(ui,&format!("DEPLOY {}",self.theme.class_name(self.chosen_class,false).to_uppercase()),EVec2::new(ui.available_width(),40.0),ACCENT,true,true).clicked();

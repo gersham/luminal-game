@@ -168,6 +168,11 @@ impl Doctrine {
             }
             let tr = c.track.as_ref().unwrap();
             let range = (tr.pos-b.pos).length();
+            if class.has_projector() {
+                use crate::world::weapon_fit::{BeamMode,support_worthwhile};
+                let mode=if support_worthwhile(view,b,c) {BeamMode::Interference} else {BeamMode::Damage};
+                if b.beam_mode!=mode {out.push(Command::SetBeamMode {body:b.id,mode});}
+            }
             if engage && range<2.0*AU && c.active_fire_control<0.5
                 && view.time>=*self.ping_at.get(&b.id).unwrap_or(&0.0) {
                 out.push(Command::Ping {body:b.id});

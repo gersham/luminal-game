@@ -6,9 +6,10 @@ use std::io::Write;
 use std::sync::Arc;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum CombatKind { JumpSpool, JumpCancelled, JumpDeparture, JumpArrival, WithdrawalStarted,WithdrawalCancelled,Withdrawn, Surrendered, NuclearBurst, BeamPulse, PointDefence, Impact, Destroyed, Expended, MissileHit, MissileMiss, SpinalPulse }
+pub enum CombatKind { InterferencePulse,FireControlDisrupted, JumpSpool, JumpCancelled, JumpDeparture, JumpArrival, WithdrawalStarted,WithdrawalCancelled,Withdrawn, Surrendered, NuclearBurst, BeamPulse, PointDefence, Impact, Destroyed, Expended, MissileHit, MissileMiss, SpinalPulse }
 impl CombatKind {
     pub fn label(self) -> &'static str { match self {
+        Self::InterferencePulse=>"Electronic attack",Self::FireControlDisrupted=>"Fire control disrupted",
         Self::JumpSpool=>"Jump spooling",Self::JumpCancelled=>"Jump cancelled",Self::JumpDeparture=>"Jump departure",Self::JumpArrival=>"Jump arrival",
         Self::WithdrawalStarted=>"Withdrawal jump spooling",Self::WithdrawalCancelled=>"Withdrawal interrupted",
         Self::Withdrawn=>"Withdrew from combat",Self::Surrendered=>"Surrendered",
@@ -20,6 +21,7 @@ impl CombatKind {
 }
 #[derive(Clone, Debug)]
 pub struct CombatEvent {
+    pub weapon_visual:super::weapon_fit::WeaponVisual,
     /// Terminal motion from own telemetry; foreign events never expose true velocity.
     pub velocity:Option<Vec2>,
     /// Known platform category, retained after its map object disappears.
@@ -196,7 +198,7 @@ impl World {
                 let own=self.bodies[id.0 as usize].faction==f;
                 let target=flash.target.and_then(|id|if self.bodies[id.0 as usize].faction==f {Some(InterceptTarget::Own(id))}
                     else {self.association.get(&(f,id)).map(|c|InterceptTarget::Contact(*c))});
-                self.refinement.received.entry(f).or_default().push(CombatEvent {target,velocity:flash.velocity,subject_kind:Some(BodyKind::Missile),
+                self.refinement.received.entry(f).or_default().push(CombatEvent {weapon_visual:crate::world::weapon_fit::WeaponVisual::Standard,target,velocity:flash.velocity,subject_kind:Some(BodyKind::Missile),
                     impact_strength:0.0,damage:None,contact:if own {None} else {self.association.get(&(f,id)).copied()},
                     own_body:own.then_some(id),pos:Some(flash.front.origin),aim:flash.aim,kind:flash.kind,emitted_at:t,received_at:self.time});
             }
@@ -309,6 +311,7 @@ impl World {
     }
     fn execute_transmitted(&mut self, cmd: Command) -> Result<(), OrderError> {
         match cmd {
+            Command::SetBeamMode {body,mode}=>self.set_beam_mode(body,mode),
             Command::Withdraw {body}=>self.withdraw(body),
             Command::Surrender {body}=>self.surrender(body),
             Command::SetRepairGoal {body,goal}=>self.set_repair_goal(body,goal),
@@ -373,12 +376,12 @@ impl World {
             let b=&self.bodies[id.0 as usize];
             match kind {
                 CombatKind::PointDefence=>b.point_defence.and_then(|pd|pd.last_shot),
-                CombatKind::BeamPulse|CombatKind::SpinalPulse=>b.last_beam,
+                CombatKind::BeamPulse|CombatKind::SpinalPulse|CombatKind::InterferencePulse=>b.last_beam,
                 _=>None,
             }.filter(|(fired,_,_)|(*fired-t).abs()<1e-6).map(|(_,_,aim)|aim)
         });
         let velocity=body.and_then(|id|self.state(id,t)).map(|s|s.vel);
-        self.refinement.truth_events.push(CombatEvent { target:None, velocity, subject_kind:body.map(|id|self.bodies[id.0 as usize].kind),impact_strength,damage:damage.clone(),contact:None, emitted_at: t, received_at: t, pos:Some(pos), kind, own_body: body, aim });
+        self.refinement.truth_events.push(CombatEvent {weapon_visual:self.weapon_visual(kind,body), target:None, velocity, subject_kind:body.map(|id|self.bodies[id.0 as usize].kind),impact_strength,damage:damage.clone(),contact:None, emitted_at: t, received_at: t, pos:Some(pos), kind, own_body: body, aim });
         let mut pending:Vec<FactionId>=pending;
         if matches!(kind,CombatKind::JumpSpool|CombatKind::JumpCancelled|CombatKind::JumpDeparture|CombatKind::JumpArrival)
             && let (Some(id),Some(f))=(body,owner) && self.decider(f,t)==Some(id) {
@@ -413,7 +416,7 @@ impl World {
         if matches!(flash.kind,CombatKind::WithdrawalStarted|CombatKind::WithdrawalCancelled|CombatKind::Withdrawn|CombatKind::Surrendered) {
             let contact=if own {None} else {flash.body.map(|id|self.contact_id(faction,id))};
             if let Some(c)=contact && matches!(flash.kind,CombatKind::Withdrawn|CombatKind::Surrendered) {self.refinement.retired_contacts.insert((faction,c));}
-            return Some(CombatEvent {velocity:None,subject_kind:Some(BodyKind::Ship),impact_strength:0.0,damage:None,contact,target:None,aim:None,
+            return Some(CombatEvent {weapon_visual:super::weapon_fit::WeaponVisual::Standard,velocity:None,subject_kind:Some(BodyKind::Ship),impact_strength:0.0,damage:None,contact,target:None,aim:None,
                 emitted_at:flash.front.t_emit,received_at:arrival,pos:own.then_some(flash.front.origin),kind:flash.kind,own_body:if own {flash.body} else {None}});
         }
         let pos=if own { Some(flash.front.origin) } else {
@@ -461,10 +464,10 @@ impl World {
                 self.perceptions.get(&faction).and_then(|p|p.contacts.get(&c)).filter(|c|c.resolved)
                     .map(|_|InterceptTarget::Contact(c))}
         });
-        Some(CombatEvent {target,velocity:if own {flash.velocity} else {None},subject_kind,impact_strength:flash.impact_strength,damage:if own {flash.damage.clone()} else {None},contact,emitted_at:flash.front.t_emit,received_at:arrival,pos,kind:flash.kind,
+        Some(CombatEvent {weapon_visual:self.weapon_visual(flash.kind,flash.body),target,velocity:if own {flash.velocity} else {None},subject_kind,impact_strength:flash.impact_strength,damage:if own {flash.damage.clone()} else {None},contact,emitted_at:flash.front.t_emit,received_at:arrival,pos,kind:flash.kind,
             // A visible beam discharge carries its beam direction, not the
             // target's identity or true position. Anchor it at the observed flash.
-            aim:if own {flash.aim} else if matches!(flash.kind,CombatKind::BeamPulse|CombatKind::SpinalPulse|CombatKind::PointDefence) {
+            aim:if own {flash.aim} else if matches!(flash.kind,CombatKind::BeamPulse|CombatKind::SpinalPulse|CombatKind::PointDefence|CombatKind::InterferencePulse) {
                 pos.zip(flash.aim).map(|(observed,aim)|observed+(aim-flash.front.origin))
             } else {None},
             own_body:if own {flash.body} else {None}})

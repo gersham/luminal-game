@@ -28,6 +28,7 @@ pub enum Role {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Command {
+    SetBeamMode {body:BodyId,mode:crate::world::weapon_fit::BeamMode},
     Withdraw {body:BodyId},
     Surrender {body:BodyId},
     SetRepairGoal {body:BodyId,goal:crate::damage::RepairGoal},
@@ -93,7 +94,7 @@ pub enum Rejection {
 impl Command {
     pub fn body(&self) -> Option<BodyId> {
         match *self {
-            Self::Withdraw {body} | Self::Surrender {body} | Self::SetRepairGoal {body,..} | Self::Jump {body,..} | Self::CancelJump {body} | Self::Alongside {body,..} | Self::Follow {body,..} | Self::SetThrust { body, .. } | Self::Orbit { body, .. } | Self::Intercept { body, .. }
+            Self::SetBeamMode {body,..} | Self::Withdraw {body} | Self::Surrender {body} | Self::SetRepairGoal {body,..} | Self::Jump {body,..} | Self::CancelJump {body} | Self::Alongside {body,..} | Self::Follow {body,..} | Self::SetThrust { body, .. } | Self::Orbit { body, .. } | Self::Intercept { body, .. }
             | Self::AppendWaypoint {body,..} | Self::Flyby { body, .. } | Self::KeepRange {body,..} | Self::Evade {body,..} | Self::MoveTo { body, .. } | Self::AllStop { body }
             | Self::SetDriveLimit { body, .. } | Self::Launch { body, .. } | Self::FireBeam { body, .. }
             | Self::SetHeatDump {body,..} | Self::Ping { body } | Self::EngageBeam { body, .. } | Self::SetScreen { body, .. } | Self::SetSystemMode {body,..}
@@ -123,6 +124,8 @@ impl From<OrderError> for Rejection {
 /// Command-ship state, delayed friendly telemetry, or truth for the spectator.
 #[derive(Clone, Debug)]
 pub struct BodyView {
+    pub beam_mode:crate::world::weapon_fit::BeamMode,
+    pub interference_remaining:f64,
     pub display_class:Option<String>,
     pub withdrawing:bool,
     pub jump:Option<crate::world::jump::JumpState>,
@@ -444,6 +447,7 @@ impl LocalSession {
             if self.world.transmit_order(body, cmd.clone()) { return Ok(()); }
         }
         match cmd {
+            Command::SetBeamMode {body,mode}=>self.world.set_beam_mode(body,mode)?,
             Command::Withdraw {body}=>self.world.withdraw(body)?,
             Command::Surrender {body}=>self.world.surrender(body)?,
             Command::SetRepairGoal {body,goal}=>self.world.set_repair_goal(body,goal)?,
@@ -611,6 +615,7 @@ impl LocalSession {
                     thermal: b.thermal,
                     thermal_rated_accel:b.heat_rated_accel(),
                     id: BodyId(i as u32),
+                    beam_mode:b.beam_mode,interference_remaining:(b.disrupted_until-t).max(0.0),
                     name: b.name.clone(),display_class:b.display_class.clone(),
                     kind: b.kind,
                     faction: b.faction,

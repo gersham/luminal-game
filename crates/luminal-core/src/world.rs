@@ -23,6 +23,9 @@ pub use refinements::{CombatEvent, CombatKind};
 pub mod calibration;
 #[path = "endgame.rs"]
 pub mod endgame;
+#[path = "weapon_fit.rs"]
+pub mod weapon_fit;
+use weapon_fit::BeamMode;
 #[path = "point_defence.rs"]
 pub mod point_defence;
 #[path = "interceptor.rs"]
@@ -127,6 +130,8 @@ pub struct Autopilot {
 
 #[derive(Clone, Debug)]
 pub struct Body {
+    pub beam_mode:BeamMode,
+    pub disrupted_until:f64,
     /// Cosmetic class title; the ship_class enum alone determines capabilities.
     pub display_class:Option<String>,
     pub withdrawing:bool,
@@ -487,6 +492,8 @@ pub struct BeamSolution {
 
 #[derive(Clone, Copy, Debug)]
 struct Beam {
+    interference:bool,
+    coherence:f64,
     missile: BodyId,
     target: BodyId,
     front: Front,
@@ -567,7 +574,7 @@ impl World {
             .into_iter()
             .map(|spec| {
                 let trajectory = ballistic_history(&system, spec.state, spec.thrust, history_s);
-                Body {display_class:None,withdrawing:false,
+                Body {beam_mode:BeamMode::Damage,disrupted_until:0.0,display_class:None,withdrawing:false,
                     jump:None,step_generation:0,
                     controls:controls::Controls::default(),last_missile_launch:None,
                     ship_class: (spec.kind==BodyKind::Ship).then_some(ShipClass::Frigate),
@@ -967,7 +974,7 @@ impl World {
         let mut start = b.trajectory.state_at(t).expect("alive");start.pos=start.pos+offset;
         let dv = payload.delta_v();
         let mid = BodyId(self.bodies.len() as u32);
-        self.bodies.push(Body {display_class:None,withdrawing:false,
+        self.bodies.push(Body {beam_mode:BeamMode::Damage,disrupted_until:0.0,display_class:None,withdrawing:false,
             jump:None,step_generation:0,
             controls:controls::Controls::default(),last_missile_launch:None,
             ship_class: None,facing:0.0,turn_target:0.0,facing_at:0.0,spinal_ready_at:0.0,spinal_tracking:None,
@@ -1080,7 +1087,7 @@ impl World {
             +transverse.y*transverse.y*p[1][1]).max(0.0)+(range*SHIP_BEAM_POINTING_RAD.value).powi(2);
         let spot=(range*SHIP_BEAM_DIVERGENCE.value).max(SHIP_RADIUS_KM.value);
         let energy=SHIP_BEAM_ENERGY_J.value*self.bodies[id.0 as usize].ship_class.map_or(1.0,ShipClass::beam_power);
-        let fraction=beam_range_factor(range)*(SHIP_RADIUS_KM.value/spot).powi(2)/(1.0+2.0*variance/(spot*spot)).sqrt();
+        let fraction=self.bodies[id.0 as usize].beam_coherence(self.time)*beam_range_factor(range)*(SHIP_RADIUS_KM.value/spot).powi(2)/(1.0+2.0*variance/(spot*spot)).sqrt();
         let expected=energy*fraction;
         Some(BeamSolution {range_km:range,flight_s:range/crate::units::C,aim_sigma_km:variance.sqrt(),spot_km:spot,
             expected_j:expected,coupled_fraction:fraction,
@@ -1088,7 +1095,7 @@ impl World {
                 || (variance<=4.0*spot*spot && expected>=SHIP_BEAM_MIN_EXPECTED_J.value.max(0.05*energy))})
     }
     fn beam_worth_firing(&self,id:BodyId,target:ContactId)->bool {
-        self.beam_solution(id,target).is_some_and(|s|s.worth_firing)
+        self.beam_solution(id,target).is_some_and(|s|s.worth_firing && (self.bodies[id.0 as usize].beam_mode==BeamMode::Damage || s.range_km<=weapon_fit::INTERFERENCE_RANGE_LS*crate::units::LIGHT_SECOND))
     }
 
     fn control_beam(&mut self, id: BodyId, order: u64) {
@@ -1135,7 +1142,7 @@ impl World {
         let t = self.time;
         let b = self.live_body_mut(id)?;
         if b.kind != BodyKind::Ship || !b.armed || b.ship_class==Some(ShipClass::Picket) { return Err(OrderError::Unarmed); }
-        let effectiveness=b.operating_effectiveness(crate::damage::System::Beam);
+        let effectiveness=if b.beam_mode==BeamMode::Interference {b.operating_effectiveness(crate::damage::System::Beam).min(b.operating_effectiveness(crate::damage::System::Ecm))} else {b.operating_effectiveness(crate::damage::System::Beam)};
         if effectiveness==0.0 {return Err(OrderError::PowerOrHeat);}
         if t < b.beam_ready_at { return Err(OrderError::BeamRecharging); }
         b.advance_thermal(t);
@@ -1152,15 +1159,20 @@ impl World {
         let aim = track.at(t + flight, &self.system).pos() - origin;
         if !flight.is_finite() || aim.length() == 0.0 { return Err(OrderError::InvalidTarget); }
         let target_body = self.body_for_contact(faction,target).ok_or(OrderError::InvalidTarget)?;
+        let interference=self.bodies[id.0 as usize].beam_mode==BeamMode::Interference;
+        if interference && (aim.length()>weapon_fit::INTERFERENCE_RANGE_LS*crate::units::LIGHT_SECOND
+            || self.bodies[target_body.0 as usize].kind!=BodyKind::Ship
+            || self.bodies[target_body.0 as usize].faction==faction) {return Err(OrderError::InvalidTarget);}
+        let coherence=self.bodies[id.0 as usize].beam_coherence(t);
         let angle = bearing_of(aim) + SHIP_BEAM_POINTING_RAD.value * self.rng.gaussian();
         let direction = Vec2::new(angle.cos(), angle.sin());
-        let beam = Beam { missile: id, target: target_body, front: Front { origin, t_emit: t }, direction,
+        let beam = Beam { interference,coherence,missile: id, target: target_body, front: Front { origin, t_emit: t }, direction,
             ship_energy_j: energy,spinal:false };
         self.bodies[id.0 as usize].beam_ready_at = t + SHIP_BEAM_RECHARGE_S.value/effectiveness;
         self.bodies[id.0 as usize].thermal.fire_energy(energy);
         self.bodies[id.0 as usize].beam_emitted_j += energy;
         self.bodies[id.0 as usize].last_beam = Some((t, origin, origin + direction * aim.length()));
-        self.record_beam(t,origin,CombatKind::BeamPulse,id,target_body,faction);
+        self.record_beam(t,origin,if interference {CombatKind::InterferencePulse} else {CombatKind::BeamPulse},id,target_body,faction);
         self.scheduler.schedule(t + flight.max(0.001), Event::Beam(beam));
         Ok(())
     }
@@ -1188,7 +1200,7 @@ impl World {
         b.thermal.capacitor_j-=input;b.thermal.heat_j+=input-energy;b.thermal.heating_w+=(input-energy)/5.0;b.thermal.emitted_j+=energy;
         b.beam_emitted_j+=energy;b.last_beam=Some((t,origin,origin+aim));
         self.record_beam(t,origin,CombatKind::SpinalPulse,id,target_body,faction);
-        self.scheduler.schedule(t+flight.max(0.001),Event::Beam(Beam {missile:id,target:target_body,front:Front {origin,t_emit:t},direction:aim.normalized(),ship_energy_j:energy,spinal:true}));
+        self.scheduler.schedule(t+flight.max(0.001),Event::Beam(Beam {interference:false,coherence:self.bodies[id.0 as usize].beam_coherence(t),missile:id,target:target_body,front:Front {origin,t_emit:t},direction:aim.normalized(),ship_energy_j:energy,spinal:true}));
         Ok(())
     }
 
@@ -1231,7 +1243,16 @@ impl World {
                     let broad=spot*10.0;
                     if rel.length()<=10.0*SHIP_BEAM_AUTO_RANGE_LS.value*crate::units::LIGHT_SECOND {(-miss*miss/(broad*broad)).exp()} else {0.0}
                 } else {beam_range_factor(rel.length())*(SHIP_RADIUS_KM.value / spot).powi(2) * (-miss * miss / (spot * spot)).exp()};
-                let coupled = energy * fraction;
+                if beam.interference {
+                    // Fixed 15% defocusing, never additive. Another hit can refresh
+                    // the eight-second lease, but cannot bank future duration.
+                    if rel.length()<=weapon_fit::INTERFERENCE_RANGE_LS*crate::units::LIGHT_SECOND && fraction*beam.coherence>=0.10 {
+                        self.bodies[beam.target.0 as usize].disrupted_until=self.bodies[beam.target.0 as usize].disrupted_until.max(t_arr+weapon_fit::INTERFERENCE_SECONDS);
+                        self.record_combat(t_arr,s.pos,CombatKind::FireControlDisrupted,Some(beam.target),None);
+                    }
+                    return;
+                }
+                let coupled = energy * fraction * beam.coherence;
                 if coupled > 0.0 {
                     self.deliver(beam.target, t_arr, coupled, Payload::Beam, beam.missile);
                 }

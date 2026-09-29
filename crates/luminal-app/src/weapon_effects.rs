@@ -4,7 +4,7 @@ use super::*;
 type MarkerKey = (bool,u32);
 #[derive(Clone,Copy)]
 struct Marker {pos:Vec2,velocity:Vec2,color:Color32,interceptor:bool}
-struct Effect {marker:Marker,started:f64,hit:bool,warp:f64}
+struct Effect {visual:luminal_core::world::weapon_fit::WeaponVisual,marker:Marker,started:f64,hit:bool,warp:f64}
 impl Effect {
     fn position(&self,now:f64)->Vec2 {
         self.marker.pos+self.marker.velocity*((now-self.started).clamp(0.0,1.0)*self.warp)
@@ -53,14 +53,14 @@ impl WeaponEffects {
             let Some(pos)=target.map(|m|m.pos).or(event_pos).or(previous.map(|m|m.pos)) else {continue;};
             let marker=Marker {pos,velocity,
                 ..previous.unwrap_or(Marker {pos,velocity:Vec2::ZERO,color:CONTACT,interceptor:false})};
-            self.effects.push(Effect {marker,started:now,hit,warp:view.warp});
+            self.effects.push(Effect {visual:e.weapon_visual,marker,started:now,hit,warp:view.warp});
         }
         // Contacts may disappear without an observed outcome. Fade the last
         // received marker without inventing an explosion or revealing truth.
         if self.initialized {
             for (key,marker) in &self.markers {
                 if !current.contains_key(key) && !ended.contains(key) {
-                    self.effects.push(Effect {marker:*marker,started:now,hit:false,warp:view.warp});
+                    self.effects.push(Effect {visual:luminal_core::world::weapon_fit::WeaponVisual::Standard,marker:*marker,started:now,hit:false,warp:view.warp});
                 }
             }
         }
@@ -81,6 +81,13 @@ impl WeaponEffects {
                     painter.circle_filled(p,radius*layer as f32/8.0,color.gamma_multiply(alpha*0.18));
                 }
                 painter.circle_filled(p,3.0+3.0*alpha,color.gamma_multiply(alpha));
+                if let luminal_core::world::weapon_fit::WeaponVisual::Canister(count)=e.visual {
+                    for i in 0..count {
+                        let angle=i as f32*std::f32::consts::TAU/count as f32;
+                        let direction=EVec2::angled(angle);
+                        painter.line_segment([p+direction*(10.0+24.0*(1.0-alpha)),p+direction*(18.0+38.0*(1.0-alpha))],Stroke::new(1.5,Color32::from_rgb(255,210,100).gamma_multiply(alpha)));
+                    }
+                }
             } else {
                 let color=e.marker.color.gamma_multiply(alpha);
                 if e.marker.interceptor {painter.circle_filled(p,2.0,color);}
@@ -101,7 +108,7 @@ mod tests {
         let marker=Marker {pos:Vec2::ZERO,velocity:Vec2::new(2.0,0.0),color:CONTACT,interceptor:false};
         effects.markers.insert((true,999),Marker {interceptor:true,..marker});
         effects.markers.insert((true,1000),marker);
-        let hit=luminal_core::world::CombatEvent {target:Some(InterceptTarget::Own(BodyId(1000))),velocity:Some(marker.velocity),
+        let hit=luminal_core::world::CombatEvent {weapon_visual:luminal_core::world::weapon_fit::WeaponVisual::Standard,target:Some(InterceptTarget::Own(BodyId(1000))),velocity:Some(marker.velocity),
             subject_kind:Some(BodyKind::Missile),impact_strength:0.0,damage:None,contact:None,
             aim:None,pos:Some(Vec2::ZERO),kind:CombatKind::MissileHit,emitted_at:49.0,received_at:50.0,own_body:Some(BodyId(999))};
         view.combat=vec![hit.clone(),luminal_core::world::CombatEvent {target:None,kind:CombatKind::Destroyed,own_body:Some(BodyId(1000)),..hit}];
@@ -129,7 +136,7 @@ mod tests {
         view.combat.clear();
         let mut effects=WeaponEffects::default();
         effects.observe(&view,Some(ESCORT),0.0);
-        view.combat=vec![luminal_core::world::CombatEvent {target:None,velocity:Some(Vec2::new(2.0,3.0)),
+        view.combat=vec![luminal_core::world::CombatEvent {weapon_visual:luminal_core::world::weapon_fit::WeaponVisual::Standard,target:None,velocity:Some(Vec2::new(2.0,3.0)),
             subject_kind:Some(BodyKind::Missile),impact_strength:0.0,damage:None,contact:None,
             aim:None,pos:Some(Vec2::ZERO),kind:CombatKind::MissileMiss,
             emitted_at:0.0,received_at:0.0,own_body:Some(BodyId(999)),
