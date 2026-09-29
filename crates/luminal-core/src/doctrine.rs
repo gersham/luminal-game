@@ -3,8 +3,13 @@
 use crate::session::{BodyView, ContactView, Command, InterceptTarget, Payload, View};
 use crate::params::*;
 use crate::units::{AU,G0};
-use crate::world::{BodyKind,ShipClass};
+use crate::world::{BodyKind,ShipClass,Stance};
 use std::collections::BTreeMap;
+
+/// Defenders leave the prize only once a tracked ship is this close to it.
+const SCREEN_LEASH: f64 = 1.5 * AU;
+/// Matched drives cannot be run down, so the quarry fights inside this range.
+const EVADE_CATCH: f64 = 0.1 * AU;
 
 #[derive(Default)]
 pub struct Doctrine {
@@ -148,10 +153,28 @@ impl Doctrine {
                 if b.missile_queued.iter().any(|n|*n>0) {out.push(Command::CancelLaunches {body:b.id});}
                 continue;
             }
+            let stance=view.objective.as_ref().map(|o|o.stance).unwrap_or(Stance::Intercept);
+            let screening=stance==Stance::Screen && view.objective.as_ref().is_some_and(|o|o.defender==b.faction);
+            let running=stance==Stance::Evade && objective.is_some();
+            if screening {
+                let obj=view.objective.as_ref().unwrap();
+                let threatened=target.is_some_and(|c|(c.track.as_ref().unwrap().pos-obj.center).length()<=SCREEN_LEASH);
+                if !threatened {
+                    if let Some(prize)=obj.prize {
+                        let following=matches!(b.autopilot.map(|ap|ap.order),Some(crate::world::Order::Follow {target,..}) if target==prize);
+                        if !following {
+                            out.push(Command::Follow {body:b.id,target:prize});
+                            out.push(Command::SetDriveLimit {body:b.id,g:class.max_g()});
+                        }
+                    }
+                    continue;
+                }
+            }
             if target.is_none() && let Some(point)=search_destination {
                 out.push(Command::MoveTo {body:b.id,point});
                 continue;
             }
+            if running && target.is_none() {continue;}
             if target.is_none() && view.time >= *self.ping_at.get(&b.id).unwrap_or(&0.0) {
                 out.push(Command::Ping { body: b.id });
                 self.ping_at.insert(b.id,view.time+BOT_PING_S.value);
@@ -173,12 +196,14 @@ impl Doctrine {
                 let mode=if support_worthwhile(view,b,c) {BeamMode::Interference} else {BeamMode::Damage};
                 if b.beam_mode!=mode {out.push(Command::SetBeamMode {body:b.id,mode});}
             }
-            if engage && range<2.0*AU && c.active_fire_control<0.5
+            if !running && engage && range<2.0*AU && c.active_fire_control<0.5
                 && view.time>=*self.ping_at.get(&b.id).unwrap_or(&0.0) {
                 out.push(Command::Ping {body:b.id});
                 self.ping_at.insert(b.id,view.time+BOT_PING_S.value);
             }
-            if engage {
+            if running && range>EVADE_CATCH {
+                out.push(Command::Evade {body:b.id,target:InterceptTarget::Contact(c.id)});
+            } else if engage || running {
                 let payload=if b.magazine[Payload::Kinetic.index()]>0 && crate::world::endgame::recoverable(damage,S::SrmLauncher) {Payload::Kinetic}
                     else if b.magazine[Payload::Nuclear.index()]>0 && crate::world::endgame::recoverable(damage,S::Launcher) {Payload::Nuclear} else {Payload::Beam};
                 out.push(Command::KeepRange {body:b.id,target:InterceptTarget::Contact(c.id),
@@ -201,7 +226,7 @@ impl Doctrine {
                         crate::world::weapon_probability::quality(c.detection),sigma,
                         crate::world::weapon_probability::evasion_score(tr.accel,tr.vel-b.vel,tr.pos-b.pos),1.0);
                     if confidence<0.5 || c.detection<crate::sensors::DetectionLevel::Resolved {
-                        if range<crate::units::AU && view.time>=*self.ping_at.get(&b.id).unwrap_or(&0.0) {
+                        if !running && range<crate::units::AU && view.time>=*self.ping_at.get(&b.id).unwrap_or(&0.0) {
                             out.push(Command::Ping {body:b.id});
                             self.ping_at.insert(b.id,view.time+BOT_PING_S.value);
                         }
@@ -335,6 +360,85 @@ mod tests {
         view.time+=10.0;
         for c in &mut view.contacts {c.track.as_mut().unwrap().pos=ship.pos+Vec2::new(3.0*AU,0.0);}
         assert_eq!(launches(ai.orders(&view)),0,"no routine long-range expenditure");
+    }
+
+    fn resolved_ship(id:u32,pos:Vec2)->ContactView {
+        ContactView {identified_name:None,display_class:None,detection:crate::sensors::DetectionLevel::Resolved,
+            ping_remaining:0.0,active_fire_control:0.0,reporting_sensor:None,resolved_class:Some(ShipClass::Cruiser),
+            resolved_interceptor:false,damage:None,id:ContactId(id),resolved_kind:Some(BodyKind::Ship),
+            resolved_missile:false,quality:"resolved",stale:false,
+            track:Some(TrackView {velocity_sigma:10.0,pos,vel:Vec2::ZERO,accel:Vec2::ZERO,
+                cov:[[1.0e16,0.0],[0.0,1.0e16]],updated_at:0.0,updates:4}),
+            bearings:vec![],last_emitted_at:0.0,last_received_at:0.0,last_source:Source::Echo,
+            last_snr:1e6,last_range:None}
+    }
+
+    fn own_ships(view:&mut View) {
+        for b in &mut view.bodies {
+            if b.kind==BodyKind::Ship && b.armed {b.controllable=true;}
+        }
+    }
+
+    #[test]
+    fn raid_screen_holds_the_station_until_a_ship_reaches_it() {
+        let session=LocalSession::new(crate::scenario::Scenario::Raid.build(42,crate::scenario::home_system()));
+        let mut view=session.view(Role::Faction(crate::scenario::RAIDER));
+        own_ships(&mut view);
+        let station=view.bodies.iter().find(|b|b.kind==BodyKind::Station).unwrap().pos;
+        view.contacts=vec![resolved_ship(1,station+Vec2::new(4.0*AU,0.0))];
+        let orders=Doctrine::default().orders(&view);
+        assert!(orders.iter().all(|c|!matches!(c,Command::KeepRange {..}|Command::Flyby {..}|Command::MoveTo {..}|Command::Evade {..})));
+        for ship in view.bodies.iter().filter(|b|b.controllable) {
+            let already=matches!(ship.autopilot.map(|ap|ap.order),Some(crate::world::Order::Follow {target:crate::world::BodyId(1),..}));
+            let ordered=orders.iter().any(|c|matches!(c,Command::Follow {body,target:crate::world::BodyId(1)} if *body==ship.id));
+            assert!(already||ordered,"{ship:?} left the screen\n{orders:?}");
+        }
+        view.contacts[0].track.as_mut().unwrap().pos=station+Vec2::new(0.2*AU,0.0);
+        let orders=Doctrine::default().orders(&view);
+        for ship in view.bodies.iter().filter(|b|b.controllable) {
+            assert!(orders.iter().any(|c|matches!(c,Command::Flyby {body,..} if *body==ship.id)),"{:?} did not fight",ship.id);
+        }
+        assert!(orders.iter().all(|c|!matches!(c,Command::Follow {..}|Command::MoveTo {..})));
+    }
+
+    #[test]
+    fn quarry_stays_dark_until_the_hunter_is_close() {
+        let session=LocalSession::new(crate::scenario::Scenario::HideAndSeek.build(42,crate::scenario::home_system()));
+        let mut view=session.view(Role::Faction(crate::scenario::RAIDER));
+        let hunt=view.objective.as_ref().unwrap().center;
+        let dark=|orders:&[Command]| !orders.iter().any(|c|matches!(c,Command::Ping {..}|Command::SetSystemMode {..}|Command::SetScreen {..}));
+        let orders=Doctrine::default().orders(&view);
+        assert!(orders.iter().any(|c|matches!(c,Command::MoveTo {point,..} if (*point-hunt).length()<1.0)));
+        assert!(dark(&orders));
+        assert!(!orders.iter().any(|c|matches!(c,Command::KeepRange {..}|Command::Flyby {..}|Command::Evade {..})));
+        let quarry=view.bodies.iter().find(|b|b.controllable).unwrap().pos;
+        view.contacts=vec![resolved_ship(1,quarry+Vec2::new(1.5*AU,0.0))];
+        let orders=Doctrine::default().orders(&view);
+        assert!(orders.iter().any(|c|matches!(c,Command::Evade {..})));
+        assert!(dark(&orders));
+        assert!(!orders.iter().any(|c|matches!(c,Command::KeepRange {..}|Command::Flyby {..}|Command::MoveTo {..})));
+        view.contacts[0].track.as_mut().unwrap().pos=quarry+Vec2::new(0.05*AU,0.0);
+        let orders=Doctrine::default().orders(&view);
+        assert!(orders.iter().any(|c|matches!(c,Command::KeepRange {..})));
+        assert!(dark(&orders));
+        assert!(!orders.iter().any(|c|matches!(c,Command::Evade {..}|Command::Ping {..})));
+    }
+
+    #[test]
+    fn armada_attackers_close_and_defenders_are_not_sent_home() {
+        let session=LocalSession::new(crate::scenario::Scenario::Armada.build(42,crate::scenario::home_system()));
+        let center=session.view(Role::Spectator).objective.unwrap().center;
+        let mut defenders=session.view(Role::Faction(crate::scenario::RAIDER));
+        own_ships(&mut defenders);
+        let orders=Doctrine::default().orders(&defenders);
+        assert!(orders.iter().all(|c|!matches!(c,Command::MoveTo {point,..} if (*point-center).length()<AU)),"{orders:?}");
+        let mut attackers=session.view(Role::Faction(crate::scenario::ESCORT));
+        attackers.contacts.clear();
+        let player=attackers.objective.as_ref().unwrap().player;
+        for b in &mut attackers.bodies {b.controllable=b.kind==BodyKind::Ship && b.armed && Some(b.id)!=player;}
+        let orders=Doctrine::default().orders(&attackers);
+        let closing=orders.iter().filter(|c|matches!(c,Command::MoveTo {point,..} if (*point-center).length()<1.0)).count();
+        assert_eq!(closing,9,"allies without a track head for the enemy fleet");
     }
 }
 

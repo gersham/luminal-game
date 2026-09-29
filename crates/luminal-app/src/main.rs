@@ -837,7 +837,9 @@ mod tests {
         assert_eq!(grid_spacing(AU / 80.0), Some(AU));
         assert_eq!(grid_spacing(AU / 400.0), Some(AU));
         assert_eq!(grid_spacing(LIGHT_SECOND / 40.0), Some(LIGHT_SECOND));
-        assert_eq!(grid_spacing(AU / 4.0), None, "dots closer than the minimum pitch would clot");
+        assert_eq!(grid_spacing(LIGHT_SECOND / 6.0), Some(10.0 * LIGHT_SECOND));
+        assert_eq!(grid_spacing(AU / 6.0), Some(10.0 * AU));
+        assert_eq!(grid_spacing(AU / 0.5), None, "dots closer than the minimum pitch would clot");
         fn frame(app:&mut LuminalApp,ctx:&egui::Context)->egui::FullOutput {
             let view=app.session.view(app.role);
             let mut output=ctx.run_ui(egui::RawInput {screen_rect:Some(Rect::from_min_size(Pos2::ZERO,EVec2::new(900.0,700.0))),..Default::default()},|ui| app.map(ui,&view,None));
@@ -885,6 +887,12 @@ mod tests {
         assert!(near(&dots,rect.center()+EVec2::new(40.0,0.0)));
         assert!(!near(&dots,rect.center()+EVec2::new(20.0,0.0)));
         assert_eq!(dots.len(),23*17);
+        app.camera=Camera {center:Vec2::ZERO,km_per_px:LIGHT_SECOND/6.0};
+        let output=frame(&mut app,&ctx);
+        let dots=points(&output);
+        assert!(near(&dots,rect.center()));
+        assert!(near(&dots,rect.center()+EVec2::new(60.0,0.0)),"10 LS is one step");
+        assert!(!near(&dots,rect.center()+EVec2::new(6.0,0.0)),"1 LS is omitted once it would clot");
     }
 
     #[test] fn manual_turns_and_throttle_are_bounded_and_frame_independent() {
@@ -1072,7 +1080,7 @@ struct LuminalApp {
 
 /// Development hooks driven by environment variables, used for visual checks.
 /// `LUMINAL_ADVANCE=<sim seconds>` pre-runs the scenario; `LUMINAL_ROLE=spectator|raider`
-/// picks the starting view; `LUMINAL_SCENARIO=escort|raid|hide|armada` picks the situation;
+/// picks the starting view; `LUMINAL_SCENARIO=<name or token>` picks the situation;
 /// `LUMINAL_SCREENSHOT=<file.ppm>` saves a frame and exits.
 #[derive(Default)]
 struct DevHooks {
@@ -1472,10 +1480,10 @@ Shift + right click: extend route").monospace().size(9.0).color(TEXT_MUTED));
             }
         });
         let system=theme.star_system(seed);
-        let mut world=if scenario==Scenario::Escort {scenario::transport_intercept_class_in_system(seed,chosen,system)} else {scenario.build(seed,system)};
+        let mut world=scenario.build_with(seed,system,chosen);
         theme.name_scenario(&mut world,seed);
         let player=world.objective.as_ref().and_then(|o|o.player);
-        let inspected=if scenario==Scenario::Escort {world.objective.as_ref().map(|o|Selection::Body(o.protect))} else {None};
+        let inspected=scenario.inspected(&world).map(Selection::Body);
         let mut session=LocalSession::new(world);
         session.set_build_identity(BUILD_VERSION,BUILD_COMMIT,build_dirty());
         let log_path=std::path::PathBuf::from("logs/latest.log");
@@ -1516,7 +1524,8 @@ Shift + right click: extend route").monospace().size(9.0).color(TEXT_MUTED));
             manual_flight:None,manual_send_elapsed:0.0,
         }
         .with_env_setup();
-        let bots: &[FactionId] = if app.chosen_scenario==Scenario::Escort && app.role==Role::Faction(RAIDER) {&[ESCORT]} else {app.chosen_scenario.bots()};
+        let human=match app.role {Role::Faction(faction)=>Some(faction),Role::Spectator=>None};
+        let bots=app.chosen_scenario.bots_for(human);
         for faction in bots {app.session.enable_bot(*faction, true);}
         let _ = app.session.command(app.role, Command::SetWarp(AUTO_MIN_WARP));
         // AUTO ramps up from 5×; screenshot fixtures remain paused.
@@ -1597,7 +1606,7 @@ Shift + right click: extend route").monospace().size(9.0).color(TEXT_MUTED));
             Ok("spectator") => self.role = Role::Spectator,
             Ok("raider") => {
                 self.role = Role::Faction(RAIDER);
-                if self.chosen_scenario==Scenario::Escort {self.selected = Some(Selection::Body(BodyId(2)));}
+                if let Some(body)=self.chosen_scenario.opposed_ship() {self.selected=Some(Selection::Body(body));}
             }
             _ => {}
         }
@@ -3451,11 +3460,12 @@ const GRID_DOT: Color32 = Color32::from_rgba_unmultiplied_const(168, 196, 220, 6
 /// Below this pitch the dots clot, so the lattice waits until it reads as points.
 const GRID_MIN_PX: f32 = 12.0;
 
-/// 1 AU across the system. 1 light-second once that pitch is wide enough to separate.
+/// Finest unlabeled lattice that stays at least GRID_MIN_PX apart: 1 LS, 10 LS, 1 AU, then 10 AU.
 fn grid_spacing(km_per_px: f64) -> Option<f64> {
     if !km_per_px.is_finite() || km_per_px <= 0.0 { return None; }
-    if LIGHT_SECOND / km_per_px >= GRID_MIN_PX as f64 { return Some(LIGHT_SECOND); }
-    if AU / km_per_px >= GRID_MIN_PX as f64 { return Some(AU); }
+    for spacing in [LIGHT_SECOND, 10.0 * LIGHT_SECOND, AU, 10.0 * AU] {
+        if spacing / km_per_px >= GRID_MIN_PX as f64 { return Some(spacing); }
+    }
     None
 }
 
@@ -3491,7 +3501,7 @@ fn draw_point_grid(painter: &egui::Painter, cam: &Camera, rect: Rect) {
             let world = Vec2::new((x0 + col) as f64 * spacing, (y0 + row) as f64 * spacing);
             let at = to_screen(cam, rect, world);
             if rect.expand(1.0).contains(at) {
-                mesh.add_colored_rect(Rect::from_center_size(at, EVec2::splat(2.0)), GRID_DOT);
+                mesh.add_colored_rect(Rect::from_center_size(at, EVec2::splat(1.0)), GRID_DOT);
             }
         }
     }

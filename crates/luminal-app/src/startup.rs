@@ -1,19 +1,10 @@
 //! Scenario selection. The live world stays put until deploy.
+//! Cards come from `Scenario::ALL`, so a new catalog row appears here on its own.
 use super::*;
-use luminal_core::world::ShipClass;
-
-fn flagship(scenario:Scenario)->ShipClass {
-    match scenario {
-        Scenario::Escort=>ShipClass::Destroyer,
-        Scenario::Raid=>ShipClass::Cruiser,
-        Scenario::HideAndSeek=>ShipClass::Frigate,
-        Scenario::Armada=>ShipClass::Battleship,
-    }
-}
 
 impl LuminalApp {
     pub(super) fn deploy_selected(&mut self) {
-        if self.chosen_scenario==Scenario::Escort {self.chosen_class=ShipClass::Destroyer;}
+        if let Some(class)=self.chosen_scenario.deployed_class() {self.chosen_class=class;}
         self.restart_scenario();self.selection_pending=false;
         let _=self.session.command(self.role,Command::SetPaused(false));
     }
@@ -55,7 +46,7 @@ impl LuminalApp {
                         p.rect_stroke(r,5.0,Stroke::new(if selected {2.0} else {1.0},if response.hovered() {TEXT} else {col.gamma_multiply(0.6)}),StrokeKind::Inside);
                         p.text(r.left_top()+EVec2::new(12.0,12.0),egui::Align2::LEFT_TOP,format!("{:02}  {}",i+1,scenario.name().to_uppercase()),mono(15.0),if selected {ACCENT} else {TEXT});
                         p.text(r.left_top()+EVec2::new(12.0,38.0),egui::Align2::LEFT_TOP,scenario.forces(),mono(11.0),TEXT_MUTED);
-                        let class=flagship(scenario);
+                        let class=scenario.flagship();
                         self.ship_art.draw(ui.ctx(),&p,Rect::from_min_size(r.min+EVec2::new(12.0,62.0),EVec2::new(card_width-24.0,64.0)),self.theme,class,col);
                         let detail=p.layout(scenario.detail().to_string(),mono(12.0),TEXT_MUTED,card_width-24.0);
                         p.galley(r.min+EVec2::new(12.0,136.0),detail,TEXT_MUTED);
@@ -78,6 +69,7 @@ impl LuminalApp {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use luminal_core::world::ShipClass;
     fn frame(app:&mut LuminalApp,ctx:&egui::Context,events:Vec<egui::Event>)->egui::FullOutput {
         let mut output=ctx.run_ui(egui::RawInput {screen_rect:Some(Rect::from_min_size(Pos2::ZERO,EVec2::new(1900.0,1000.0))),events,..Default::default()},|ui| {
             if app.startup(ui) {app.deploy_selected();}

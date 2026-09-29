@@ -404,6 +404,19 @@ pub struct SensorSite {
     pub sensors:sensors::SensorSuite,
 }
 
+/// How a botted ship fights the objective. Escort stays [`Stance::Intercept`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Stance {
+    /// Hunt the objective and fight whatever blocks the route.
+    Intercept,
+    /// Defenders hold the prize and leave it only when a ship closes in.
+    Screen,
+    /// Stay dark, run for the objective, and fight only when caught.
+    Evade,
+    /// Close and fight. Defenders keep the helm order they were given.
+    Battle,
+}
+
 /// A scenario goal known to every side: `protect` must reach the region.
 #[derive(Clone, Debug)]
 pub struct Objective {
@@ -425,6 +438,7 @@ pub struct Objective {
     pub defender: FactionId,
     /// The side trying to stop it.
     pub attacker: FactionId,
+    pub stance: Stance,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -2359,6 +2373,7 @@ mod tests {
                 wipe: false,
                 defender: FactionId(0),
                 attacker: FactionId(1),
+                stance: Stance::Intercept,
             });
             w
         };
@@ -2401,7 +2416,7 @@ mod tests {
             ];
             let mut w=World::new(sun(),specs,0.0,1);
             w.objective=Some(Objective {sensor_site:None,name:"fleet".into(),center:Vec2::ZERO,radius:1.0,
-                protect:BodyId(0),player:Some(BodyId(0)),defeat:None,prize,wipe,defender,attacker});
+                protect:BodyId(0),player:Some(BodyId(0)),defeat:None,prize,wipe,defender,attacker,stance:Stance::Intercept});
             w
         };
         let mut w=make(Some(BodyId(3)),false,FactionId(0),FactionId(1));

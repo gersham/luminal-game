@@ -6,7 +6,7 @@ use crate::rng::Rng;
 use crate::units::{AU, LIGHT_SECOND};
 #[cfg(test)]
 use crate::units::G0;
-use crate::world::{BodyId, BodyKind, BodySpec, FactionId, Objective, ShipClass, World};
+use crate::world::{BodyId, BodyKind, BodySpec, FactionId, Objective, ShipClass, Stance, World};
 
 pub const ESCORT: FactionId = FactionId(0);
 pub const RAIDER: FactionId = FactionId(1);
@@ -172,6 +172,7 @@ pub fn transport_intercept_in_system(seed:u64,system:System)->World {
         wipe: false,
         defender: ESCORT,
         attacker: RAIDER,
+        stance: Stance::Intercept,
     });
     let destination = world.objective.as_ref().unwrap().center;
     world.bodies[0].ship_class=Some(crate::world::ShipClass::Transport);
@@ -205,56 +206,115 @@ pub fn transport_intercept_in_system(seed:u64,system:System)->World {
     world
 }
 
-/// Player-facing situations. Escort keeps the transport mission; the others are standalone fights.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Scenario { Escort, Raid, HideAndSeek, Armada }
+/// One playable situation. Add a builder and a [`Play`] row, then list it in [`Scenario::ALL`].
+struct Play {
+    name:&'static str,
+    /// Accepted by `LUMINAL_SCENARIO`, along with `name`.
+    token:&'static str,
+    brief:&'static str,
+    forces:&'static str,
+    detail:&'static str,
+    /// Ship on the selection card. Deploy fields this class when `player_class` is set.
+    flagship:ShipClass,
+    /// Doctrine factions. The human's own ship stays on manual helm.
+    bots:&'static [FactionId],
+    /// Combatants follow the class passed to [`Scenario::build_with`] until deploy forces `flagship`.
+    player_class:bool,
+    /// Open the map on the protected body.
+    inspect_protect:bool,
+    /// Ship selected when the human takes the raider side.
+    opposed_ship:Option<BodyId>,
+    /// Doctrine factions when the human takes the raider side. Empty keeps `bots`.
+    opposed_bots:&'static [FactionId],
+    build:fn(u64,System,ShipClass)->World,
+}
+
+const RAIDER_SIDE:&[FactionId]=&[RAIDER];
+const BOTH_SIDES:&[FactionId]=&[ESCORT,RAIDER];
+const ESCORT_SIDE:&[FactionId]=&[ESCORT];
+const NO_SIDE:&[FactionId]=&[];
+
+fn escort_world(seed:u64,system:System,class:ShipClass)->World {transport_intercept_class_in_system(seed,class,system)}
+fn raid_world(seed:u64,system:System,_:ShipClass)->World {raid(seed,system)}
+fn hide_world(seed:u64,system:System,_:ShipClass)->World {hide_and_seek(seed,system)}
+fn armada_world(seed:u64,system:System,_:ShipClass)->World {armada(seed,system)}
+
+static ESCORT_PLAY:Play=Play {
+    name:"Escort",token:"escort",brief:"Escort the transport past a destroyer.",forces:"Destroyer versus destroyer",
+    detail:"Both sides field a destroyer. The transport runs for the departure region. Defeat the raider.",
+    flagship:ShipClass::Destroyer,bots:RAIDER_SIDE,player_class:true,inspect_protect:true,opposed_ship:Some(BodyId(2)),opposed_bots:ESCORT_SIDE,build:escort_world,
+};
+static RAID_PLAY:Play=Play {
+    name:"Raid",token:"raid",brief:"A cruiser raid on a screened station.",forces:"Cruiser versus a station and its escorts",
+    detail:"Your cruiser starts away from the base. A destroyer and two frigates screen the station. Destroy the station.",
+    flagship:ShipClass::Cruiser,bots:RAIDER_SIDE,player_class:false,inspect_protect:false,opposed_ship:None,opposed_bots:NO_SIDE,build:raid_world,
+};
+static HIDE_PLAY:Play=Play {
+    name:"Hide and Seek",token:"hide",brief:"Two frigates. Find the other one.",forces:"Frigate versus frigate",
+    detail:"You and the quarry are frigates, placed at random and out of contact. Destroy the quarry.",
+    flagship:ShipClass::Frigate,bots:RAIDER_SIDE,player_class:false,inspect_protect:false,opposed_ship:None,opposed_bots:NO_SIDE,build:hide_world,
+};
+static ARMADA_PLAY:Play=Play {
+    name:"Armada",token:"armada",brief:"Ten ships each, from opposite ends.",forces:"Battleship and a mixed fleet of nine",
+    detail:"Your battleship leads a cruiser, two destroyers, three frigates and three pickets. The enemy fleet matches you.",
+    flagship:ShipClass::Battleship,bots:BOTH_SIDES,player_class:false,inspect_protect:false,opposed_ship:None,opposed_bots:NO_SIDE,build:armada_world,
+};
+
+/// Player-facing situations. Identity is the catalog row, so a new scenario does not grow a match.
+#[derive(Clone,Copy)]
+pub struct Scenario(&'static Play);
+
+impl PartialEq for Scenario {
+    fn eq(&self,other:&Self)->bool {std::ptr::eq(self.0,other.0)}
+}
+impl Eq for Scenario {}
+impl std::fmt::Debug for Scenario {
+    fn fmt(&self,f:&mut std::fmt::Formatter<'_>)->std::fmt::Result {f.write_str(self.name())}
+}
+
+#[allow(non_upper_case_globals)]
+impl Scenario {
+    pub const Escort:Self=Self(&ESCORT_PLAY);
+    pub const Raid:Self=Self(&RAID_PLAY);
+    pub const HideAndSeek:Self=Self(&HIDE_PLAY);
+    pub const Armada:Self=Self(&ARMADA_PLAY);
+    /// Card order on the startup screen.
+    pub const ALL:[Self;4]=[Self::Escort,Self::Raid,Self::HideAndSeek,Self::Armada];
+    fn play(self)->&'static Play {self.0}
+    pub fn name(self)->&'static str {self.play().name}
+    pub fn token(self)->&'static str {self.play().token}
+    pub fn brief(self)->&'static str {self.play().brief}
+    pub fn forces(self)->&'static str {self.play().forces}
+    pub fn detail(self)->&'static str {self.play().detail}
+    pub fn flagship(self)->ShipClass {self.play().flagship}
+    pub fn bots(self)->&'static [FactionId] {self.play().bots}
+    /// Doctrine factions. A raider-side human uses `opposed_bots` when the row sets them.
+    pub fn bots_for(self,human:Option<FactionId>)->&'static [FactionId] {
+        if human==Some(RAIDER) && !self.play().opposed_bots.is_empty() {self.play().opposed_bots} else {self.bots()}
+    }
+    /// Class written at deploy. `None` leaves the builder's own ships alone.
+    pub fn deployed_class(self)->Option<ShipClass> {self.play().player_class.then_some(self.flagship())}
+    pub fn opposed_ship(self)->Option<BodyId> {self.play().opposed_ship}
+    pub fn inspected(self,world:&World)->Option<BodyId> {
+        self.play().inspect_protect.then(||world.objective.as_ref().map(|o|o.protect)).flatten()
+    }
+    pub fn parse(name:&str)->Option<Self> {
+        let name=name.trim();
+        Self::ALL.into_iter().find(|scenario|scenario.name().eq_ignore_ascii_case(name)||scenario.token().eq_ignore_ascii_case(name))
+    }
+    /// Fixed flagship. Escort's startup class override goes through [`Self::build_with`].
+    pub fn build(self,seed:u64,system:System)->World {self.build_with(seed,system,self.flagship())}
+    pub fn build_with(self,seed:u64,system:System,class:ShipClass)->World {
+        let class=if self.play().player_class {class} else {self.flagship()};
+        (self.play().build)(seed,system,class)
+    }
+}
 
 const ARMADA_MIX:[ShipClass;10]=[
     ShipClass::Battleship,ShipClass::Cruiser,ShipClass::Destroyer,ShipClass::Destroyer,
     ShipClass::Frigate,ShipClass::Frigate,ShipClass::Frigate,ShipClass::Picket,ShipClass::Picket,ShipClass::Picket,
 ];
 const RAID_SCREEN:[ShipClass;3]=[ShipClass::Destroyer,ShipClass::Frigate,ShipClass::Frigate];
-
-impl Scenario {
-    pub const ALL:[Self;4]=[Self::Escort,Self::Raid,Self::HideAndSeek,Self::Armada];
-    pub fn name(self)->&'static str {match self {Self::Escort=>"Escort",Self::Raid=>"Raid",Self::HideAndSeek=>"Hide and Seek",Self::Armada=>"Armada"}}
-    pub fn token(self)->&'static str {match self {Self::Escort=>"escort",Self::Raid=>"raid",Self::HideAndSeek=>"hide",Self::Armada=>"armada"}}
-    pub fn brief(self)->&'static str {match self {
-        Self::Escort=>"Escort the transport past a destroyer.",
-        Self::Raid=>"A cruiser raid on a screened station.",
-        Self::HideAndSeek=>"Two frigates. Find the other one.",
-        Self::Armada=>"Ten ships each, from opposite ends.",
-    }}
-    pub fn forces(self)->&'static str {match self {
-        Self::Escort=>"Destroyer versus destroyer",
-        Self::Raid=>"Cruiser versus a station and its escorts",
-        Self::HideAndSeek=>"Frigate versus frigate",
-        Self::Armada=>"Battleship and a mixed fleet of nine",
-    }}
-    pub fn detail(self)->&'static str {match self {
-        Self::Escort=>"Both sides field a destroyer. The transport runs for the departure region. Defeat the raider.",
-        Self::Raid=>"Your cruiser starts away from the base. A destroyer and two frigates screen the station. Destroy the station.",
-        Self::HideAndSeek=>"You and the quarry are frigates, placed at random and out of contact. Destroy the quarry.",
-        Self::Armada=>"Your battleship leads a cruiser, two destroyers, three frigates and three pickets. The enemy fleet matches you.",
-    }}
-    pub fn bots(self)->&'static [FactionId] {
-        const BOTH:[FactionId;2]=[ESCORT,RAIDER];
-        const ONE:[FactionId;1]=[RAIDER];
-        match self {Self::Armada=>&BOTH,_=>&ONE}
-    }
-    pub fn parse(name:&str)->Option<Self> {
-        let name=name.trim();
-        Self::ALL.into_iter().find(|scenario|scenario.name().eq_ignore_ascii_case(name)||scenario.token().eq_ignore_ascii_case(name))
-    }
-    pub fn build(self,seed:u64,system:System)->World {
-        match self {
-            Self::Escort=>transport_intercept_class_in_system(seed,ShipClass::Destroyer,system),
-            Self::Raid=>raid(seed,system),
-            Self::HideAndSeek=>hide_and_seek(seed,system),
-            Self::Armada=>armada(seed,system),
-        }
-    }
-}
 
 fn clear_of_celestials(system:&System,pos:Vec2)->bool {
     system.bodies.iter().enumerate().all(|(i,b)|(pos-system.state(i,0.0).pos).length()>b.radius+0.03*AU)
@@ -342,7 +402,7 @@ fn raid(seed:u64,system:System)->World {
         world.bodies[id.0 as usize].drive_limit=limit;
     }
     world.objective=Some(Objective {sensor_site:None,name:"enemy station".into(),center:station_pos,radius:0.08*AU,
-        protect:BodyId(0),player:Some(BodyId(0)),defeat:None,prize:Some(BodyId(1)),wipe:false,defender:RAIDER,attacker:ESCORT});
+        protect:BodyId(0),player:Some(BodyId(0)),defeat:None,prize:Some(BodyId(1)),wipe:false,defender:RAIDER,attacker:ESCORT,stance:Stance::Screen});
     silence_probes(&mut world);
     world
 }
@@ -369,7 +429,7 @@ fn hide_and_seek(seed:u64,system:System)->World {
     fit_combatant(&mut world,BodyId(1),ShipClass::Frigate,false);
     world.set_move(BodyId(1),hunt).expect("the quarry can cross open space");
     world.objective=Some(Objective {sensor_site:None,name:"hunting ground".into(),center:hunt,radius:0.5*AU,
-        protect:BodyId(0),player:Some(BodyId(0)),defeat:Some(BodyId(1)),prize:None,wipe:false,defender:ESCORT,attacker:RAIDER});
+        protect:BodyId(0),player:Some(BodyId(0)),defeat:Some(BodyId(1)),prize:None,wipe:false,defender:ESCORT,attacker:RAIDER,stance:Stance::Evade});
     silence_probes(&mut world);
     world
 }
@@ -398,7 +458,7 @@ fn armada(seed:u64,system:System)->World {
         world.set_move(BodyId(10+i as u32),player_slots[i]).expect("the enemy fleet can close");
     }
     world.objective=Some(Objective {sensor_site:None,name:"opposing fleet".into(),center:enemy_slots[0],radius:0.25*AU,
-        protect:BodyId(0),player:Some(BodyId(0)),defeat:None,prize:None,wipe:true,defender:RAIDER,attacker:ESCORT});
+        protect:BodyId(0),player:Some(BodyId(0)),defeat:None,prize:None,wipe:true,defender:RAIDER,attacker:ESCORT,stance:Stance::Battle});
     silence_probes(&mut world);
     world
 }
@@ -406,6 +466,24 @@ fn armada(seed:u64,system:System)->World {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn catalog_names_and_tokens_are_unique_and_each_scenario_builds() {
+        let mut names=Vec::new();
+        let mut tokens=Vec::new();
+        for scenario in Scenario::ALL {
+            assert!(!names.contains(&scenario.name())&&!tokens.contains(&scenario.token()),"{scenario:?}");
+            names.push(scenario.name());
+            tokens.push(scenario.token());
+            assert_eq!(Scenario::parse(scenario.name()),Some(scenario));
+            assert_eq!(Scenario::parse(&scenario.token().to_uppercase()),Some(scenario));
+            let world=scenario.build(42,home_system());
+            let player=world.objective.as_ref().and_then(|o|o.player).expect("a scenario names its player");
+            assert!(world.body(player).is_some(),"missing {player:?}");
+            assert_eq!(scenario.build(42,home_system()).bodies[0].trajectory.state_at(0.0).unwrap().pos,world.bodies[0].trajectory.state_at(0.0).unwrap().pos);
+        }
+        assert!(Scenario::parse("").is_none()&&Scenario::parse("skirmish").is_none());
+    }
+
     #[test]
     fn random_desktop_starts_have_enough_light_history() {
         for seed in 0..64 {
@@ -560,7 +638,7 @@ mod tests {
         assert_eq!(w.bodies[1].ship_class,Some(ShipClass::Destroyer));
         assert_eq!(w.bodies[2].ship_class,Some(ShipClass::Destroyer));
         let o=w.objective.as_ref().unwrap();
-        assert_eq!((o.player,o.defeat,o.prize,o.wipe),(Some(BodyId(1)),Some(BodyId(2)),None,false));
+        assert_eq!((o.player,o.defeat,o.prize,o.wipe,o.stance),(Some(BodyId(1)),Some(BodyId(2)),None,false,Stance::Intercept));
     }
 
     #[test]
@@ -578,7 +656,7 @@ mod tests {
             assert!(matches!(b.autopilot.map(|a|a.order),Some(crate::world::Order::Follow {target:BodyId(1),..})));
         }
         let o=w.objective.as_ref().unwrap();
-        assert_eq!((o.prize,o.player,o.attacker,o.defender),(Some(BodyId(1)),Some(BodyId(0)),ESCORT,RAIDER));
+        assert_eq!((o.prize,o.player,o.attacker,o.defender,o.stance),(Some(BodyId(1)),Some(BodyId(0)),ESCORT,RAIDER,Stance::Screen));
         let player=w.bodies[0].trajectory.state_at(0.0).unwrap().pos;
         let station=w.bodies[1].trajectory.state_at(0.0).unwrap().pos;
         assert!((player-station).length()>6.0*AU);
@@ -595,7 +673,7 @@ mod tests {
         let quarry=w.bodies[1].trajectory.state_at(0.0).unwrap().pos;
         assert!((hunter-quarry).length()>=4.0*AU-1.0);
         let o=w.objective.as_ref().unwrap();
-        assert_eq!((o.player,o.defeat),(Some(BodyId(0)),Some(BodyId(1))));
+        assert_eq!((o.player,o.defeat,o.stance),(Some(BodyId(0)),Some(BodyId(1)),Stance::Evade));
         assert!((o.center-hunter).length()>AU&&(o.center-quarry).length()>AU);
         let session=crate::session::LocalSession::new(w);
         assert!(session.view(crate::session::Role::Faction(ESCORT)).contacts.is_empty());
@@ -620,7 +698,7 @@ mod tests {
         let enemy=w.bodies[10].trajectory.state_at(0.0).unwrap().pos;
         assert!((player-enemy).length()>10.0*AU);
         let o=w.objective.unwrap();
-        assert!(o.wipe&&o.prize.is_none()&&o.player==Some(BodyId(0)));
+        assert!(o.wipe&&o.prize.is_none()&&o.player==Some(BodyId(0))&&o.stance==Stance::Battle);
         assert!((o.center-enemy).length()<1.0);
         let mut session=crate::session::LocalSession::new(Scenario::Armada.build(42,home_system()));
         session.enable_bot(ESCORT,true);session.enable_bot(RAIDER,true);
@@ -631,5 +709,44 @@ mod tests {
         assert!(view.bodies.iter().find(|b|b.id==BodyId(0)).unwrap().autopilot.is_none(),"the player's battleship stays on manual helm");
         let idle:Vec<_>=view.bodies.iter().filter(|b|b.kind==BodyKind::Ship && b.id!=BodyId(0) && b.autopilot.is_none()).map(|b|b.id).collect();
         assert!(idle.is_empty(),"ships without helm orders: {idle:?}");
+        let center=view.objective.as_ref().unwrap().center;
+        for b in view.bodies.iter().filter(|b|b.faction==RAIDER) {
+            if let Some(crate::world::Order::MoveTo {frame,offset})=b.autopilot.map(|a|a.order) {
+                let dest=view.celestials[frame].pos+offset;
+                assert!((dest-center).length()>AU,"{b:?} was sent back to its own anchor");
+            }
+        }
+    }
+
+    #[test]
+    fn raid_screen_keeps_formation_under_the_bot() {
+        let mut session=crate::session::LocalSession::new(Scenario::Raid.build(42,home_system()));
+        session.enable_bot(RAIDER,true);
+        session.command(crate::session::Role::Spectator,crate::session::Command::SetPaused(false)).unwrap();
+        session.tick(60.0);
+        let view=session.view(crate::session::Role::Spectator);
+        let station=view.bodies.iter().find(|b|b.id==BodyId(1)).unwrap().pos;
+        for id in [BodyId(2),BodyId(3),BodyId(4)] {
+            let b=view.bodies.iter().find(|b|b.id==id).unwrap();
+            assert!(matches!(b.autopilot.map(|a|a.order),Some(crate::world::Order::Follow {target:BodyId(1),..})),"{id:?} {:?}",b.autopilot);
+            assert!((b.pos-station).length()<0.05*AU,"{id:?} left the station by {} km",(b.pos-station).length());
+            assert!(b.drive_limit.is_finite() && b.drive_limit<=b.ship_class.unwrap().max_g()*G0*1.01);
+        }
+    }
+
+    #[test]
+    fn quarry_runs_without_lighting_itself() {
+        let mut session=crate::session::LocalSession::new(Scenario::HideAndSeek.build(42,home_system()));
+        session.enable_bot(RAIDER,true);
+        session.command(crate::session::Role::Spectator,crate::session::Command::SetPaused(false)).unwrap();
+        session.tick(90.0);
+        let view=session.view(crate::session::Role::Spectator);
+        assert!(view.pings.is_empty(),"the quarry pinged");
+        let quarry=view.bodies.iter().find(|b|b.id==BodyId(1)).unwrap();
+        assert!(!quarry.screen_up);
+        assert_eq!(quarry.controls.screens,crate::world::controls::Mode::Off);
+        assert_eq!(quarry.controls.ecm,crate::world::controls::Mode::Off);
+        assert_eq!(quarry.controls.active,crate::world::controls::Mode::Off);
+        assert!(matches!(quarry.autopilot.map(|a|a.order),Some(crate::world::Order::MoveTo {..})|Some(crate::world::Order::Evade(_))),"{:?}",quarry.autopilot);
     }
 }
