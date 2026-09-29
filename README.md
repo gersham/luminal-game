@@ -626,3 +626,13 @@ The helm highlights jump selection, spooling and recovery. System Modes groups
 ECM, screens, evasion, active sensors, radiators and cycling repair priorities.
 When ship tracking is off, moving the pointer into the map's 24-pixel edge band
 scrolls the map; speed increases toward the edge and follows the current zoom.
+
+Observed ship destruction creates a ten-real-second flash, expanding shock ring,
+secondary bursts and fading debris. Automatic warp changes are held for those
+ten seconds; manual time controls remain available. The animation also runs
+while paused and never reveals an unreceived destruction event.
+
+Friendly SRMs visually leave their known launcher, cross the first light-second,
+and blend into their current flight position over one real second. This is a
+map animation only: simulation positions, hit checks and guidance are unchanged.
+Unseen enemy launch positions are never invented.

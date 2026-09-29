@@ -14,6 +14,7 @@ impl Effect {
 
 #[derive(Default)]
 pub(super) struct WeaponEffects {
+    launches:BTreeMap<BodyId,(BodyId,f64)>,
     initialized:bool,
     seen:BTreeSet<CombatLogKey>,
     markers:BTreeMap<MarkerKey,Marker>,
@@ -37,6 +38,15 @@ impl WeaponEffects {
             .chain(view.contacts.iter().filter(|c|c.resolved_missile).filter_map(|c|c.track.as_ref().map(|t|
                 ((false,c.id.0),Marker {pos:t.pos,velocity:t.vel,color:CONTACT,interceptor:c.resolved_interceptor}))))
             .collect();
+        self.launches.retain(|id,(_,start)|now-*start<1.0 && view.bodies.iter().any(|b|b.id==*id));
+        if self.initialized {
+            for b in &view.bodies {
+                if let Some(m)=b.missile && m.payload==Payload::Kinetic && !self.markers.contains_key(&(true,b.id.0))
+                    && view.bodies.iter().any(|source|source.id==m.launcher) {
+                    self.launches.insert(b.id,(m.launcher,now));
+                }
+            }
+        }
         let mut ended=BTreeSet::new();
         for e in &view.combat {
             let hit=e.kind==CombatKind::MissileHit
@@ -67,6 +77,17 @@ impl WeaponEffects {
         self.seen=view.combat.iter().map(event_key).collect();
         self.markers=current;
         self.initialized=true;
+    }
+
+    pub(super) fn launch_position(&self,body:&BodyView,view:&View,now:f64)->Option<Vec2> {
+        let (launcher,start)=self.launches.get(&body.id)?;
+        let origin=view.bodies.iter().find(|b|b.id==*launcher)?.pos;
+        let age=(now-start).clamp(0.0,1.0);
+        let delta=body.pos-origin;
+        let mouth=origin+delta.normalized()*delta.length().min(LIGHT_SECOND);
+        let smooth=|v:f64|v*v*(3.0-2.0*v);
+        Some(if age<0.5 {origin+(mouth-origin)*smooth(age*2.0)}
+            else {mouth+(body.pos-mouth)*smooth((age-0.5)*2.0)})
     }
 
     pub(super) fn draw(&self,painter:&egui::Painter,cam:&Camera,rect:Rect,now:f64) {
@@ -100,6 +121,22 @@ impl WeaponEffects {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn srm_launch_animates_from_known_ship_through_one_light_second() {
+        let app=LuminalApp::new();let mut view=app.session.view(app.role);
+        view.combat.clear();view.contacts.clear();view.bodies.retain(|b|b.kind!=BodyKind::Missile);
+        let source=view.bodies.iter().find(|b|b.controllable).unwrap().clone();
+        let mut effects=WeaponEffects::default();effects.observe(&view,Some(ESCORT),0.0);
+        let mut missile=source.clone();missile.id=BodyId(999);missile.kind=BodyKind::Missile;
+        missile.pos=source.pos+Vec2::new(2.0*LIGHT_SECOND,0.0);
+        missile.missile=Some(luminal_core::session::MissileView {launcher:source.id,payload:Payload::Kinetic,target:ContactId(1),phase:luminal_core::missile::Phase::Burn,dv_left:1.0,locally_resolved:true,correction_possible:None});
+        view.bodies.push(missile.clone());effects.observe(&view,Some(ESCORT),1.0);
+        assert_eq!(effects.launch_position(&missile,&view,1.0),Some(source.pos));
+        assert_eq!(effects.launch_position(&missile,&view,1.5),Some(source.pos+Vec2::new(LIGHT_SECOND,0.0)));
+        assert_eq!(effects.launch_position(&missile,&view,2.0),Some(missile.pos));
+        effects.observe(&view,Some(ESCORT),2.0);assert!(effects.launches.is_empty());
+        assert_eq!(view.bodies.last().unwrap().pos,missile.pos);
+    }
     #[test]
     fn interception_removes_interceptor_and_moves_one_victim_bloom() {
         let app=LuminalApp::new();let mut view=app.session.view(app.role);

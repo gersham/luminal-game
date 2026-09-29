@@ -185,6 +185,7 @@ pub struct BodyView {
 /// A missile's own status, as its faction knows it.
 #[derive(Clone, Copy, Debug)]
 pub struct MissileView {
+    pub launcher:BodyId,
     pub correction_possible: Option<bool>,
     pub locally_resolved: bool,
     pub payload: Payload,
@@ -637,7 +638,7 @@ impl LocalSession {
                     magazine: b.magazine,
                     missile_ready_at: b.missile_ready_at,
                     missile_queued: b.missile_queued,
-                    missile: b.missile.map(|m| MissileView { payload: m.payload, target: m.target, phase: m.phase, dv_left: m.dv_left, locally_resolved: m.local_fix.is_some(),
+                    missile: b.missile.map(|m| MissileView { launcher:m.launcher,payload: m.payload, target: m.target, phase: m.phase, dv_left: m.dv_left, locally_resolved: m.local_fix.is_some(),
                         correction_possible:m.local_fix.map(|fix| {
                             let target=crate::kinematics::State {pos:fix.pos+fix.vel*(t-fix.t),vel:fix.vel};
                             let (left,miss)=crate::missile::zero_effort_miss(s,target,Vec2::ZERO);

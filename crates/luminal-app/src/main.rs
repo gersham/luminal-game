@@ -1730,7 +1730,8 @@ impl eframe::App for LuminalApp {
         }
         let dt = ui.input(|i| i.stable_dt) as f64;
         self.session.set_watch(self.own_faction());
-        self.update_auto_speed(dt.min(0.1));
+        if self.jump_effects.holds_auto_speed(ui.input(|i|i.time)) {self.auto_speed_elapsed=0.0;}
+        else {self.update_auto_speed(dt.min(0.1));}
         self.session.tick_realtime(dt.min(0.1));
         ui.ctx().request_repaint();
 
@@ -2645,7 +2646,12 @@ impl LuminalApp {
         for b in &view.bodies {
             let c = body_color(b, self.own_faction());
             let selected = self.selected == Some(Selection::Body(b.id));
-            let p = to_screen(&cam, rect, b.pos);
+            let launch_pos=self.weapon_effects.launch_position(b,view,ui.input(|i|i.time));
+            let p = to_screen(&cam, rect, launch_pos.unwrap_or(b.pos));
+            if launch_pos.is_some() {
+                painter.circle_filled(p,7.0,c.gamma_multiply(0.12));
+                painter.circle_filled(p,3.5,Color32::from_rgb(255,215,140).gamma_multiply(0.65));
+            }
             if b.kind!=BodyKind::Missile {draw_hit_bloom(&painter,p,c,view,Some(b.id),None);}
             if b.kind == BodyKind::Missile {
                 if b.interceptor.is_some() {painter.circle_filled(p,2.0,c);}
