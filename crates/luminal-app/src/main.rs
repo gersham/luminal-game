@@ -2,6 +2,8 @@
 mod audio;
 mod weapon_effects;
 mod jump_effects;
+mod theme;
+mod startup;
 
 use luminal_core::world::jump::{JumpState, MAX_SOL_RADIUS_AU};
 use eframe::egui::{self, Color32, Pos2, Rect, Sense, Shape, Stroke, StrokeKind, Vec2 as EVec2};
@@ -890,6 +892,7 @@ struct LuminalApp {
     ship_headings: BTreeMap<BodyId, Vec2>,
     selection_pending:bool,
     chosen_class:luminal_core::world::ShipClass,
+    theme:theme::Theme,
     tactical_log:TacticalLog,
     weapon_effects:weapon_effects::WeaponEffects,
     jump_effects:jump_effects::JumpEffects,
@@ -937,12 +940,12 @@ impl LuminalApp {
                 ui.painter().line_segment([rect.left_top()-EVec2::new(4.0,0.0),rect.left_bottom()-EVec2::new(4.0,0.0)],Stroke::new(1.0,EDGE));
             }
             let ui=&mut columns[0];
-            sub_header(ui,"FIRE CONTROL",Some(("PRE-DEFENCE",TEXT_MUTED)));
+            sub_header(ui,&format!("FIRE CONTROL · {}",self.theme.name().to_uppercase()),Some(("PRE-DEFENCE",TEXT_MUTED)));
             if let Some(ship)=own {self.compact_weapons(ui,view,ship);}
             let ui=&mut columns[1];
             sub_header(ui,"OWN SHIP",own.and_then(|b|if b.damage.damage.lifeless() {Some(("LIFELESS HULK",TEXT_MUTED))} else if b.damage.damage.state(System::Mind)==Condition::Destroyed {Some(("MIND OFFLINE",TEXT_MUTED))} else {None}));
             compact_status(ui,own.map(|b|&b.damage),own.map(|b|b.thrust.length()/G0),own.and_then(|b|b.ship_class).map(|c|c.max_g()),false);
-            compact_systems(ui,"own_deck",own.map(|b|b.damage));
+            compact_systems(ui,"own_deck",own.map(|b|b.damage),self.theme);
             if let Some(ship)=own {self.repair_controls(ui,ship);}
             self.central_controls(&mut columns[2],own,view);
             let ui=&mut columns[3];
@@ -952,7 +955,7 @@ impl LuminalApp {
             let thrust=target.filter(|c|contact_has_course(c)).and_then(|c|c.track.as_ref()).map(|t|t.accel.length()/G0)
                 .filter(|_|systems.is_some_and(|r|r.operating_effectiveness(System::Propulsion)>0.0));
             compact_status(ui,target.and_then(|c|c.damage.as_ref()),thrust,target.and_then(|c|c.resolved_class).map(|c|c.max_g()),true);
-            compact_systems(ui,"target_deck",systems);
+            compact_systems(ui,"target_deck",systems,self.theme);
             let ui=&mut columns[4];
             if let Some(ship)=own {self.movement_panel(ui,view,ship);}
         });
@@ -968,14 +971,14 @@ impl LuminalApp {
         });
         if let Some(target)=ship.damage.damage.repair_target {
             let rate=ship.damage.damage.system_repair_rate();
-            if rate>0.0 {ui.small(format!("Repairing {} · {}",target.name(),fmt_time((luminal_core::damage::SYSTEM_REPAIR_SECONDS-ship.damage.damage.repair_progress).max(0.0)/rate)));}
+            if rate>0.0 {ui.small(format!("Repairing {} · {}",self.theme.system(target),fmt_time((luminal_core::damage::SYSTEM_REPAIR_SECONDS-ship.damage.damage.repair_progress).max(0.0)/rate)));}
             else {ui.small("Repairs unavailable");}
         }
     }
     fn movement_panel(&mut self,ui:&mut egui::Ui,view:&View,ship:&BodyView) {
         if ship.jump.is_none() {
             ui.horizontal(|ui| {
-                if ship.ship_class.is_some_and(|c|c.has_jump_drive()) && ui.add_enabled(ship.damage.operating_effectiveness(System::Jump)>0.0,egui::Button::new("WITHDRAW (JUMP)")).on_hover_text("Concede the objective and leave combat after the vulnerable ten-minute jump spool. Cancel before departure to stay.").clicked() {self.command(Command::Withdraw {body:ship.id});}
+                if ship.ship_class.is_some_and(|c|c.has_jump_drive()) && ui.add_enabled(ship.damage.operating_effectiveness(System::Jump)>0.0,egui::Button::new(if self.theme==theme::Theme::Luminal {"WITHDRAW (JUMP)".into()} else {format!("WITHDRAW ({})",self.theme.jump())})).on_hover_text("Concede the objective and leave combat after the vulnerable ten-minute jump spool. Cancel before departure to stay.").clicked() {self.command(Command::Withdraw {body:ship.id});}
                 ui.menu_button("SURRENDER",|ui| {
                     ui.label("Concede this battle and remove your ship from combat.");
                     if ui.button("Confirm surrender").clicked() {self.command(Command::Surrender {body:ship.id});ui.close();}
@@ -983,13 +986,13 @@ impl LuminalApp {
             });
         }
         if let Some(jump)=ship.jump {
-            sub_header(ui,"HELM / JUMP DRIVE",None);
+            sub_header(ui,&format!("HELM / {}",self.theme.jump()),None);
             match jump {
                 JumpState::Spooling {depart_at,..}=>{
                     ui.label(egui::RichText::new(if ship.withdrawing {"Withdrawing — spooling for jump"} else {"Spooling for jump"}).strong().color(ACCENT));
                     ui.label(format!("{} remaining",fmt_time((depart_at-view.time).max(0.0))));
                     ui.small("Thrust, evasion, screens, beams and PD lasers offline.");
-                    if ui.button("CANCEL JUMP").clicked() {self.command(Command::CancelJump {body:ship.id});}
+                    if ui.button(if self.theme==theme::Theme::Luminal {"CANCEL JUMP".into()} else {format!("CANCEL {}",self.theme.jump())}).clicked() {self.command(Command::CancelJump {body:ship.id});}
                     ui.small("Cancel: screens recharge from zero.");
                 }
                 JumpState::Transit {arrive_at,..}=>{
@@ -1001,7 +1004,7 @@ impl LuminalApp {
         }
         if ship.ship_class.is_some_and(|c|c.has_jump_drive()) {
             let selecting=self.jump_select==Some(ship.id);
-            if ui.add_enabled(ship.damage.operating_effectiveness(System::Jump)>0.0,egui::Button::selectable(selecting,if selecting {"CANCEL DESTINATION SELECTION"} else {"JUMP DRIVE"})).on_hover_text("Choose any map point within 50 AU of Sol. Spools for 10 minutes, then travels at 1 AU/s; retains your velocity. Generates extreme heat. Requires an intact jump drive and power plant.").clicked() {
+            if ui.add_enabled(ship.damage.operating_effectiveness(System::Jump)>0.0,egui::Button::selectable(selecting,if selecting {"CANCEL DESTINATION SELECTION"} else {self.theme.jump()})).on_hover_text("Choose any map point within 50 AU of Sol. Spools for 10 minutes, then travels at 1 AU/s; retains your velocity. Generates extreme heat. Requires an intact jump drive and power plant.").clicked() {
                 self.jump_select=if selecting {None} else {Some(ship.id)};
                 self.manual_flight=None;
             }
@@ -1039,7 +1042,7 @@ impl LuminalApp {
             let width=(ui.available_width()-ui.spacing().item_spacing.x)/2.0;
             for &mode in pair {
                 let selected=active==Some(mode);
-                if tac_button(ui,mode.label(),EVec2::new(width,27.0),ACCENT,selected,ship.damage.operating_effectiveness(System::Propulsion)>0.0).on_hover_text(mode.help()).clicked() {
+                if tac_button(ui,&self.theme.range(mode),EVec2::new(width,27.0),ACCENT,selected,ship.damage.operating_effectiveness(System::Propulsion)>0.0).on_hover_text(mode.help()).clicked() {
                     self.movement_mode=mode;
                     if let Some(target)=target {self.command(mode.command(ship.id,target));}
                 }
@@ -1087,7 +1090,7 @@ Shift + right click: extend route").monospace().size(9.0).color(TEXT_MUTED));
         ui.painter().text(center+EVec2::new(0.0,24.0),egui::Align2::CENTER_CENTER,unit,mono(11.0),heat_color);
         let flank=radius+22.0;let size=(r.width()*0.047).clamp(14.0,24.0);
         for (x,align,label,value,color) in [(cx-flank,egui::Align2::RIGHT_CENTER,"EMISSIVITY",format!("{:.2}×",ef.value()),ACCENT),
-            (cx+flank,egui::Align2::LEFT_CENTER,"SCREENS",if ship.has_screen {format!("{:.0}%",ship.damage.screen_available*100.0)} else {"N/F".into()},ARMOUR)] {
+            (cx+flank,egui::Align2::LEFT_CENTER,self.theme.screens(),if ship.has_screen {format!("{:.0}%",ship.damage.screen_available*100.0)} else {"N/F".into()},ARMOUR)] {
             ui.painter().text(Pos2::new(x,r.top()+45.0),align,label,mono(8.0),TEXT_MUTED);
             ui.painter().text(Pos2::new(x,r.top()+72.0),align,value,mono(size),color);
         }
@@ -1109,7 +1112,7 @@ Shift + right click: extend route").monospace().size(9.0).color(TEXT_MUTED));
             else {format!("{:.0}% AVAILABLE",ship.damage.screen_available*100.0)};
         let controls=[
             ("ECM",C::Ecm,ship.controls.ecm,ship.controls.ecm_active,if ship.controls.ecm_active {"EMITTING".into()} else {"SILENT".into()},ship.damage.operating_effectiveness(System::Ecm)>0.0,"Auto emits while a resolved enemy ship is known. Class-rated ECM/ECCM; maximum 50% resolution reduction."),
-            ("SCREENS",C::Screens,ship.controls.screens,ship.screen_up,screen,ship.damage.operating_effectiveness(System::Screens)>0.0,"Auto latches on after resolving an enemy ship. Charges 0.2% per minute. Off disables absorption immediately. Hits and idle operation heat the ship."),
+            (self.theme.screens(),C::Screens,ship.controls.screens,ship.screen_up,screen,ship.damage.operating_effectiveness(System::Screens)>0.0,"Auto latches on after resolving an enemy ship. Charges 0.2% per minute. Off disables absorption immediately. Hits and idle operation heat the ship."),
             ("EVADE",C::Evade,ship.controls.evade,ship.controls.evading,if ship.jump.is_some() {"OFF: JUMP".into()} else if ship.controls.evading {"EVADING".into()} else if ship.controls.evade==Mode::Auto {"WATCHING".into()} else {"OFF".into()},ship.damage.operating_effectiveness(System::Propulsion)>0.0,"Auto temporarily evades incoming damaging missiles, then resumes your prior movement order. Off disables automatic evasion."),
             ("ACTIVE",C::Active,ship.controls.active,ship.controls.active==Mode::Auto,if ship.controls.active==Mode::Auto {format!("PING IN {:.0}s",(ship.controls.next_ping_at-view.time).max(0.0))} else {"SILENT".into()},ship.damage.operating_effectiveness(System::Active)>0.0,"Auto pings every 60 seconds until switched Off, even without contacts.")
         ];
@@ -1148,7 +1151,7 @@ Shift + right click: extend route").monospace().size(9.0).color(TEXT_MUTED));
             let r=Rect::from_min_size(Pos2::new(area.left(),top+row as f32*(height+4.0)),EVec2::new(area.width(),height));
             ui.painter().rect_filled(r,3.0,Color32::from_rgb(12,22,33));
             let left=r.left()+7.0;let right=r.right()-7.0;
-            let label=if p==Payload::Beam {"BEAM"} else {payload_label(p)};
+            let label=self.theme.weapon(p);
             ui.painter().text(Pos2::new(left,r.top()+5.0),egui::Align2::LEFT_TOP,label,mono(12.0),TEXT);
             if p!=Payload::Beam {
                 let chance=missile_hit_estimate(b,target,p);
@@ -1215,7 +1218,7 @@ Shift + right click: extend route").monospace().size(9.0).color(TEXT_MUTED));
                 .on_hover_text(format!("{} laser mounts. Interceptors remain independent of laser heat limits.",b.point_defence.map_or(0,|pd|pd.lasers)));
             if b.ship_class==Some(luminal_core::world::ShipClass::Battleship) {
                 let left=(b.spinal_ready_at-view.time).max(0.0);
-                ui.label(egui::RichText::new(if b.jump.is_some() {"SPINAL OFF: JUMP".into()} else if left>0.0 {format!("SPINAL {left:.0}s")} else {"SPINAL READY".into()}).monospace().size(9.0).color(WARM)).on_hover_text("Forward mount: requires target alignment within 2°; shares heat and power with beams.");
+                ui.label(egui::RichText::new(if b.jump.is_some() {format!("{} OFF: JUMP",self.theme.spinal())} else if left>0.0 {format!("{} {left:.0}s",self.theme.spinal())} else {format!("{} READY",self.theme.spinal())}).monospace().size(9.0).color(WARM)).on_hover_text("Forward mount: requires target alignment within 2°; shares heat and power with beams.");
             }
             if queued>0 && ui.small_button(format!("CANCEL {queued}")).clicked() {self.command(Command::CancelLaunches {body:b.id});}
         });
@@ -1276,6 +1279,7 @@ Shift + right click: extend route").monospace().size(9.0).color(TEXT_MUTED));
             ship_headings: BTreeMap::new(),
             selection_pending:!cfg!(test) && (std::env::var_os("LUMINAL_SCREENSHOT").is_none() || std::env::var_os("LUMINAL_SHIP_SELECT").is_some()),
             chosen_class:chosen,
+            theme:std::env::var("LUMINAL_THEME").ok().and_then(|name|theme::Theme::ALL.into_iter().find(|t|t.name().eq_ignore_ascii_case(&name))).unwrap_or_default(),
             tactical_log:TacticalLog::default(),
             weapon_effects:weapon_effects::WeaponEffects::default(),
             jump_effects:jump_effects::JumpEffects::default(),
@@ -1293,10 +1297,12 @@ Shift + right click: extend route").monospace().size(9.0).color(TEXT_MUTED));
     }
 
     fn restart_scenario(&mut self) {
+        let theme=self.theme;
         let volume=self.audio.volume;
         let music_volume=self.audio.music_volume;
         let muted=self.audio.muted;
         *self=Self::new_with_class(self.chosen_class);
+        self.theme=theme;
         self.audio.volume=volume;self.audio.music_volume=music_volume;self.audio.muted=muted;self.audio.settings_changed();
     }
 
@@ -1391,7 +1397,7 @@ Shift + right click: extend route").monospace().size(9.0).color(TEXT_MUTED));
         if matches!(cmd,Command::SetWarp(_)) {self.auto_speed=false;}
         let note=match &cmd {
             Command::AppendWaypoint {..}=>Some(("helm","ROUTE POINT ADDED".into())),
-            Command::Launch {payload,..}=>Some(("launch",format!("MISSILE QUEUED · {}",payload_label(*payload)))),
+            Command::Launch {payload,..}=>Some(("launch",format!("MISSILE QUEUED · {}",self.theme.weapon(*payload)))),
             Command::Alongside {..}|Command::Follow {..}=>Some(("helm","FOLLOW · 1 LS ALONGSIDE".into())),
             Command::Intercept {..}=>Some(("helm","MATCH ORDERED".into())),
             Command::Flyby {..}=>Some(("helm","FLYBY ORDERED".into())),
@@ -1399,7 +1405,7 @@ Shift + right click: extend route").monospace().size(9.0).color(TEXT_MUTED));
             Command::SetHeatDump {enabled,..}=>Some(("thermal",if *enabled {"HEAT DUMP · RADIATORS OPEN".into()} else {"HEAT DUMP STOPPED".into()})),
             Command::Evade {..}=>Some(("helm","EVADE ORDERED".into())),
             Command::AllStop {..}=>Some(("helm","ALL STOP ORDERED".into())),
-            Command::SetScreen {up,..}=>Some(("screen",if *up {"SCREENS RAISING".into()} else {"SCREENS LOWERING".into()})),
+            Command::SetScreen {up,..}=>Some(("screen",format!("{} {}",self.theme.screens(),if *up {"RAISING"} else {"LOWERING"}))),
             _=>None,
         };
         let ping_duration=if let Command::Ping {body}=cmd {
@@ -1641,31 +1647,8 @@ fn bearing_opacity(b:&luminal_core::session::BearingView,now:f64)->f32 {
 impl eframe::App for LuminalApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         if self.selection_pending {
-            let mut start=false;
-            egui::Window::new("CHOOSE YOUR COMMAND").anchor(egui::Align2::CENTER_CENTER,EVec2::ZERO).collapsible(false).resizable(false).default_width(760.0).show(ui.ctx(),|ui| {
-                ui.label("Escort the transport. Destroy the raider. Your opponent receives the same ship class.");ui.add_space(12.0);
-                egui::Grid::new("class_roster").striped(true).spacing(EVec2::new(20.0,14.0)).show(ui,|ui| {
-                    for title in ["CLASS","HULL","ARMOR","SRM / LRM","PD LASERS / INT","MAX G","180° TURN"] {ui.strong(title);}ui.end_row();
-                    for class in luminal_core::world::ShipClass::COMBAT {
-                        ui.selectable_value(&mut self.chosen_class,class,class.name());
-                        ui.label(format!("{:.0}",1000.0*class.scale()));ui.label(format!("{:.0}",500.0*class.protection()));
-                        ui.label(format!("{} / {}",class.magazine()[0],class.magazine()[1]));ui.label(format!("{} / {}",class.pd_lasers(),class.interceptors()));
-                        ui.label(format!("{:.0}",class.max_g()));ui.label(format!("{:.0}s",class.turn_seconds()));ui.end_row();
-                    }
-                });
-                ui.add_space(12.0);ui.label(match self.chosen_class {
-                    luminal_core::world::ShipClass::Picket=>"Fast SRM picket. No LRM or offensive beam mounts.",
-                    luminal_core::world::ShipClass::Frigate=>"Balanced escort. Flexible missile armament and beam weapons.",
-                    luminal_core::world::ShipClass::Destroyer=>"Twice frigate scale. More weapons, armor, screens and heat capacity.",
-                    luminal_core::world::ShipClass::Cruiser=>"Missile artillery: 80 LRMs. Four times frigate scale.",
-                    _=>"Heavy slugger: eight times frigate scale, extra armor/screens, 160 SRMs. Spinal: 60 LS, 10× beam energy, 120s cycle, forward 2° arc.",
-                });
-                ui.label(format!("Sensor rating {:.0} · ECM {:.0} / ECCM {:.0} · Screen capacity {:.1}× · Launchers SRM {} / LRM {}",
-                    self.chosen_class.sensor_rating(),self.chosen_class.sensor_rating(),self.chosen_class.sensor_rating()*0.5,self.chosen_class.protection(),
-                    self.chosen_class.launchers(Payload::Kinetic),self.chosen_class.launchers(Payload::Nuclear)));
-                ui.add_space(12.0);start=tac_button(ui,"DEPLOY",EVec2::new(ui.available_width(),38.0),ACCENT,true,true).clicked();
-            });
-            if start {let class=self.chosen_class;self.restart_scenario();self.chosen_class=class;self.selection_pending=false;let _=self.session.command(self.role,Command::SetPaused(false));}
+            let start=self.startup(ui);
+            if start {self.deploy_selected();}
             self.dev_screenshot(ui);ui.ctx().request_repaint();return;
         }
         let dt = ui.input(|i| i.stable_dt) as f64;
@@ -1816,7 +1799,7 @@ impl LuminalApp {
                 meter(ui, "SCREENS", Some(heat), &format!("{:.0}%", 100.0 * heat), HEAT)
                     .on_hover_text("Remaining shield capacity. Absorbed hits heat the ship.");
                 ui.add_space(2.0);
-                system_matrix(ui, "own", Some(b.damage));
+                system_matrix(ui, "own", Some(b.damage),self.theme);
                 system_legend(ui);
                 ui.add_space(2.0);
                 ui.horizontal(|ui| {
@@ -2014,7 +1997,7 @@ impl LuminalApp {
             sub_header(ui, "DAMAGE ASSESSMENT", Some((stamp.as_deref().unwrap_or("NO ECHO"), if stamp.is_some() { TEXT_MUTED } else { SYS_UNKNOWN })))
                 .on_hover_text("Latest confirmed active echo, not live truth. Ping to refresh.");
             damage_bars(ui, c.damage.as_ref());
-            system_matrix(ui, "target", c.damage);
+            system_matrix(ui, "target", c.damage,self.theme);
         });
 
         section(ui, "WEAPONS", None);
@@ -2085,7 +2068,7 @@ impl LuminalApp {
                 for p in Payload::ALL {
                     let i = p.index();
                     let available = b.magazine[i].saturating_sub(b.missile_queued[i]);
-                    if payload_tile(ui, w, payload_label(p), available, b.missile_queued[i], self.payload == p)
+                    if payload_tile(ui, w, self.theme.weapon(p), available, b.missile_queued[i], self.payload == p)
                         .on_hover_text(match p { Payload::Kinetic => "SRM: short-range kinetic shotgun", Payload::Nuclear => "LRM: long-range nuclear-pumped laser", Payload::Beam => "Ship beam" })
                         .clicked()
                     {
@@ -2094,7 +2077,7 @@ impl LuminalApp {
                 }
             });
             let ammo = b.magazine[self.payload.index()].saturating_sub(b.missile_queued[self.payload.index()]);
-            let label = if ammo == 0 { "MAGAZINE EMPTY".into() } else { format!("LAUNCH  ·  {}", payload_label(self.payload)) };
+            let label = if ammo == 0 { "MAGAZINE EMPTY".into() } else { format!("LAUNCH  ·  {}", self.theme.weapon(self.payload)) };
             let armed = launchable && ammo > 0;
             if tac_button(ui, &label, EVec2::new(ui.available_width(), 30.0), WARM, armed, armed)
                 .on_hover_text("Each click queues one missile. Shared launch rate: one every sixty seconds.").clicked()
@@ -2557,7 +2540,7 @@ impl LuminalApp {
 
         // Only the player's ship gets weapon envelopes; no emission or PD discs.
         for b in view.bodies.iter().filter(|b| b.controllable && Some(b.faction)==self.own_faction()) {
-            draw_weapon_ranges(&painter,&cam,rect,b);
+            draw_weapon_ranges(&painter,&cam,rect,b,self.theme);
         }
 
         // Own (or, for the spectator, all) ships.
@@ -2840,9 +2823,10 @@ fn weapon_ranges(ship:&BodyView)->Vec<(&'static str,f64,Color32)> {
     ranges.push(("BEAM",params::SHIP_BEAM_AUTO_RANGE_LS.value*LIGHT_SECOND,color));
     ranges
 }
-fn draw_weapon_ranges(painter:&egui::Painter,cam:&Camera,rect:Rect,ship:&BodyView) {
+fn draw_weapon_ranges(painter:&egui::Painter,cam:&Camera,rect:Rect,ship:&BodyView,theme:theme::Theme) {
     let center=to_screen(cam,rect,ship.pos);
     for (label,range,color) in weapon_ranges(ship) {
+        let label=theme.weapon(match label {"LRM"=>Payload::Nuclear,"SRM"=>Payload::Kinetic,_=>Payload::Beam});
         let radius=(range/cam.km_per_px) as f32;
         if !radius.is_finite() || radius<2.0 || radius>1e6 {continue;}
         let dots=(std::f32::consts::TAU*radius/6.0).ceil() as usize;
@@ -3683,14 +3667,6 @@ fn list_row(ui: &mut egui::Ui, selected: bool, glyph: Option<(Glyph, Color32)>, 
     resp.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
 
-fn payload_label(p: Payload) -> &'static str {
-    match p {
-        Payload::Kinetic => "SRM",
-        Payload::Nuclear => "LRM",
-        Payload::Beam => "BEAM",
-    }
-}
-
 /// Magazine tile: payload, rounds available and a pip per round (outlined when queued).
 fn payload_tile(ui: &mut egui::Ui, width: f32, name: &str, available: u32, queued: u32, selected: bool) -> egui::Response {
     let (rect, resp) = ui.allocate_exact_size(EVec2::new(width, 40.0), Sense::click());
@@ -3900,7 +3876,7 @@ fn compact_status(ui:&mut egui::Ui,report:Option<&Report>,thrust_g:Option<f64>,m
         .on_hover_text(thrust_g.map_or("Thrust unknown".into(),|g|format!("{}{g:.1}g thrust · {}",if estimated {"Estimated "} else {""},max_g.map_or("maximum unknown".into(),|max|format!("{:.0}% of {max:.0}g maximum",100.0*g/max)))));
 }
 
-fn compact_systems(ui:&mut egui::Ui,salt:&str,report:Option<Report>) {
+fn compact_systems(ui:&mut egui::Ui,salt:&str,report:Option<Report>,theme:theme::Theme) {
     let groups:[(&str,&[System]);5]=[
         ("SENSORS",&[System::Passive,System::Active,System::Direction]),
         ("ELECTRONIC WARFARE",&[System::Ecm,System::Eccm]),
@@ -3919,7 +3895,7 @@ fn compact_systems(ui:&mut egui::Ui,salt:&str,report:Option<Report>) {
             let chip=Chip::of(report,*system);
             paint_chip(ui.painter(),cell,system.code(),chip);
             let repair=paint_repair_progress(ui.painter(),cell,report,*system);
-            ui.interact(cell,ui.id().with((salt,*system as usize)),Sense::hover()).on_hover_text(format!("{} · {}{repair}",system.name(),chip.describe()));
+            ui.interact(cell,ui.id().with((salt,*system as usize)),Sense::hover()).on_hover_text(format!("{} [{}] · {}{repair}",theme.system(*system),system.code(),chip.describe()));
         }
     }
 }
@@ -3939,7 +3915,7 @@ fn paint_repair_progress(p:&egui::Painter,cell:Rect,report:Option<Report>,system
     else {format!("\nRepair {:.0}% · {} remaining (at report time)",fraction*100.0,fmt_age((duration-r.damage.repair_progress).max(0.0)/rate))}
 }
 
-fn system_matrix(ui: &mut egui::Ui, salt: &str, report: Option<Report>) {
+fn system_matrix(ui: &mut egui::Ui, salt: &str, report: Option<Report>,theme:theme::Theme) {
     const ROWS: [&[(&str, &[System])]; 3] = [
         &[("SENSORS", &[System::Passive, System::Active, System::Direction]), ("EW", &[System::Ecm, System::Eccm])],
         &[("WEAPONS", &[System::Beam, System::Launcher, System::SrmLauncher, System::PdMissiles, System::PdLaser]), ("COMMAND", &[System::Crew, System::Mind])],
@@ -3969,9 +3945,9 @@ fn system_matrix(ui: &mut egui::Ui, salt: &str, report: Option<Report>) {
                 let repair=paint_repair_progress(&p,cell,report,system);
                 ui.interact(cell, ui.id().with(("system_chip", salt, system as usize)), Sense::hover()).on_hover_text(format!(
                     "{}\n{}{}{repair}",
-                    system.name(),
+                    theme.system(system),
                     chip.describe(),
-                    if system == System::Repair { "\nOne damaged component per two effective minutes. Power first, then damage control. Hull +1% per 10 minutes; no armour regeneration." } else { "" }
+                    if system == System::Repair { "\nOne damaged component per 20 effective minutes. Power first, then damage control. Hull +1% per hour; no armour regeneration." } else { "" }
                 ));
             }
             x += group_w + group_gap;

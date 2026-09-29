@@ -601,3 +601,13 @@ Jump spooling has a sustained blue halo. Departure and arrival create large
 blue blooms lasting four real seconds; withdrawing ships have a departure
 bloom only. See the [endgame validation](calibration/2026-09-29-endgame/report.md)
 for behavior, screenshots, regression coverage and the 20-mission survey.
+
+### Fleet vocabulary
+
+The startup screen uses selectable WWII-style naval recognition cards with live
+class stats. Choose Luminal, Starfleet, Grim Dark, Imperium or Culture vocabulary
+before deploying. Theme choices change display terms only; classes, weapons,
+flight rules and balance are identical. Choices survive scenario restart.
+See [theme vocabulary and future styling ideas](docs/THEMES.md).
+For previews, `LUMINAL_THEME=Starfleet` selects a vocabulary and
+`LUMINAL_SHIP_SELECT=1` includes startup in the screenshot workflow.
