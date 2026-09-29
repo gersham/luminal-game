@@ -1,6 +1,6 @@
 # Ship marker concept — review only
 
-Generated raster concept sheets, not used by the game. Open `ship-class-recognition.png`
+Generated raster concept sheets, not used by the game. Open `ship-class-recognition-hires.png`
 in an image editor. The black background is part of this review sheet; production
 sprites would need transparent backgrounds and small-size readability checks.
 
@@ -26,3 +26,12 @@ black interiors and industrial hull geometry. The first two sheets were rejected
 Prompt: `recognition-prompt.txt`. Curds / OpenAI `gpt-image-2.5-flare`;
 1536 × 1024 RGB PNG, verified and visually reviewed. Still not integrated.
 Sanitized command: `curds -no-tui -provider openai -aspect-ratio 3:2 -quality high -prompt <recognition prompt> -output <ship-class-recognition.png>`.
+
+## Higher-resolution master
+
+`ship-class-recognition-hires.png`: verified 3072 × 2048 RGB PNG (four times
+as many pixels as the previous sheet), regenerated using that sheet as an image
+reference. Minor linework and colour differences are possible in regeneration.
+Prompt: `recognition-hires-prompt.txt`. Curds / OpenAI `gpt-image-2.5-flare`.
+Sanitized command: `curds -no-tui -provider openai -size 3072x2048 -quality high -input-image <ship-class-recognition.png> -prompt <hires prompt> -output <ship-class-recognition-hires.png>`.
+Opened in Pinta for review; not applied to the game.
