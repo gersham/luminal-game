@@ -6,6 +6,10 @@
 
 use crate::kinematics::{State, Vec2};
 
+/// Mini-reactor fuel sustains an LRM for exactly two hours after launch.
+pub const LRM_REACTOR_LIFETIME_S: f64 = 120.0 * 60.0;
+pub const SRM_REACTOR_LIFETIME_S: f64 = 22.0 * 60.0;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Payload {
     /// Direct ship-beam damage only; not a launchable missile or magazine slot.
@@ -34,17 +38,42 @@ impl Payload {
 
     pub fn launcher_system(self)->crate::damage::System {if self==Self::Kinetic {crate::damage::System::SrmLauncher} else {crate::damage::System::Launcher}}
     pub fn kill_radius(self)->f64 {if self==Self::Kinetic {crate::params::KINETIC_PATTERN_KM.value} else {crate::params::NUCLEAR_AOE_KM.value}}
-    pub fn seeker_range(self)->f64 {if self==Self::Kinetic {10_000.0} else {2.0*self.kill_radius()}}
+    pub fn seeker_range(self)->f64 {self.terminal_range()}
+    pub fn terminal_range(self)->f64 {crate::units::AU*if self==Self::Kinetic {0.04} else {0.1}}
+    pub fn boost_budget(self)->f64 {if self==Self::Kinetic {self.delta_v()} else {42_060.5}}
+    pub fn correction_budget(self)->f64 {if self==Self::Kinetic {self.delta_v()} else {self.delta_v()-self.boost_budget()-4_993.2}}
     /// Only a fifth of main-engine acceleration is available for course correction.
     pub fn lateral_accel(self)->f64 {0.2*self.acceleration_g()*crate::units::G0}
 
     pub fn delta_v(self)->f64 {
-        crate::params::MISSILE_DELTA_V_KMS.value * if self==Self::Kinetic {0.5} else {1.0}
+        if self==Self::Kinetic {40_000.0} else {55_000.0}
     }
     pub fn acceleration_g(self)->f64 {crate::params::MISSILE_MAX_ACCEL_G.value*if self==Self::Kinetic {2.0} else {1.0}}
     pub fn launch_interval(self)->f64 {if self==Self::Kinetic {crate::params::SRM_LAUNCH_INTERVAL_S.value} else {crate::params::MISSILE_LAUNCH_INTERVAL_S.value}}
-    pub fn endurance(self)->f64 {if self==Self::Kinetic {4500.0} else {21600.0}}
+    pub fn endurance(self)->f64 {if self==Self::Kinetic {SRM_REACTOR_LIFETIME_S} else {LRM_REACTOR_LIFETIME_S}}
     pub fn engagement_range(self)->f64 {crate::units::AU*if self==Self::Kinetic {0.14} else {1.4}}
+}
+
+/// Planning estimate for a powered flight with inherited closing velocity.
+/// Fuel is an acceleration-integral budget (km/s), not a speed override. The
+/// simulation integrates relativistic motion; this Newtonian ETA is approximate.
+pub fn remaining_flight_seconds(payload:Payload,range:f64,closing:f64,boost_left:f64,fuel:f64,phase:Phase)->f64 {
+    if range<=0.0 {return 0.0;}
+    let a=payload.acceleration_g()*crate::units::G0;
+    let powered_time=|r:f64,v:f64| 2.0*r/((v*v+2.0*a*r).sqrt()+v).max(1e-12);
+    let mut r=range;let mut speed=closing;let mut elapsed=0.0;let mut fuel=fuel;
+    if payload==Payload::Nuclear && phase!=Phase::Terminal {
+        let burn=boost_left.min(fuel)/a;
+        let hit=powered_time(r,speed);
+        if hit<=burn {return hit;}
+        r-=speed*burn+0.5*a*burn*burn;speed+=a*burn;elapsed+=burn;fuel-=a*burn;
+        if r>payload.terminal_range() {
+            if speed<=0.0 {return f64::INFINITY;}
+            elapsed+=(r-payload.terminal_range())/speed;r=payload.terminal_range();
+        }
+    }
+    let hit=powered_time(r,speed);
+    if hit*a>fuel {f64::INFINITY} else {elapsed+hit}
 }
 
 /// Fixed limited field of regard about a received aim, never the true bearing.
@@ -63,7 +92,7 @@ pub fn launch_confidence(range:f64,sigma:f64,velocity_sigma:f64,payload:Payload)
     let acquisition=payload.seeker_range();
     let time=(acquisition/speed).min(crate::params::MISSILE_TERMINAL_S.value);
     let reach=lateral_reach(payload.lateral_accel(),
-        payload.delta_v()*crate::params::MISSILE_RESERVE_FRACTION.value,time);
+        payload.correction_budget(),time);
     let footprint=acquisition*crate::params::MISSILE_SEARCH_HALF_ANGLE.tan();
     (reach.min(footprint)/uncertainty.max(1.0)).min(1.0)
 }
@@ -254,9 +283,10 @@ pub fn closest_approach(t0: f64, t1: f64, f: impl Fn(f64) -> Option<Vec2>) -> Op
 #[cfg(test)]
 mod tests {
     #[test]
-    fn srm_has_double_acceleration_and_half_lrm_fuel() {
+    fn srm_has_double_acceleration_and_continuous_burn_fuel() {
         assert_eq!(super::Payload::Kinetic.acceleration_g(),2.0*super::Payload::Nuclear.acceleration_g());
-        assert_eq!(super::Payload::Kinetic.delta_v(),0.5*super::Payload::Nuclear.delta_v());
+        assert_eq!(super::Payload::Kinetic.delta_v(),40_000.0);
+        assert_eq!(super::Payload::Nuclear.delta_v(),55_000.0);
     }
     use super::*;
     #[test]

@@ -34,6 +34,7 @@ fn signature_scale(ef:f64)->f64 {
 pub fn detection_ranges(ef:f64)->[f64;4] {
     [0.1,1.0,5.0,20.0].map(|au|au*crate::units::AU*signature_scale(ef))
 }
+pub fn ping_resolved_range(ef:f64)->f64 {2.0*crate::units::AU*signature_scale(ef).max(1.0)}
 pub fn ping_range(ef:f64)->f64 {
     // Active illumination reaches five AU even for a cold target.
     5.0*crate::units::AU*signature_scale(ef).max(1.0)
@@ -57,7 +58,8 @@ pub fn ship_detection_ew(suite:SensorSuite,effectiveness:[f64;2],active:f64,ef:f
     let locating=passive.max(ping);
     let resolution_factor=resolution_factor.clamp(0.5,1.0);
     if locating>0.0 && range<=identity*locating*resolution_factor {Identity}
-    else if locating>0.0 && range<=resolved*locating*resolution_factor {Resolved}
+    else if (passive>0.0 && range<=resolved*passive*resolution_factor)
+        || (ping>0.0 && range<=ping_resolved_range(ef)*ping*resolution_factor) {Resolved}
     else if (passive>0.0 && range<=approximate*passive) || (ping>0.0 && range<=ping_range(ef)*ping*resolution_factor) {Approximate}
     else if direction_active && suite.direction_finding && effectiveness[1]>0.0 && range<=bearing*effectiveness[1] {Bearing}
     else {None}
@@ -282,12 +284,12 @@ mod tests {
                 assert_eq!(ship_detection(SensorSuite::FULL,[1.0,1.0],0.0,ef,range*ef*au,true),expected);
             }
         }
-        for (range,expected) in [(0.099,Identity),(0.999,Resolved),(1.001,Approximate),(4.999,Approximate),(5.001,Bearing)] {
+        for (range,expected) in [(0.099,Identity),(0.999,Resolved),(1.001,Resolved),(2.001,Approximate),(4.999,Approximate),(5.001,Bearing)] {
             assert_eq!(ship_detection(SensorSuite::FULL,[1.0,1.0],1.0,1.0,range*au,true),expected);
         }
         // Typical ECM adds 50% signature but cuts resolution distance by half.
         let ef=REFERENCE_EF*1.5;
-        for (range,expected) in [(0.074,Identity),(0.749,Resolved),(0.751,Approximate),(3.749,Approximate),(3.751,Approximate)] {
+        for (range,expected) in [(0.074,Identity),(0.749,Resolved),(0.751,Resolved),(1.501,Approximate),(3.749,Approximate),(3.751,Approximate)] {
             assert_eq!(ship_detection_ew(SensorSuite::FULL,[1.0,1.0],1.0,ef,range*au,true,resolution_factor(100.0,50.0)),expected);
         }
     }

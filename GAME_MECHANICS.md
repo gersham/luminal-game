@@ -1,3 +1,13 @@
+> Current implementation update (2026-09-28): the missile and jump sections in
+> [README.md](README.md#missile-model) describe the playable tuning. Offensive
+> missiles now fly physical fuel-budgeted trajectories; nominal range circles
+> are not hard cutoffs. LRMs have a 120-minute lifetime and a 0.4/0.9/0.1 AU
+> boost/coast/terminal profile at 1.4 AU. SRMs remain powered throughout flight.
+> Auto-evade evaluates benefit before burning, unseen LRM cruise tracks require
+> acquisition, and received active echoes improve missile fire control.
+> Destroyer and larger jump drives spool for ten minutes and preserve velocity.
+> Older conceptual values below remain design history where they differ.
+
 # TL7 ship combat mechanics — design handoff
 
 ## Current playtest calibration (September 27)
@@ -42,7 +52,10 @@ Damage control restores
 Penetrating hits have a 20% subsystem-hit chance, rising to 40% below 50% hull
 and 80% below 25% hull, using hull remaining after the hit. Component-hit selection weights propulsion at 2, power at 1 (halved), every other
 installed non-destroyed subsystem at 1. Hull is not a randomly selected system.
-Damaged power disables propulsion, active sensors, EW, screens and weapons;
+Damaged propulsion disables thrust. Damaged jump drives cannot spool or jump.
+Damaged power disables propulsion, jump, active sensors, EW and weapons;
+screens instead retain a 50% cap with normal regeneration. Damaged screens have
+the same non-stacking cap; repair restores the ceiling, then charge regenerates.
 their chips turn grey until power is repaired, retaining underlying damage states.
 Passive sensors, direction finding and ship mind use backup power; crew and damage
 control also remain operational and keep their own condition colours. The ship

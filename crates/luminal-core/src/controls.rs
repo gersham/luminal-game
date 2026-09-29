@@ -144,13 +144,14 @@ pub struct Controls {
     pub active:Mode,pub next_ping_at:f64,
     pub transport_alerted:bool,
     pub evade:Mode,pub evading:bool,
+    pub evasion:Option<(ContactId,autopilot::EvasionBurn)>,
     pub last_auto_ping:Option<f64>,
     pub ecm:Mode,pub screens:Mode,
     pub ecm_active:bool,pub screens_latched:bool,
     pub ecm_rating:f64,pub eccm_rating:f64,
 }
 impl Default for Controls {
-    fn default()->Self {Self {active:Mode::Off,next_ping_at:0.0,transport_alerted:false,evade:Mode::Auto,evading:false,last_auto_ping:None,ecm:Mode::Auto,screens:Mode::Auto,
+    fn default()->Self {Self {active:Mode::Off,next_ping_at:0.0,transport_alerted:false,evade:Mode::Auto,evading:false,evasion:None,last_auto_ping:None,ecm:Mode::Auto,screens:Mode::Auto,
         ecm_active:false,screens_latched:false,ecm_rating:100.0,eccm_rating:50.0}}
 }
 impl Body {
@@ -235,10 +236,13 @@ impl World {
         }
         let auto=|mode,condition|match mode {Mode::On=>true,Mode::Off=>false,Mode::Auto=>condition};
         b.controls.screens_latched|=resolved_ship && b.controls.screens==Mode::Auto;
+        if matches!(b.jump,Some(super::jump::JumpState::Spooling {..})) && b.operating_effectiveness(crate::damage::System::Jump)<=0.0 {
+            b.jump=None;b.thermal.field=0.0;
+        }
         b.controls.ecm_active=auto(b.controls.ecm,resolved_ship) && b.operating_effectiveness(crate::damage::System::Ecm)>0.0;
-        b.screen_up=b.has_screen && b.damage.state(crate::damage::System::Screens)!=crate::damage::Condition::Destroyed
+        b.screen_up=b.jump.is_none() && b.has_screen && b.damage.state(crate::damage::System::Screens)!=crate::damage::Condition::Destroyed
             && auto(b.controls.screens,b.controls.screens_latched);
-        if !b.screen_up || b.operating_effectiveness(crate::damage::System::Screens)<=0.0 {b.thermal.field=0.0;}
+        if !b.screen_up {b.thermal.field=0.0;} else {b.thermal.field=b.thermal.field.min(b.operating_effectiveness(crate::damage::System::Screens));}
         let ping=b.controls.active==Mode::Auto && self.time>=b.controls.next_ping_at;
         if previous_limit!=b.drive_limit || (b.controls.evade==Mode::Auto && missile_watch) || b.controls.evading {self.guide(id);}
         if ping && self.ping(id) {

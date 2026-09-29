@@ -336,6 +336,10 @@ impl Contact {
     pub fn detection(&self,t:f64)->crate::sensors::DetectionLevel {
         self.best_evidence(t).map_or(crate::sensors::DetectionLevel::None,|o|self.report_level(o,t))
     }
+    pub fn active_fire_control(&self,t:f64,eligible:impl Fn(BodyId)->bool)->f64 {
+        self.evidence.values().filter(|o|o.source==Source::Echo && o.detection>=crate::sensors::DetectionLevel::Resolved && eligible(o.sensor))
+            .map(|o|((o.decider_received_at+75.0-t)/15.0).clamp(0.0,1.0)).fold(0.0,f64::max)
+    }
     pub fn ping_remaining(&self,t:f64)->f64 {
         self.evidence.values().filter(|o|o.source==Source::Echo && o.detection>=crate::sensors::DetectionLevel::Resolved)
             .map(|o|(o.sensor_received_at+crate::sensors::PING_RESOLUTION_S-t).max(0.0)).fold(0.0,f64::max)

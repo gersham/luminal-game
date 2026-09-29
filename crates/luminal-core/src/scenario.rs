@@ -185,7 +185,7 @@ pub fn transport_intercept_seeded(seed: u64) -> World {
     for id in [BodyId(1), BodyId(2)] {
         world.bodies[id.0 as usize].damage.hull=crate::damage::FRIGATE_HULL_HP;
         world.bodies[id.0 as usize].damage.hull_max=crate::damage::FRIGATE_HULL_HP;
-        world.bodies[id.0 as usize].magazine=[20,10];
+        world.bodies[id.0 as usize].magazine=crate::world::ShipClass::Frigate.magazine();
         world.arm_beams(id).unwrap();
     }
     for b in &mut world.bodies {

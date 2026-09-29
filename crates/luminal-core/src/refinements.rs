@@ -129,9 +129,10 @@ impl World {
         let round=&self.bodies[id.0 as usize];
         if let Some(launcher)=round.missile.map(|m|m.launcher).or_else(||round.interceptor.map(|i|i.launcher)) {
             let viewers:Vec<_>=self.perceptions.keys().copied().filter(|f| {
-                *f!=self.bodies[id.0 as usize].faction && self.association.get(&(*f,launcher))
+                *f!=self.bodies[id.0 as usize].faction && (round.missile.is_some_and(|m|m.payload==Payload::Kinetic)
+                    || self.association.get(&(*f,launcher))
                     .and_then(|c|self.perceptions.get(f)?.contacts.get(c))
-                    .is_some_and(|c|c.detection(self.time)>=sensors::DetectionLevel::Resolved)
+                    .is_some_and(|c|c.detection(self.time)>=sensors::DetectionLevel::Resolved))
             }).collect();
             for f in viewers {self.refresh_missile_contact(f,id);}
         }
@@ -140,13 +141,20 @@ impl World {
     /// Once acquired, a missile stays tracked throughout its live flight.
     /// This explicit gameplay exception does not reveal its target or seeker data.
     pub(super) fn refresh_resolved_missiles(&mut self) {
-        let known:Vec<_>=self.association.iter().filter_map(|(&(f,id),&c)| {
-            (self.bodies[id.0 as usize].kind==BodyKind::Missile && self.bodies[id.0 as usize].alive_at(self.time)
-                && self.perceptions.get(&f)?.contacts.get(&c)?.resolved).then_some((f,id))
-        }).collect();
+        let mut known=Vec::new();
+        for (i,body) in self.bodies.iter().enumerate() {
+            if body.kind!=BodyKind::Missile || !body.alive_at(self.time) {continue;}
+            let id=BodyId(i as u32);
+            let mandatory=body.missile.is_some_and(|m|m.payload==Payload::Kinetic || m.phase==Phase::Terminal);
+            for (&f,picture) in &self.perceptions {
+                if f==body.faction {continue;}
+                let acquired=self.association.get(&(f,id)).and_then(|c|picture.contacts.get(c)).is_some_and(|c|c.resolved);
+                if mandatory || acquired {known.push((f,id));}
+            }
+        }
         for (f,id) in known {self.refresh_missile_contact(f,id);}
     }
-    fn refresh_missile_contact(&mut self,f:FactionId,id:BodyId) {
+    pub(super) fn refresh_missile_contact(&mut self,f:FactionId,id:BodyId) {
         let Some(sensor)=self.decider(f,self.time) else {return;};
         let Some(state)=self.state(id,self.time) else {return;};
         let Some(observer)=self.state(sensor,self.time) else {return;};
@@ -219,7 +227,7 @@ impl World {
         let pid=BodyId(self.bodies.len() as u32);
         probe.name=format!("{} Probe {}",probe.name,pid.0);
         probe.kind=BodyKind::Probe; probe.controllable=false; probe.armed=false;
-        probe.ship_class=None;
+        probe.ship_class=None;probe.jump=None;probe.step_generation=0;
         probe.has_screen=false;
         probe.point_defence=None;
         probe.interceptor_battery=None; probe.interceptor=None;
@@ -236,7 +244,7 @@ impl World {
         self.refinement.telemetry.entry(pid).or_default().push_back((t,probe.clone()));
         self.bodies.push(probe);
         self.last_step.push(t);
-        self.scheduler.schedule(t,Event::Step(pid));
+        self.scheduler.schedule(t,Event::Step(pid,0));
         self.ping(pid);
         Ok(pid)
     }
@@ -291,6 +299,8 @@ impl World {
     }
     fn execute_transmitted(&mut self, cmd: Command) -> Result<(), OrderError> {
         match cmd {
+            Command::Jump {body,destination}=>self.start_jump(body,destination),
+            Command::CancelJump {body}=>self.cancel_jump(body),
             Command::DeployProbe {body,direction} => self.deploy_probe(body,direction).map(|_|()),
             Command::SetThrust { body, thrust } => self.set_thrust(body, thrust),
             Command::Orbit { body, celestial } => self.set_orbit(body, celestial),

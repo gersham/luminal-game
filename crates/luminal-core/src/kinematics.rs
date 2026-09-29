@@ -186,6 +186,7 @@ pub enum TrajectoryError {
 pub struct Trajectory {
     segments: Vec<Segment>,
     end: Option<f64>,
+    jump_gaps: Vec<(f64, Option<f64>)>,
 }
 
 impl Trajectory {
@@ -193,6 +194,7 @@ impl Trajectory {
         Self {
             segments: vec![Segment { t0, pos: initial.pos, vel: limit_velocity(initial.vel), accel: Vec2::ZERO, thrust: Vec2::ZERO }],
             end: None,
+            jump_gaps: Vec::new(),
         }
     }
 
@@ -217,7 +219,21 @@ impl Trajectory {
         &self.segments
     }
 
+    pub fn jump_gaps(&self) -> &[(f64, Option<f64>)] { &self.jump_gaps }
+
+    /// Leave normal space. History remains available to light-delayed observers.
+    pub(crate) fn jump_departure(&mut self, t: f64) {
+        self.jump_gaps.push((t, None));
+    }
+
+    pub(crate) fn jump_arrival(&mut self, t: f64, state: State) {
+        self.jump_gaps.last_mut().expect("jump departure").1 = Some(t);
+        self.segments.push(Segment {t0:t,pos:state.pos,vel:limit_velocity(state.vel),accel:Vec2::ZERO,thrust:Vec2::ZERO});
+    }
+
     fn segment_at(&self, t: f64) -> Option<&Segment> {
+        if self.jump_gaps.iter().any(|(start,end)|t>=*start && end.is_none_or(|end|t<end)) {return None;}
+
         if t < self.start() || self.end.is_some_and(|e| t > e) {
             return None;
         }

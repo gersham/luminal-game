@@ -243,18 +243,18 @@ pub const TRACK_MANEUVER_G: Param = Param {
 
 pub const MISSILE_DELTA_V_KMS: Param = Param {
     key: "missile.delta_v",
-    value: 29_979.0,
+    value: 55_000.0,
     unit: "km/s",
     commitment: Placeholder,
-    note: "Total propulsion budget, about 0.1c: about 34 minutes at full 1,500 g; initial burn uses 60% (about 0.06c). Ships are reactionless and unlimited.",
+    note: "LRM acceleration-integral fuel budget; SRMs carry 40000 km/s. Ships are reactionless and unlimited.",
 };
 
 pub const MISSILE_BURN_FRACTION: Param = Param {
     key: "missile.burn_fraction",
-    value: 0.6,
+    value: 42_060.5/55_000.0,
     unit: "",
     commitment: Placeholder,
-    note: "Share of delta-v spent in the initial burn.",
+    note: "LRM initial boost allocation: 0.4 AU from rest at 1500g.",
 };
 
 pub const MISSILE_RESERVE_FRACTION: Param = Param {
@@ -262,7 +262,7 @@ pub const MISSILE_RESERVE_FRACTION: Param = Param {
     value: 0.3,
     unit: "",
     commitment: Placeholder,
-    note: "Share of delta-v cruise corrections may not touch; kept for terminal.",
+    note: "Legacy reference allocation; physical flight uses Payload boost and correction budgets.",
 };
 
 pub const MISSILE_TERMINAL_S: Param = Param {
@@ -270,7 +270,7 @@ pub const MISSILE_TERMINAL_S: Param = Param {
     value: 60.0,
     unit: "s",
     commitment: Placeholder,
-    note: "Time to go at which the missile switches to its own seeker.",
+    note: "Planning horizon for uncertainty corrections; actual seekers switch by terminal range.",
 };
 
 pub const MISSILE_SEEKER_NOISE_FLOOR: Param = Param {
@@ -302,7 +302,7 @@ pub const MAGAZINE_CRUISER: Param = Param {
     value: 20.0,
     unit: "missiles/type",
     commitment: Established,
-    note: "Default scenario raider starts with twenty SRMs and ten LRMs; class presets override both.",
+    note: "Legacy constructor magazine; scenario and class loadout tables override both payloads.",
 };
 
 pub const MAGAZINE_FRIGATE: Param = Param {
@@ -310,12 +310,12 @@ pub const MAGAZINE_FRIGATE: Param = Param {
     value: 20.0,
     unit: "missiles/type",
     commitment: Established,
-    note: "Frigate carries twenty SRMs and ten LRMs. Transport carries none.",
+    note: "Legacy constructor magazine; class fits provide twelve frigate SRMs and ten LRMs. Transport carries none.",
 };
 
 pub const MISSILE_LAUNCH_INTERVAL_S: Param = Param {
     key: "missile.launch_interval", value: 10.0, unit: "s", commitment: Established,
-    note: "LRM launcher fires every ten seconds: 1 PJ per round matches the SRM nominal damage rate.",
+    note: "LRM launcher fires every ten seconds; SRMs cycle twice as fast.",
 };
 pub const SRM_LAUNCH_INTERVAL_S:Param=Param {key:"missile.srm_launch_interval",value:5.0,unit:"s",commitment:Established,note:"Independent SRM launcher fires once per five simulation seconds."};
 
@@ -377,10 +377,10 @@ pub const NUCLEAR_AOE_KM: Param = Param {
 
 pub const NUCLEAR_ENERGY_J: Param = Param {
     key: "payload.nuclear_energy",
-    value: 1.0e15,
+    value: 3.0e14,
     unit: "J",
     commitment: Placeholder,
-    note: "1 PJ from an LRM nuclear-pumped laser strike, before screen absorption.",
+    note: "0.3 PJ from an LRM nuclear-pumped laser strike, before screen absorption.",
 };
 
 

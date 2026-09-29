@@ -73,7 +73,7 @@ impl Thermal {
         self.advance_with_drive(t,up,power,screen,0.0);
     }
     pub fn advance_with_drive(&mut self,t:f64,up:bool,power:f64,screen:f64,drive_w:f64) {
-        if !up {self.field=0.0;}
+        if !up {self.field=0.0;} else {self.field=self.field.min(screen);}
         let screen_w=if up {Self::drive_power(1.0)*SCREEN_IDLE_HEAT_FRACTION*self.capacity_scale*screen} else {0.0};
         let drive_w=drive_w+screen_w;
         self.continuous_input_w=drive_w;
@@ -85,7 +85,7 @@ impl Thermal {
             self.capacitor_j += recharge;
             self.generated_j += recharge;
             if up {
-                self.field = (self.field + screen * dt / SCREEN_BUILD_TIME_S.value).min(1.0);
+                self.field = (self.field + dt / SCREEN_BUILD_TIME_S.value).min(screen);
             }
             let rate_decay=(-dt/5.0).exp();
             self.heating_w=self.heating_w*rate_decay+drive_w*(1.0-rate_decay);

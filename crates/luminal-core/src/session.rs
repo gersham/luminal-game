@@ -26,6 +26,8 @@ pub enum Role {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Command {
+    Jump {body:BodyId,destination:Vec2},
+    CancelJump {body:BodyId},
     /// Constant thrust from now on, km/s². Gravity acts in addition. Cancels any
     /// autopilot order.
     SetThrust { body: BodyId, thrust: Vec2 },
@@ -65,6 +67,8 @@ pub enum Command {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Rejection {
+    JumpUnavailable,
+    JumpBusy,
     PowerOrHeat,
     UnknownBody,
     NotYourBody,
@@ -84,7 +88,7 @@ pub enum Rejection {
 impl Command {
     pub fn body(&self) -> Option<BodyId> {
         match *self {
-            Self::Alongside {body,..} | Self::Follow {body,..} | Self::SetThrust { body, .. } | Self::Orbit { body, .. } | Self::Intercept { body, .. }
+            Self::Jump {body,..} | Self::CancelJump {body} | Self::Alongside {body,..} | Self::Follow {body,..} | Self::SetThrust { body, .. } | Self::Orbit { body, .. } | Self::Intercept { body, .. }
             | Self::AppendWaypoint {body,..} | Self::Flyby { body, .. } | Self::KeepRange {body,..} | Self::Evade {body,..} | Self::MoveTo { body, .. } | Self::AllStop { body }
             | Self::SetDriveLimit { body, .. } | Self::Launch { body, .. } | Self::FireBeam { body, .. }
             | Self::SetHeatDump {body,..} | Self::Ping { body } | Self::EngageBeam { body, .. } | Self::SetScreen { body, .. } | Self::SetSystemMode {body,..}
@@ -97,6 +101,8 @@ impl Command {
 impl From<OrderError> for Rejection {
     fn from(e: OrderError) -> Self {
         match e {
+            OrderError::JumpUnavailable=>Rejection::JumpUnavailable,
+            OrderError::JumpBusy=>Rejection::JumpBusy,
             OrderError::PowerOrHeat => Rejection::PowerOrHeat,
             OrderError::Destroyed => Rejection::Destroyed,
             OrderError::NoTrack => Rejection::NoTrack,
@@ -112,6 +118,7 @@ impl From<OrderError> for Rejection {
 /// Command-ship state, delayed friendly telemetry, or truth for the spectator.
 #[derive(Clone, Debug)]
 pub struct BodyView {
+    pub jump:Option<crate::world::jump::JumpState>,
     pub ship_class:Option<crate::world::ShipClass>,
     pub heading:Vec2,
     pub spinal_ready_at:f64,
@@ -205,6 +212,7 @@ pub struct ContactView {
     pub detection:crate::sensors::DetectionLevel,
     pub reporting_sensor:Option<BodyId>,
     pub ping_remaining:f64,
+    pub active_fire_control:f64,
     pub resolved_class:Option<crate::world::ShipClass>,
     pub resolved_interceptor:bool,
     pub damage:Option<crate::damage::Report>,
@@ -420,6 +428,8 @@ impl LocalSession {
             if self.world.transmit_order(body, cmd.clone()) { return Ok(()); }
         }
         match cmd {
+            Command::Jump {body,destination}=>self.world.start_jump(body,destination)?,
+            Command::CancelJump {body}=>self.world.cancel_jump(body)?,
             Command::DeployProbe {body,direction} => { self.owned(role,body)?; self.world.deploy_probe(body,direction)?; }
             Command::CancelLaunches { body } => { self.owned(role, body)?; self.world.cancel_launches(body)?; }
             Command::SetWarp(w) => self.warp = w.clamp(0.0, 1e6),
@@ -565,8 +575,8 @@ impl LocalSession {
             .filter_map(|(i, b)| {
                 let known;
                 let b = if let Role::Faction(f) = role { known = w.known_body(f, BodyId(i as u32))?; &known } else { b };
-                let s = b.trajectory.state_at(t)?;
-                Some(BodyView {beam_solutions:if b.controllable && b.kind==BodyKind::Ship {
+                let s = b.trajectory.state_at(t).or_else(||b.jump.and_then(|jump|jump.display_state(t)))?;
+                Some(BodyView {jump:b.jump,beam_solutions:if b.controllable && b.kind==BodyKind::Ship {
                     w.received_picture(BodyId(i as u32)).into_iter().flat_map(|p|p.contacts.keys())
                         .filter_map(|c|w.beam_solution(BodyId(i as u32),*c).map(|s|(*c,s))).collect()
                 } else {BTreeMap::new()},ship_class:b.ship_class,heading:b.heading_at(t),spinal_ready_at:b.spinal_ready_at,
@@ -652,7 +662,7 @@ impl LocalSession {
                             Measurement::Bearing { .. } => None,
                         };
                         ContactView {
-                            detection,reporting_sensor:c.best_evidence(t).map(|o|o.sensor),ping_remaining:c.ping_remaining(t),
+                            detection,reporting_sensor:c.best_evidence(t).map(|o|o.sensor),ping_remaining:c.ping_remaining(t),active_fire_control:c.active_fire_control(t,|sensor|w.body(sensor).is_some_and(|b|matches!(b.kind,BodyKind::Ship|BodyKind::Station))),
                             resolved_class:if c.resolved {w.body_for_contact(f,c.id).and_then(|id|w.bodies[id.0 as usize].ship_class)} else {None},
                             resolved_interceptor:c.resolved && w.body_for_contact(f,c.id).is_some_and(|id|w.bodies[id.0 as usize].interceptor.is_some()),
                             damage:w.known_damage(f,c.id),

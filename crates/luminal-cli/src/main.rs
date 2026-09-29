@@ -11,6 +11,21 @@ use std::time::Instant;
 fn main() {
     let mut args = std::env::args().skip(1);
     let first = args.next();
+    if first.as_deref()==Some("--missile-envelope") {
+        let seeds=args.next().and_then(|s|s.parse::<u64>().ok()).unwrap_or(32);
+        println!("payload,range_au,closure_kms,evade,active,seed,hit,time,fuel,boost_au,terminal_au,reversals");
+        for p in luminal_core::missile::Payload::ALL {
+            let nominal=p.engagement_range()/luminal_core::units::AU;
+            for (fraction,closure,evade,active) in [(0.1,0.0,false,false),(0.1,0.0,true,false),(1.0,0.0,false,false),
+                (1.0,0.0,true,false),(1.0,0.0,false,true),(1.1,0.0,false,false),(1.2,0.0,false,false),(1.2,0.0,true,false),(1.0,5000.0,false,false),(1.0,-5000.0,false,false)] {
+                for seed in 0..seeds {
+                    let r=luminal_core::world::calibration::envelope_trial(p,nominal*fraction,closure,evade,active,5000+seed);
+                    println!("{},{},{},{},{},{},{},{},{},{},{},{}",p.name(),nominal*fraction,closure,evade,active,seed,r.hit,r.time,r.fuel,r.boost_au,r.terminal_au,r.engine_reversals);
+                }
+            }
+        }
+        return;
+    }
     if first.as_deref()==Some("--class-balance") {
         let seeds=args.next().and_then(|s|s.parse::<u64>().ok()).unwrap_or(10);
         let selection=args.next().unwrap_or_else(||"all".into());

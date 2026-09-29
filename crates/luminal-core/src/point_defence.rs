@@ -51,6 +51,9 @@ impl World {
         self.bodies[id.0 as usize].advance_thermal(t);
         let b=&self.bodies[id.0 as usize];
         let Some(pd)=b.point_defence else {return};
+        if b.trajectory.end().is_none() && matches!(b.jump,Some(jump::JumpState::Transit {..})) {
+            self.scheduler.schedule(t+1.0,Event::PointDefence(id));return;
+        }
         if !b.alive_at(t) || !pd.rate_hz.is_finite() || pd.rate_hz<=0.0 {return;}
         let origin=b.trajectory.state_at(t).unwrap().pos;
         let faction=b.faction;
@@ -62,6 +65,20 @@ impl World {
         // Use light-delayed emission, never its current truth position/velocity.
         for (i,target) in self.bodies.iter().enumerate() {
             if target.faction==faction || target.kind!=BodyKind::Missile || !target.alive_at(t) {continue;}
+            // Retained boost tracks and mandatory SRM/terminal resolution are
+            // valid fire-control information, even when a plume is now dark.
+            if sensor_effectiveness.iter().any(|v|*v>0.0)
+                && let Some(contact)=self.association.get(&(faction,BodyId(i as u32)))
+                && let Some(track)=self.received_picture(id).and_then(|p|p.contacts.get(contact))
+                    .filter(|c|c.detection(t)>=sensors::DetectionLevel::Resolved)
+                    .and_then(|c|c.estimate(t,&self.system)) {
+                let rel=track.pos()-origin;let range=rel.length();
+                if range<=PD_MAX_RANGE_LS.value*LIGHT_SECOND && self.system.occluder(track.pos(),t,origin,t).is_none() {
+                    let measurement=Measurement::BearingRange {range,bearing:bearing_of(rel),sigma_range:1.0,sigma_bearing:1e-7};
+                    candidates.push((range,BodyId(i as u32),track.pos(),t,measurement,1e12));
+                    continue;
+                }
+            }
             let Some((emitted,seen))=retarded_state(&target.trajectory,origin,t) else {continue};
             let rel=seen.pos-origin;
             let range=rel.length();

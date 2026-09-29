@@ -151,16 +151,99 @@ pub fn flyby(ship: State, target: State, _target_accel: Vec2, max_accel: f64) ->
     Approach { thrust: delta.normalized() * max_accel, eta, gap: delta.length(), rel_speed: (target.vel - ship.vel).length() }
 }
 
-/// Maximum lateral displacement from an incoming missile's predicted flight line.
-pub fn evade_missile(ship:State,missile:State,max_accel:f64)->Vec2 {
-    let relative=ship.pos-missile.pos;
-    let velocity=ship.vel-missile.vel;
-    let axis=velocity.normalized();
-    let miss=relative-axis*relative.dot(axis);
-    let direction=if miss.length()>1e-6 {miss.normalized()}
-        else if axis!=Vec2::ZERO {Vec2::new(-axis.y,axis.x)}
-        else {relative.normalized()};
-    direction*max_accel
+/// A held escape heading, in the Sol frame. Reevaluate periodically, but do not
+/// erase accumulated sideways velocity whenever a seeker corrects its course.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct EvasionBurn {
+    pub direction: Vec2,
+    pub since: f64,
+    pub evaluated_at: f64,
+}
+
+const EVADE_REASSESS_S: f64 = 5.0;
+const EVADE_SIDE_HOLD_S: f64 = 30.0;
+
+/// Conservative additional delta-v a missile would need to reach a continuously
+/// accelerating ship. Minimize over possible meeting times, so merely delaying
+/// the original closest approach is not mistaken for a guaranteed escape.
+/// This is a coasting-track estimate, not knowledge of enemy fuel or guidance.
+fn evasion_correction(ship: State, missile: State, burn: Vec2) -> f64 {
+    let r = ship.pos - missile.pos;
+    let v = ship.vel - missile.vel;
+    let encounter = (-r.dot(v) / v.dot(v).max(1e-12)).clamp(1.0, 1800.0);
+    let low = (encounter * 0.2).max(0.1);
+    let high = (encounter * 4.0).min(7200.0);
+    let demand = |t: f64| (r * (1.0 / t) + v + burn * (0.5 * t)).length();
+    // Log spacing covers imminent terminal passes and a prolonged stern chase.
+    let ratio = (high / low).powf(1.0 / 32.0);
+    let mut best = (f64::INFINITY, low);
+    let mut at = low;
+    for _ in 0..=32 {
+        let score = demand(at);
+        if score < best.0 { best = (score, at); }
+        at *= ratio;
+    }
+    let (mut lo, mut hi) = ((best.1 / ratio).max(low), (best.1 * ratio).min(high));
+    for _ in 0..12 {
+        let a = lo + (hi - lo) / 3.0;
+        let b = hi - (hi - lo) / 3.0;
+        if demand(a) < demand(b) { hi = b; } else { lo = a; }
+    }
+    demand((lo + hi) * 0.5).min(best.0)
+}
+
+/// Choose sustained lateral/oblique escape using received motion only. Both
+/// sides are considered initially; a reversal needs a 50% improvement after a
+/// 30-second commitment. Small angle changes need a 10% improvement.
+pub fn evade_missile(ship: State, missile: State, max_accel: f64, now: f64,
+    previous: Option<EvasionBurn>) -> EvasionBurn {
+    if let Some(held) = previous && now - held.evaluated_at < EVADE_REASSESS_S {
+        return held;
+    }
+    let away = (ship.pos - missile.pos).normalized();
+    let away = if away == Vec2::ZERO { Vec2::new(1.0, 0.0) } else { away };
+    let lateral = Vec2::new(-away.y, away.x);
+    let preferred = if ship.vel.dot(lateral) < 0.0 { -lateral } else { lateral };
+    let mut direction = previous.map_or(preferred, |held| held.direction);
+    let current = evasion_correction(ship, missile, direction * max_accel);
+    let mut best = current;
+    for side in [preferred, -preferred] {
+        // Angles from directly away: lateral, then increasingly oblique. An
+        // oblique candidate still spends at least half its thrust sideways.
+        for angle in [90.0_f64, 75.0, 60.0, 45.0, 30.0] {
+            let (sin, cos) = angle.to_radians().sin_cos();
+            let candidate = side * sin + away * cos;
+            let score = evasion_correction(ship, missile, candidate * max_accel);
+            if let Some(held) = previous {
+                let reverses = candidate.dot(lateral) * held.direction.dot(lateral) < 0.0;
+                if reverses && now - held.since < EVADE_SIDE_HOLD_S { continue; }
+                let threshold = if reverses { 1.5 } else { 1.1 };
+                if score <= current * threshold + 0.01 { continue; }
+            }
+            // Tiny tracking noise must not choose against existing sideways
+            // motion on the initial decision either.
+            if previous.is_none() && ship.vel.dot(lateral).abs()>0.001
+                && candidate.dot(preferred)<0.0 && score<=best*1.03+0.01 {continue;}
+            if score > best + 1e-6 { direction = candidate; best = score; }
+        }
+    }
+    EvasionBurn { direction, since: previous.filter(|p|p.direction.dot(lateral)*direction.dot(lateral)>=0.0)
+        .map_or(now, |held|held.since), evaluated_at: now }
+}
+
+/// Spend heat on evasion only when the additional correction demanded is a
+/// meaningful share of the missile class's nominal maneuver reserve. No actual
+/// remaining fuel is read. Hot ships require a larger expected benefit.
+pub fn evasion_worthwhile(ship:State,missile:State,max_accel:f64,plan:EvasionBurn,
+    correction_reserve:f64,heat_fraction:f64,missile_accel:f64)->bool {
+    let r=missile.pos-ship.pos;
+    let closing=-(missile.vel-ship.vel).dot(r.normalized());
+    let earliest=2.0*r.length()/(closing+(closing*closing+2.0*missile_accel*r.length()).sqrt()).max(1e-9);
+    let threshold=correction_reserve*(0.1+0.2*heat_fraction.clamp(0.0,1.0));
+    if 0.5*max_accel*earliest < threshold {return false;}
+    let coast=evasion_correction(ship,missile,Vec2::ZERO);
+    let escape=evasion_correction(ship,missile,plan.direction*max_accel);
+    escape-coast > threshold
 }
 
 /// How far ahead the collision check looks, s.
@@ -251,12 +334,60 @@ mod tests {
     fn evasive_burn_maximizes_lateral_miss_distance() {
         let ship=State {pos:Vec2::ZERO,vel:Vec2::ZERO};
         let missile=State {pos:Vec2::new(10000.0,0.0),vel:Vec2::new(-100.0,0.0)};
-        let burn=evade_missile(ship,missile,1.2);
+        let burn=evade_missile(ship,missile,1.2,0.0,None).direction*1.2;
         assert!((burn.length()-1.2).abs()<1e-12);
-        assert!(burn.x.abs()<1e-12);
-        assert!(burn.y.abs()>1.19);
+        assert!(burn.x<=1e-12);
+        assert!(burn.y.abs()>=0.59);
         let offset=State {pos:Vec2::new(10000.0,100.0),..missile};
-        assert!(evade_missile(ship,offset,1.2).y<0.0);
+        assert!(evade_missile(ship,offset,1.2,0.0,None).direction.y<0.0);
+    }
+
+    #[test]
+    fn evasion_spends_heat_only_for_meaningful_escape_opportunities() {
+        let ship=State {pos:Vec2::ZERO,vel:Vec2::ZERO};
+        let assess=|distance:f64,velocity:f64,heat:f64| {
+            let missile=State {pos:Vec2::new(distance,0.0),vel:Vec2::new(-velocity,0.0)};
+            let plan=evade_missile(ship,missile,1.2,0.0,None);
+            evasion_worthwhile(ship,missile,1.2,plan,7946.3,heat,14.71)
+        };
+        assert!(!assess(1_500_000.0,100.0,0.0),"fresh close missile can accelerate after us");
+        assert!(!assess(1_500_000.0,40_000.0,0.0),"imminent terminal pass leaves no useful dodge");
+        assert!(assess(60_000_000.0,10_000.0,0.0),"distant known missile permits a useful burn");
+        assert!(!assess(60_000_000.0,10_000.0,1.0),"hot ship should conserve heat for a marginal dodge");
+    }
+
+    #[test]
+    fn sustained_evasion_keeps_side_through_noisy_seeker_corrections() {
+        let ship=State {pos:Vec2::ZERO,vel:Vec2::new(0.0,10.0)};
+        let mut previous=None;
+        for tick in 0..25 {
+            let noise=if tick%2==0 {0.01} else {-0.01};
+            let missile=State {pos:Vec2::new(10000.0,noise),vel:Vec2::new(-100.0,10.0+noise)};
+            let plan=evade_missile(ship,missile,1.2,tick as f64*5.0,previous);
+            assert!(plan.direction.y>0.0,"must preserve accumulated sideways motion");
+            if let Some(held)=previous {assert!(plan.direction.dot(held.direction)>0.99);}
+            previous=Some(plan);
+        }
+    }
+
+    #[test]
+    fn evasion_selects_oblique_for_slow_chase_and_lateral_for_fast_terminal() {
+        let ship=State {pos:Vec2::ZERO,vel:Vec2::ZERO};
+        let slow=State {pos:Vec2::new(10000.0,0.0),vel:Vec2::new(-100.0,0.0)};
+        let fast=State {vel:Vec2::new(-1000.0,0.0),..slow};
+        let oblique=evade_missile(ship,slow,1.2,0.0,None);
+        let lateral=evade_missile(ship,fast,1.2,0.0,None);
+        assert!(oblique.direction.x < -0.2);
+        assert!(lateral.direction.x.abs()<0.05);
+        let old=Vec2::new(0.0,-1.2);
+        assert!(evasion_correction(ship,slow,oblique.direction*1.2)>evasion_correction(ship,slow,old)*1.05);
+        // A clearly better opposite side can win after commitment, not before.
+        let wrong=EvasionBurn {direction:-oblique.direction,since:0.0,evaluated_at:0.0};
+        let held=evade_missile(ship,slow,1.2,5.0,Some(wrong));
+        assert!(held.direction.y>0.0);
+        let ship=State {vel:Vec2::new(0.0,-100.0),..ship};
+        let changed=evade_missile(ship,slow,1.2,35.0,Some(wrong));
+        assert!(changed.direction.y<0.0);
     }
 
     #[test]

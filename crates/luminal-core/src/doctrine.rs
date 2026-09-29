@@ -136,6 +136,11 @@ impl Doctrine {
             }
             let tr = c.track.as_ref().unwrap();
             let range = (tr.pos-b.pos).length();
+            if engage && range<2.0*AU && c.active_fire_control<0.5
+                && view.time>=*self.ping_at.get(&b.id).unwrap_or(&0.0) {
+                out.push(Command::Ping {body:b.id});
+                self.ping_at.insert(b.id,view.time+BOT_PING_S.value);
+            }
             if engage {
                 let payload=if b.magazine[Payload::Kinetic.index()]>0 {Payload::Kinetic}
                     else if b.magazine[Payload::Nuclear.index()]>0 {Payload::Nuclear} else {Payload::Beam};
@@ -196,7 +201,7 @@ mod tests {
         let ship=view.bodies.iter_mut().find(|b|b.controllable).unwrap();
         ship.pos=Vec2::ZERO;ship.vel=Vec2::ZERO;
         view.contacts=(1..=2).map(|id|ContactView {detection:crate::sensors::DetectionLevel::Resolved,
-            ping_remaining:0.0,reporting_sensor:None,
+            ping_remaining:0.0,active_fire_control:0.0,reporting_sensor:None,
             resolved_class:Some(if id==1 {ShipClass::Transport} else {ShipClass::Frigate}),
             resolved_interceptor:false,damage:None,id:ContactId(id),resolved_kind:Some(BodyKind::Ship),
             resolved_missile:false,quality:"resolved",stale:false,
@@ -267,7 +272,7 @@ mod tests {
         let mut view=session.view(Role::Faction(crate::scenario::RAIDER));
         view.objective.as_mut().unwrap().sensor_site=None;
         let ship=view.bodies.iter().find(|b|b.controllable).unwrap().clone();
-        view.contacts=(1..=2).map(|id|ContactView {detection:crate::sensors::DetectionLevel::Resolved,ping_remaining:0.0,reporting_sensor:None,resolved_class:None,
+        view.contacts=(1..=2).map(|id|ContactView {detection:crate::sensors::DetectionLevel::Resolved,ping_remaining:0.0,active_fire_control:0.0,reporting_sensor:None,resolved_class:None,
             resolved_interceptor:false,
             damage:None,
             id:ContactId(id),resolved_kind:Some(BodyKind::Ship),resolved_missile:false,

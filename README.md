@@ -11,18 +11,86 @@ high simulation speeds. Audio hardware is optional; the game works silently
 if no output device is available. Linux source builds require ALSA development
 headers (`alsa-lib` on Arch, `libasound2-dev` on Debian/Ubuntu).
 
+### Jump drives
+
+Destroyers, cruisers and battleships have a **JUMP DRIVE** helm button. Select it,
+then left-click any destination within 50 AU of Sol; the map switches to a crosshair.
+Escape or right-click cancels destination selection. A jump spools for 600 simulation
+seconds, with a blinking triangle and countdown. During spooling, thrust, evasion,
+screens, beam weapons and PD lasers are disabled. **CANCEL JUMP** aborts the spool;
+screens rebuild from zero under their existing control mode, and accumulated heat remains.
+Missiles and interceptor missiles remain usable during the spool. The jump drive
+is a damageable installed component: damage or destruction prevents use, and a
+jump-drive or power failure aborts an active spool. Repair permits a fresh spool.
+Damaged propulsion or power also disables ordinary thrust. Damaged screens or
+power cap screen charge at 50% (not 25% when both are damaged); recharge continues
+at its normal rate. Repair restores the cap to 100%, followed by normal recharge.
+
+Transit takes distance / (1 AU/s), cannot be cancelled, and preserves the ship's
+normal-space velocity at departure. The ship is absent from normal space in transit;
+its UI marker shows jump progress. Arrival resumes ballistic motion, with screens
+recharging from zero. Jump is the game's only faster-than-light movement; sensor
+information still travels at light speed, including old images of the departure.
+
+Initial heat balance: spool input is **4× full-thrust drive heat**, scaled by class
+thermal capacity, and arrival adds **100% of class heat capacity**. This intentionally
+leaves a very hot ship whose normal thermal limits can inhibit thrust and lasers
+after arrival. Heat dumping is unavailable during the jump sequence. These tuning
+constants live in `crates/luminal-core/src/jump.rs`.
+
 ### Missile model
 
-Offensive missiles and interceptors use timed probabilistic engagements,
-not physical closest-pass guidance. Their displayed flights follow received
-tracks; terminal seekers can improve acquisition and share observations.
-Each surviving round resolves once at its deadline and is removed on hit,
-miss, or loss of its target. Hit probability depends on launch range, track
-quality/uncertainty, target evasion, and ECM/ECCM; point defence remains a
-separate layer. LRM proximity bursts and SRM direct hits retain distinct damage.
-The animation is intentionally an abstraction, not a fuel-accurate trajectory.
+Offensive missiles inherit their launcher's velocity and physically accelerate,
+coast and steer using received tracks. A hit roll occurs only after the missile
+actually reaches its target's proximity envelope. Running away consumes its time
+and fuel; launching aft into a closing pursuer benefits from relative motion.
 
-Successful SRM shotgun hits deliver 0.5 PJ every 5 seconds; LRM nuclear-pumped laser strikes deliver 1 PJ every 10 seconds. Both launchers have 0.1 PJ/s nominal output before misses and defence. Frigates carry 20 SRMs and 10 LRMs (10 PJ per magazine), plus 40 interceptors. Interceptor base kill chances are 75% against SRMs and 45% against LRMs, reduced by encounter speed.
+| | LRM | SRM |
+|---|---:|---:|
+| Nominal range circle | 1.4 AU | 0.14 AU |
+| Acceleration | 1,500 g | 3,000 g |
+| Propulsion budget | 55,000 km/s | 40,000 km/s |
+| Reactor lifetime | 120 min | 22 min |
+| Terminal acquisition | 0.1 AU | 0.04 AU |
+| Hit energy | 0.3 PJ | 0.25 PJ |
+| Launcher cycle | 10 s | 5 s |
+
+A stationary LRM shot at 1.4 AU boosts over approximately 0.4 AU, coasts over
+0.9 AU and powers through the final 0.1 AU, taking about 107 minutes. Its baseline
+hit roll is 75% before uncertainty, ECM and defence. SRMs have no cruise phase.
+Range circles are nominal envelopes: inherited velocity, target motion, fuel and
+reactor expiry determine actual reach. Fuel figures are acceleration integrals,
+not instantaneous speeds; ordinary flight remains relativistic.
+
+SRMs and terminal LRMs are always resolved. An LRM acquired during boost stays
+tracked during cruise. Otherwise its cold cruise is difficult to acquire, so
+interceptors may have no target until a ping or terminal acquisition reveals it.
+Pings automatically resolve LRMs within their effective detection radius once
+the echo returns, and extend ship resolution from 1 AU to 2 AU at full sensor
+strength. A fresh resolved ship/station echo supplies missile fire control:
+40% of the remaining hit-roll failure chance is removed (75% becomes 85%).
+Support lasts 60 seconds after receipt and fades over 15 seconds. The weapon
+card marks supported estimates with PING. Pinging also reveals the transmitter.
+
+Auto-evade uses received missile motion and class performance to estimate whether
+a dodge would demand a meaningful share of its correction reserve. It accounts
+for upcoming missile acceleration, rejects low-payoff close dodges, and requires
+more benefit when hot. Worthwhile burns commit to a lateral or oblique direction;
+minor seeker corrections do not flip the ship back and forth. Standing helm
+orders resume when no worthwhile threat remains. This is an estimate, not access
+to the enemy's remaining fuel or a guarantee of escape.
+
+Large hulls concentrate missiles into wider volleys; magazine and launcher counts
+share one class loadout table in `ShipClass::missile_fit`.
+
+| Class | SRM rounds / launchers | LRM rounds / launchers |
+|---|---:|---:|
+| Picket | 20 / 1 | — |
+| Frigate | 12 / 1 | 10 / 1 |
+| Destroyer | 24 / 4 | 18 / 3 |
+| Cruiser | 24 / 6 | 36 / 6 |
+| Battleship | 48 / 12 | 48 / 8 |
+
 Full salvos are dangerous to ships with exhausted interceptor magazines; see
 [salvo calibration](calibration/exhausted-defences.md) for controlled trials.
 Own-ship map rings show LRM (1.4 AU), SRM (0.14 AU), and the nominal beam envelope
@@ -31,7 +99,8 @@ Beyond the nominal 6 LS beam range, automatic fire requires at least 1 TJ
 and 5% of emitted energy expected to couple, with transverse aim uncertainty
 no wider than twice the beam radius. Coupling tapers smoothly from 6 to 10 LS, reaching zero at 10 LS.
 Explicit directed fire beyond that wastes heat and power. Spinal mounts retain their separate 60 LS envelope. Emission footprints and point-defence rings are no longer drawn.
-Weapon circles use thin yellow dots. Ship forecasts fade toward their endpoints;
+Weapon circles use thin yellow dots. When their on-screen radius exceeds 320 px
+(and at least six label widths), small interior labels repeat every 30 degrees. Ship forecasts fade toward their endpoints;
 red dashed target links show separation in LS or AU. Observed missile and
 interceptor hits bloom red, while misses fade out over one real-time second.
 Missed rounds keep coasting during the fade at their last received velocity and
@@ -289,7 +358,8 @@ Damaged sensors halve their range. Ping identity expires
 60 seconds after original sensor receipt, not after an allied relay.
 Learned class identity remains; condition reports become historical.
 
-Damaged power disables propulsion, active sensors, screens and weapons. Passive
+Damaged propulsion disables thrust. Damaged power disables thrust, jump, active sensors
+and weapons, while capping screens at 50%. Passive
 sensors, direction finding and the ship mind have backup power; crew and damage
 control remain operational. Destroyed power or an exhausted hull destroys a ship.
 Subsystem critical probability scales smoothly with penetrating energy before
@@ -418,23 +488,19 @@ when the threats clear it resumes that order. A new order issued during evasion
 becomes the order to resume. Interceptor tracks do not trigger this response.
 Heat dumping overrides evasion and keeps the drive off.
 
-Missile accuracy now penalizes crossing velocity and lateral acceleration during
-the final 30 seconds, rather than penalizing every thrust direction equally. Base
-accuracy is raised from 0.9 to 1.0, with ceilings of 95% for LRM and 97% for SRM.
-The paired missile regression runs 64 seeded engagements per weapon with AUTO on
-and off, without ECM or point defense, and verifies materially fewer actual hits
-against the evading ship. These are isolated close-range tests, not scenario-wide
-survival odds.
+Missile evasion now works through physical displacement and fuel demand. The
+terminal hit roll does not apply an extra flat evasion penalty after the missile
+has already reached proximity. UI estimates still discount difficult crossing
+motion, most strongly near nominal range. See the missile model above and the
+[balance report](calibration/2026-09-28-rebalance/report.md) for measured outcomes.
 
-Missile terminal guidance consumes a finite correction budget, with course-change
-acceleration capped at 20% of the main drive. All offensive hits require a swept
-close pass inside the strike envelope; accuracy rolls cannot rescue a geometric miss.
-SRMs require a resolved target at queue and launch time, and resolve locally only
-within 10,000 km, with a 5,000 km shotgun burst envelope. LRMs can target approximate ellipses or bearings and acquire only
-within twice their 29,979 km strike radius. Approximate launches aim at the fixed
-ellipse center until local acquisition; they never steer using hidden target truth.
-Seeker reports travel back at light speed. Active ship pings now distinguish identity
-(0.1 AU × EF), resolved (1 AU × EF), and approximate (5 AU × max(EF, 1)) returns.
+Boost and terminal steering use the main engine; cruise correction is limited to
+20% of rated acceleration and its allocated correction fuel. All offensive hits
+require a swept close pass. SRMs require resolved targets at launch and acquire
+terminal solutions inside 0.04 AU; their shotgun burst envelope remains 5,000 km.
+LRMs can search approximate ellipses or bearings and acquire terminal solutions
+inside 0.1 AU; their strike radius remains 29,979 km. Seeker reports travel at light
+speed. Ship ping resolution reaches 2 AU at full strength before rating/ECM scaling.
 
 
 ### Ship selection and volleys
@@ -447,10 +513,10 @@ navigation thruster vector. Hull-mounted spinal fire must wait for alignment.
 | Class | Hull | Armor | SRM / LRM magazine | SRM / LRM launchers | Interceptors | Max G | Turn |
 |---|---:|---:|---:|---:|---:|---:|---:|
 | Picket | 500 | 250 | 20 / 0 | 1 / 0 | 2 | 150 | 5s |
-| Frigate | 1000 | 500 | 20 / 10 | 1 / 1 | 40 | 120 | 10s |
-| Destroyer | 2000 | 1000 | 40 / 20 | 2 / 2 | 80 | 100 | 20s |
-| Cruiser | 4000 | 2000 | 40 / 80 | 2 / 4 | 200 | 70 | 35s |
-| Battleship | 8000 | 6000 | 160 / 60 | 4 / 4 | 240 | 50 | 60s |
+| Frigate | 1000 | 500 | 12 / 10 | 1 / 1 | 40 | 120 | 10s |
+| Destroyer | 2000 | 1000 | 24 / 18 | 4 / 3 | 80 | 100 | 20s |
+| Cruiser | 4000 | 2000 | 24 / 36 | 6 / 6 | 200 | 70 | 35s |
+| Battleship | 8000 | 6000 | 48 / 48 | 12 / 8 | 240 | 50 | 60s |
 
 Pickets have no offensive beam. Battleships add a 120-second spinal mount with
 10 times its main beam energy (3 PJ), a 60 LS envelope (10 times the nominal beam band),

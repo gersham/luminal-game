@@ -382,3 +382,46 @@ pub fn class_battle(class:ShipClass,seed:u64,depth:Option<u32>,range_au:f64)->Cl
         interceptor_kills:w.losses.iter().filter(|l|matches!(l.cause,LossCause::Interceptor {..})).count(),
         pd_kills:w.losses.iter().filter(|l|matches!(l.cause,LossCause::PointDefence {..})).count()}
 }
+
+/// Isolated physical-envelope trial: no defensive weapons or ECM. The fixture
+/// supplies an initial exact solution; all subsequent reports remain causal.
+#[derive(Debug)]
+pub struct EnvelopeTrial {
+    pub hit:bool,pub time:f64,pub fuel:f64,pub boost_au:f64,pub terminal_au:f64,
+    pub engine_reversals:u32,
+}
+pub fn envelope_trial(payload:Payload,range_au:f64,closure:f64,evade:bool,active:bool,seed:u64)->EnvelopeTrial {
+    let specs=vec![
+        BodySpec {name:"Launcher".into(),kind:BodyKind::Ship,faction:FactionId(0),state:State {pos:Vec2::ZERO,vel:Vec2::ZERO},thrust:Vec2::ZERO,magazine:10},
+        BodySpec {name:"Target".into(),kind:BodyKind::Ship,faction:FactionId(1),state:State {pos:Vec2::new(range_au*AU,0.0),vel:Vec2::new(-closure,0.0)},thrust:Vec2::ZERO,magazine:0},
+    ];
+    let mut w=World::new(System {bodies:vec![]},specs,1000.0,seed);
+    for b in &mut w.bodies {b.controls.ecm=controls::Mode::Off;b.controls.screens=controls::Mode::Off;b.controls.evade=controls::Mode::Off;}
+    w.bodies[1].controls.evade=if evade {controls::Mode::Auto} else {controls::Mode::Off};
+    if active {w.bodies[0].controls.active=controls::Mode::Auto;}
+    let c=w.contact_id(FactionId(0),BodyId(1));
+    w.perceptions.get_mut(&FactionId(0)).unwrap().ingest(Observation {detection:sensors::DetectionLevel::Resolved,contact:c,sensor:BodyId(0),origin:Vec2::ZERO,
+        emitted_at:0.0,sensor_received_at:0.0,decider_received_at:0.0,source:Source::Emission,snr:1e12,
+        measurement:Measurement::BearingRange {bearing:0.0,range:range_au*AU,sigma_range:0.001,sigma_bearing:1e-10}},&w.system);
+    let tr=w.perceptions.get_mut(&FactionId(0)).unwrap().contacts.get_mut(&c).unwrap().track.as_mut().unwrap();
+    tr.x[2]=-closure;tr.p[2][2]=1e-4;tr.p[3][3]=1e-4;
+    let id=w.launch(BodyId(0),c,payload).unwrap();
+    // Known boost track isolates maneuver benefit from stealth acquisition.
+    w.refresh_missile_contact(FactionId(1),id);
+    let mut boost_au=0.0;let mut terminal_au=0.0;let mut previous=Phase::Burn;
+    let mut heading=Vec2::ZERO;let mut reversals=0;
+    while w.bodies[id.0 as usize].alive_at(w.time()) && w.time()<payload.endurance()+1.0 {
+        w.advance_to(w.time()+5.0);
+        let b=&w.bodies[id.0 as usize];let m=b.missile.unwrap();
+        if let Some(s)=w.state(id,w.time()) {
+            if previous==Phase::Burn && m.phase==Phase::Cruise {boost_au=s.pos.length()/AU;}
+            if previous!=Phase::Terminal && m.phase==Phase::Terminal {terminal_au=(s.pos-w.state(BodyId(1),w.time()).unwrap().pos).length()/AU;}
+        }
+        previous=m.phase;
+        let burn=w.bodies[1].trajectory.last().thrust.normalized();
+        if heading!=Vec2::ZERO && burn!=Vec2::ZERO && heading.dot(burn)<0.0 {reversals+=1;}
+        if burn!=Vec2::ZERO {heading=burn;}
+    }
+    EnvelopeTrial {hit:w.hits.iter().any(|h|h.missile==id),time:w.bodies[id.0 as usize].trajectory.end().unwrap_or(w.time()),
+        fuel:w.bodies[id.0 as usize].missile.unwrap().dv_left,boost_au,terminal_au,engine_reversals:reversals}
+}
