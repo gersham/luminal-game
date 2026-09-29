@@ -9,6 +9,16 @@ mod startup;
 mod roster;
 mod ship_art;
 
+const BUILD_VERSION:&str=env!("LUMINAL_VERSION");
+const BUILD_COMMIT:&str=env!("LUMINAL_COMMIT");
+
+fn build_dirty()->bool { env!("LUMINAL_DIRTY")=="1" }
+fn build_hover()->String {
+    let mut hover=format!("commit {BUILD_COMMIT}");
+    if build_dirty() {hover.push_str(" · uncommitted changes");}
+    hover
+}
+
 use luminal_core::world::jump::{JumpState, MAX_SOL_RADIUS_AU};
 use eframe::egui::{self, Color32, Pos2, Rect, Sense, Shape, Stroke, StrokeKind, Vec2 as EVec2};
 use luminal_core::celestial::{CelestialKind, Orbit};
@@ -17,7 +27,7 @@ use luminal_core::kinematics::{State, Vec2};
 use luminal_core::mind::{ContactId, Source};
 use luminal_core::sensors::{self, wrap_angle};
 use luminal_core::params;
-use luminal_core::scenario::{self, ESCORT, RAIDER};
+use luminal_core::scenario::{self, Scenario, ESCORT, RAIDER};
 use luminal_core::session::{
     AutopilotStatus, BodyId, BodyView, Command, ContactView, InterceptTarget, LocalSession, Order, Payload, Phase, Role, View,
 };
@@ -108,9 +118,13 @@ impl TacticalLog {
 }
 
 fn main() -> eframe::Result {
+    if std::env::args().skip(1).any(|arg| arg=="--version" || arg=="-V") {
+        println!("luminal-app {BUILD_VERSION} commit={BUILD_COMMIT} dirty={}",u8::from(build_dirty()));
+        return Ok(());
+    }
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default().with_inner_size([1400.0, 900.0])
-            .with_title("Luminal").with_app_id("luminal").with_fullscreen(true)
+            .with_title(format!("Luminal {BUILD_VERSION}")).with_app_id("luminal").with_fullscreen(true)
             .with_icon(eframe::icon_data::from_png_bytes(include_bytes!("../../../assets/icons/luminal.png"))
                 .expect("bundled Luminal icon is valid PNG")),
         ..Default::default()
@@ -743,6 +757,136 @@ mod tests {
         assert!(app.session.view(app.role).outcome.unwrap().reason.contains("surrendered"));
     }
 
+    #[test]
+    fn planet_name_sits_once_inside_its_orbit_with_star_distance() {
+        assert_eq!(star_distance_label("Earth", AU), "Earth - 1 AU");
+        assert_eq!(star_distance_label("Mercury", 0.3871 * AU), "Mercury - 0.39 AU");
+        assert_eq!(star_distance_label("Jupiter", 5.2029 * AU), "Jupiter - 5.2 AU");
+        assert_eq!(primary_distance_label("Moon", 384_400.0), "Moon - 1.3 LS");
+        assert_eq!(primary_distance_label("Scourge", 44_000.0), "Scourge - 0.15 LS");
+        fn frame(app:&mut LuminalApp,ctx:&egui::Context)->egui::FullOutput {
+            let view=app.session.view(app.role);
+            let mut output=ctx.run_ui(egui::RawInput {screen_rect:Some(Rect::from_min_size(Pos2::ZERO,EVec2::new(900.0,700.0))),..Default::default()},|ui| app.map(ui,&view,None));
+            output.textures_delta.clear();output
+        }
+        fn walk<'a>(shape:&'a Shape,out:&mut Vec<&'a egui::epaint::TextShape>) {
+            match shape {Shape::Text(t)=>out.push(t),Shape::Vec(v)=>for s in v {walk(s,out);},_=>{}}
+        }
+        fn texts(output:&egui::FullOutput)->Vec<&egui::epaint::TextShape> {
+            let mut out=Vec::new();
+            for clipped in &output.shapes {walk(&clipped.shape,&mut out);}
+            out
+        }
+        fn glyph_anchor(t:&egui::epaint::TextShape)->Pos2 {
+            let a0=egui::Align2::CENTER_CENTER.pos_in_rect(&t.galley.rect).to_vec2();
+            let (s,c)=t.angle.sin_cos();
+            t.pos+EVec2::new(c*a0.x-s*a0.y,s*a0.x+c*a0.y)
+        }
+        fn arc_label(output:&egui::FullOutput,center:Pos2,body:Pos2,min_r:f32,max_r:f32,near:f32,color:Color32)->String {
+            let mut glyphs=Vec::new();
+            for t in texts(output) {
+                if t.fallback_color!=color || t.galley.text().chars().count()!=1 {continue;}
+                let at=glyph_anchor(t);
+                let rel=at-center;
+                if rel.length()<min_r || rel.length()>max_r || at.distance(body)>near {continue;}
+                glyphs.push((rel.y.atan2(rel.x),t.galley.text().to_string()));
+            }
+            let body_angle=(body-center).y.atan2((body-center).x);
+            let delta=|angle:f32| {let mut d=angle-body_angle;while d>std::f32::consts::PI {d-=std::f32::consts::TAU;}while d<=-std::f32::consts::PI {d+=std::f32::consts::TAU;}d};
+            glyphs.sort_by(|a,b|delta(b.0).total_cmp(&delta(a.0)));
+            glyphs.into_iter().map(|(_,s)|s).collect()
+        }
+        let label_color=|kind| {let c=celestial_color(kind);Color32::from_rgba_unmultiplied(c.r(),c.g(),c.b(),128)};
+        let mut app=LuminalApp::new_with_theme(luminal_core::world::ShipClass::Frigate,theme::Theme::Luminal);
+        app.fit_pending=false;app.track_player=false;app.opening_fit=false;
+        let ctx=egui::Context::default();
+        let rect=Rect::from_min_size(Pos2::ZERO,EVec2::new(900.0,700.0));
+        let view=app.session.view(app.role);
+        let earth=view.celestials[1].pos;
+        let earth_orbit=match view.system.bodies[1].orbit {Orbit::Frozen {radius,..} | Orbit::Circular {radius,..}=>radius,_=>panic!("earth orbit")};
+        app.camera=Camera {center:earth,km_per_px:earth_orbit/400.0};
+        let output=frame(&mut app,&ctx);
+        let sun_s=to_screen(&app.camera,rect,view.celestials[0].pos);
+        let earth_s=to_screen(&app.camera,rect,earth);
+        let joined=arc_label(&output,sun_s,earth_s,370.0,400.0,140.0,label_color(CelestialKind::Planet));
+        assert_eq!(joined,"Earth - 1 AU");
+        for forbidden in ["Earth","0.5 AU","1 AU","1.5 AU","2 AU"] {
+            assert!(!texts(&output).iter().any(|t|t.galley.text()==forbidden),"{forbidden} still painted");
+        }
+        let moon=view.celestials[2].pos;
+        let (moon_orbit,parent)=match view.system.bodies[2].orbit {Orbit::Frozen {radius,parent,..} | Orbit::Circular {radius,parent,..}=>(radius,parent),_=>panic!("moon orbit")};
+        assert_eq!(parent,1);
+        app.camera=Camera {center:moon,km_per_px:moon_orbit/280.0};
+        let output=frame(&mut app,&ctx);
+        let earth_s=to_screen(&app.camera,rect,view.celestials[parent].pos);
+        let moon_s=to_screen(&app.camera,rect,moon);
+        let expected=primary_distance_label("Moon",(moon-view.celestials[parent].pos).length());
+        let joined=arc_label(&output,earth_s,moon_s,250.0,278.0,140.0,label_color(CelestialKind::Moon));
+        assert_eq!(joined,expected);
+        assert!(!texts(&output).iter().any(|t|t.galley.text()=="Moon"));
+        app.camera=Camera {center:earth,km_per_px:earth_orbit/24.0};
+        let output=frame(&mut app,&ctx);
+        let straight=texts(&output).iter().filter(|t|t.galley.text()=="Earth - 1 AU").count();
+        assert_eq!(straight,1);
+        let sun_s=to_screen(&app.camera,rect,view.celestials[0].pos);
+        assert!(arc_label(&output,sun_s,to_screen(&app.camera,rect,earth),4.0,20.0,80.0,label_color(CelestialKind::Planet)).is_empty());
+    }
+
+    #[test]
+    fn point_grid_is_one_au_and_switches_to_one_light_second() {
+        assert_eq!(grid_spacing(AU / 80.0), Some(AU));
+        assert_eq!(grid_spacing(AU / 400.0), Some(AU));
+        assert_eq!(grid_spacing(LIGHT_SECOND / 40.0), Some(LIGHT_SECOND));
+        assert_eq!(grid_spacing(AU / 4.0), None, "dots closer than the minimum pitch would clot");
+        fn frame(app:&mut LuminalApp,ctx:&egui::Context)->egui::FullOutput {
+            let view=app.session.view(app.role);
+            let mut output=ctx.run_ui(egui::RawInput {screen_rect:Some(Rect::from_min_size(Pos2::ZERO,EVec2::new(900.0,700.0))),..Default::default()},|ui| app.map(ui,&view,None));
+            output.textures_delta.clear();output
+        }
+        fn points(output:&egui::FullOutput)->Vec<Pos2> {
+            let mut found=Vec::new();
+            fn walk(shape:&Shape,found:&mut Vec<Pos2>) {
+                match shape {
+                    Shape::Mesh(mesh)=>{
+                        let v=&mesh.vertices;
+                        let mut i=0;
+                        while i+3<v.len() {
+                            if v[i].color==GRID_DOT && v[i+1].color==GRID_DOT && v[i+2].color==GRID_DOT && v[i+3].color==GRID_DOT {
+                                found.push(Pos2::new((v[i].pos.x+v[i+1].pos.x+v[i+2].pos.x+v[i+3].pos.x)*0.25,(v[i].pos.y+v[i+1].pos.y+v[i+2].pos.y+v[i+3].pos.y)*0.25));
+                                i+=4;
+                            } else {i+=1;}
+                        }
+                    }
+                    Shape::Vec(list)=>for shape in list {walk(shape,found);},
+                    _=>{}
+                }
+            }
+            for clipped in &output.shapes {walk(&clipped.shape,&mut found);}
+            found
+        }
+        fn near(points:&[Pos2],at:Pos2)->bool {points.iter().any(|p|p.distance(at)<1.5)}
+        let mut app=LuminalApp::new_with_theme(luminal_core::world::ShipClass::Frigate,theme::Theme::Luminal);
+        app.fit_pending=false;app.track_player=false;app.opening_fit=false;
+        let ctx=egui::Context::default();
+        let rect=Rect::from_min_size(Pos2::ZERO,EVec2::new(900.0,700.0));
+        app.camera=Camera {center:Vec2::new(0.3*AU,-0.4*AU),km_per_px:AU/100.0};
+        let output=frame(&mut app,&ctx);
+        let dots=points(&output);
+        let origin=to_screen(&app.camera,rect,Vec2::ZERO);
+        assert!(near(&dots,origin),"the star sits on an AU point");
+        assert!(near(&dots,to_screen(&app.camera,rect,Vec2::new(AU,0.0))));
+        assert!(near(&dots,to_screen(&app.camera,rect,Vec2::new(0.0,AU))));
+        assert!(!near(&dots,to_screen(&app.camera,rect,Vec2::new(0.5*AU,0.0))),"half an AU is not a grid point");
+        assert_eq!(dots.len(),63);
+        app.camera=Camera {center:Vec2::ZERO,km_per_px:LIGHT_SECOND/40.0};
+        let output=frame(&mut app,&ctx);
+        let dots=points(&output);
+        assert!(near(&dots,rect.center()));
+        assert!(near(&dots,rect.center()+EVec2::new(40.0,0.0)));
+        assert!(!near(&dots,rect.center()+EVec2::new(20.0,0.0)));
+        assert_eq!(dots.len(),23*17);
+    }
+
     #[test] fn manual_turns_and_throttle_are_bounded_and_frame_independent() {
         let initial=ManualFlight {body:BodyId(1),angle:0.0,throttle:0.0};
         let mut one=initial;let mut many=initial;
@@ -917,6 +1061,7 @@ struct LuminalApp {
     ship_headings: BTreeMap<BodyId, Vec2>,
     selection_pending:bool,
     chosen_class:luminal_core::world::ShipClass,
+    chosen_scenario:Scenario,
     theme:theme::Theme,
     ship_art:ship_art::ShipArt,
     tactical_log:TacticalLog,
@@ -927,7 +1072,8 @@ struct LuminalApp {
 
 /// Development hooks driven by environment variables, used for visual checks.
 /// `LUMINAL_ADVANCE=<sim seconds>` pre-runs the scenario; `LUMINAL_ROLE=spectator|raider`
-/// picks the starting view; `LUMINAL_SCREENSHOT=<file.ppm>` saves a frame and exits.
+/// picks the starting view; `LUMINAL_SCENARIO=escort|raid|hide|armada` picks the situation;
+/// `LUMINAL_SCREENSHOT=<file.ppm>` saves a frame and exits.
 #[derive(Default)]
 struct DevHooks {
     screenshot: Option<std::path::PathBuf>,
@@ -1308,21 +1454,30 @@ Shift + right click: extend route").monospace().size(9.0).color(TEXT_MUTED));
             .unwrap_or(if cfg!(test) {luminal_core::world::ShipClass::Frigate} else {random_class});
         let theme=std::env::var("LUMINAL_THEME").ok().and_then(|name|theme::Theme::ALL.into_iter().find(|t|t.name().eq_ignore_ascii_case(&name)))
             .unwrap_or(if cfg!(test) {theme::Theme::Culture} else {random_theme});
-        Self::new_with_theme(chosen,theme)
+        let scenario=std::env::var("LUMINAL_SCENARIO").ok().and_then(|name|Scenario::parse(&name)).unwrap_or(Scenario::Escort);
+        Self::new_with_scenario(scenario,chosen,theme)
     }
     #[cfg(test)]
     fn new_with_class(chosen:luminal_core::world::ShipClass) -> Self {
-        Self::new_with_theme(chosen,theme::Theme::Culture)
+        Self::new_with_scenario(Scenario::Escort,chosen,theme::Theme::Culture)
     }
+    #[cfg(test)]
     fn new_with_theme(chosen:luminal_core::world::ShipClass,theme:theme::Theme) -> Self {
+        Self::new_with_scenario(Scenario::Escort,chosen,theme)
+    }
+    fn new_with_scenario(scenario:Scenario,chosen:luminal_core::world::ShipClass,theme:theme::Theme) -> Self {
         let seed = std::env::var("LUMINAL_SEED").ok().and_then(|s|s.parse().ok()).unwrap_or_else(|| {
             if cfg!(test) || std::env::var_os("LUMINAL_SCREENSHOT").is_some() {42} else {
                 std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos() as u64
             }
         });
-        let mut world=scenario::transport_intercept_class_in_system(seed,chosen,theme.star_system(seed));
+        let system=theme.star_system(seed);
+        let mut world=if scenario==Scenario::Escort {scenario::transport_intercept_class_in_system(seed,chosen,system)} else {scenario.build(seed,system)};
         theme.name_scenario(&mut world,seed);
+        let player=world.objective.as_ref().and_then(|o|o.player);
+        let inspected=if scenario==Scenario::Escort {world.objective.as_ref().map(|o|Selection::Body(o.protect))} else {None};
         let mut session=LocalSession::new(world);
+        session.set_build_identity(BUILD_VERSION,BUILD_COMMIT,build_dirty());
         let log_path=std::path::PathBuf::from("logs/latest.log");
         let log_error=if cfg!(test) || std::env::var_os("LUMINAL_SCREENSHOT").is_some() {None} else {
             std::fs::create_dir_all("logs").and_then(|_|session.enable_debug_log(&log_path)).err()
@@ -1339,8 +1494,8 @@ Shift + right click: extend route").monospace().size(9.0).color(TEXT_MUTED));
             manual_ping_zoom_until:0.0,
             fit_pending: true,
             opening_fit: true,
-            selected: Some(Selection::Body(BodyId(1))),
-            inspected: Some(Selection::Body(BodyId(0))),
+            selected: player.map(Selection::Body),
+            inspected,
             movement_mode: MovementMode::Flyby,
             jump_select:None,
             target_chosen: false,
@@ -1351,6 +1506,7 @@ Shift + right click: extend route").monospace().size(9.0).color(TEXT_MUTED));
             ship_headings: BTreeMap::new(),
             selection_pending:!cfg!(test) && (std::env::var_os("LUMINAL_SCREENSHOT").is_none() || std::env::var_os("LUMINAL_SHIP_SELECT").is_some()),
             chosen_class:chosen,
+            chosen_scenario:scenario,
             theme,ship_art:ship_art::ShipArt::default(),
             tactical_log:TacticalLog::default(),
             weapon_effects:weapon_effects::WeaponEffects::default(),
@@ -1360,7 +1516,8 @@ Shift + right click: extend route").monospace().size(9.0).color(TEXT_MUTED));
             manual_flight:None,manual_send_elapsed:0.0,
         }
         .with_env_setup();
-        app.session.enable_bot(if app.role == Role::Faction(RAIDER) { ESCORT } else { RAIDER }, true);
+        let bots: &[FactionId] = if app.chosen_scenario==Scenario::Escort && app.role==Role::Faction(RAIDER) {&[ESCORT]} else {app.chosen_scenario.bots()};
+        for faction in bots {app.session.enable_bot(*faction, true);}
         let _ = app.session.command(app.role, Command::SetWarp(AUTO_MIN_WARP));
         // AUTO ramps up from 5×; screenshot fixtures remain paused.
         if app.dev.screenshot.is_none() && !app.selection_pending {
@@ -1371,11 +1528,16 @@ Shift + right click: extend route").monospace().size(9.0).color(TEXT_MUTED));
 
     fn restart_scenario(&mut self) {
         let theme=self.theme;
+        let scenario=self.chosen_scenario;
+        let class=self.chosen_class;
+        let pending=self.selection_pending;
         let volume=self.audio.volume;
         let music_volume=self.audio.music_volume;
         let muted=self.audio.muted;
-        *self=Self::new_with_theme(self.chosen_class,theme);
+        *self=Self::new_with_scenario(scenario,class,theme);
         self.theme=theme;
+        self.selection_pending=pending;
+        if !pending {let _=self.session.command(self.role,Command::SetPaused(false));}
         self.audio.volume=volume;self.audio.music_volume=music_volume;self.audio.muted=muted;self.audio.settings_changed();
     }
 
@@ -1435,7 +1597,7 @@ Shift + right click: extend route").monospace().size(9.0).color(TEXT_MUTED));
             Ok("spectator") => self.role = Role::Spectator,
             Ok("raider") => {
                 self.role = Role::Faction(RAIDER);
-                self.selected = Some(Selection::Body(BodyId(2)));
+                if self.chosen_scenario==Scenario::Escort {self.selected = Some(Selection::Body(BodyId(2)));}
             }
             _ => {}
         }
@@ -1849,6 +2011,7 @@ impl LuminalApp {
             }});
         }
         ui.label(egui::RichText::new(format!("{} · {:.1}×",if self.auto_speed {"AUTO"} else {"MANUAL"},view.warp)).monospace().size(10.0).color(ACCENT));
+        ui.label(egui::RichText::new(BUILD_VERSION).monospace().size(9.0).color(TEXT_MUTED)).on_hover_text(build_hover());
         if ui.button(if self.session.waiting_for_event() {"STOP ADVANCING"} else {"NEXT TACTICAL EVENT"}).on_hover_text("Advance until a received threat, combat report, repair, jump, useful beam range or mission outcome; pauses automatically. Maximum 24 simulated hours.").clicked() {
             self.auto_speed=false;
             if self.session.waiting_for_event() {self.command(Command::SetPaused(true));}
@@ -2453,7 +2616,7 @@ impl LuminalApp {
         let cam = self.camera;
         let mut labels = Labels::default();
         if self.track_player {painter.text(rect.center_top()+EVec2::new(0.0,12.0),egui::Align2::CENTER_TOP,"TRACKING OWN SHIP · T",mono(10.0),ACCENT);}
-        draw_range_rings(&painter, &cam, rect);
+        draw_point_grid(&painter, &cam, rect);
         draw_orbits(&painter, &cam, rect, view);
 
         // Stellar shadows are cosmetic. Sensor occlusion remains in the core.
@@ -2473,7 +2636,9 @@ impl LuminalApp {
                 })
                 .collect();
             painter.extend(Shape::dashed_line(&pts, Stroke::new(1.0, col.gamma_multiply(0.7)), 8.0, 5.0));
-            let label = format!("{} (goal: {})", o.name, view.bodies.iter().find(|b| b.id == o.protect).map_or("the transport".into(), |b| b.name.clone()));
+            let label = if o.prize.is_some() || o.wipe {o.name.clone()} else {
+                format!("{} (goal: {})", o.name, view.bodies.iter().find(|b| b.id == o.protect).map_or("the transport".into(), |b| b.name.clone()))
+            };
             if rect.contains(center) {
                 labels.add(center + EVec2::new(r * 0.7 + 4.0, -r * 0.7), label, col);
             } else {
@@ -2569,7 +2734,11 @@ impl LuminalApp {
                 self.celestial_art.draw(ui.ctx(),&painter,view,i,self.theme,p,r,ui.input(|i|i.time));
             }
             if rect.contains(p) {
-                labels.add(p + EVec2::new(r + 4.0, -r - 2.0), c.name.clone(), col.gamma_multiply(0.8));
+                let labeled=c.kind!=CelestialKind::Star && draw_orbit_label(&painter,&cam,rect,view,i,p,col);
+                if !labeled {
+                    let text=if c.kind==CelestialKind::Star {c.name.clone()} else {celestial_distance_label(view,i)};
+                    labels.add(p + EVec2::new(r + 4.0, -r - 2.0), text, col.gamma_multiply(0.8));
+                }
             } else {
                 let origin=view.bodies.iter().find(|b|b.controllable && Some(b.faction)==self.own_faction()).map_or(cam.center,|b|b.pos);
                 let label=edge_distance_label(&c.name,(c.pos-origin).length());
@@ -2955,17 +3124,7 @@ fn draw_weapon_ranges(painter:&egui::Painter,cam:&Camera,rect:Rect,ship:&BodyVie
         if radius>=320.0_f32.max(width*6.0) {
             let text_radius=radius-14.0;
             for i in 0..12 {
-                let anchor=std::f32::consts::TAU*i as f32/12.0;
-                let mut offset=-width*0.5;
-                for glyph in &glyphs {
-                    let angle=anchor-(offset+glyph.size().x*0.5)/text_radius;
-                    let at=center+EVec2::new(angle.cos(),angle.sin())*text_radius;
-                    if clip.expand(glyph.size().length()).contains(at) {
-                        painter.add(egui::epaint::TextShape::new(at-glyph.size()*0.5,glyph.clone(),label_color)
-                            .with_angle_and_anchor(angle-std::f32::consts::FRAC_PI_2,egui::Align2::CENTER_CENTER));
-                    }
-                    offset+=glyph.size().x;
-                }
+                paint_inward_arc(painter,center,text_radius,std::f32::consts::TAU*i as f32/12.0,&glyphs,label_color);
             }
         }
         for i in 0..dots {
@@ -3219,38 +3378,124 @@ fn draw_scale_bar(painter: &egui::Painter, cam: &Camera, rect: Rect) {
     painter.text(Pos2::new(x+px,y-6.0),egui::Align2::RIGHT_BOTTOM,label,egui::FontId::monospace(11.0),TEXT_HI);
 }
 
-/// Dim distance rings about the star, spaced to suit the zoom level.
-fn draw_range_rings(painter: &egui::Painter, cam: &Camera, rect: Rect) {
-    let view_km = cam.km_per_px * rect.width().max(rect.height()) as f64;
-    let Some(spacing) = [0.1, 0.5, 1.0, 5.0, 10.0].into_iter().map(|a| a * AU).find(|s| view_km / s <= 12.0) else { return };
-    if view_km / spacing < 1.5 {
-        return;
+fn star_distance_label(name:&str,distance:f64)->String {
+    format!("{name} - {}",fmt_distance(distance))
+}
+
+/// Orbital distance from the moon's primary, always in light-seconds.
+fn primary_distance_label(name:&str,distance:f64)->String {
+    format!("{name} - {} LS",sparse_distance(distance/LIGHT_SECOND))
+}
+
+fn celestial_distance_label(view:&View,index:usize)->String {
+    let body=&view.celestials[index];
+    match view.system.bodies.get(index).map(|b|&b.orbit) {
+        Some(Orbit::Circular {parent,..} | Orbit::Frozen {parent,..}) if body.kind==CelestialKind::Moon =>
+            primary_distance_label(&body.name,(body.pos-view.celestials[*parent].pos).length()),
+        _ => star_distance_label(&body.name,(body.pos-view.celestials[0].pos).length()),
     }
-    let origin = to_screen(cam, rect, Vec2::ZERO);
-    let far = [rect.left_top(), rect.right_top(), rect.left_bottom(), rect.right_bottom()]
-        .into_iter()
-        .map(|p| to_world(cam, rect, p).length())
-        .fold(0.0, f64::max)
-        .min(100.0 * AU);
-    let near = if rect.contains(origin) { 0.0 } else { (to_world(cam, rect, rect.center()).length() - view_km).max(0.0) };
-    let line = Color32::from_rgb(28, 34, 48);
-    let text = Color32::from_rgb(80, 92, 118);
-    let mut r = (near / spacing).floor().max(1.0) * spacing;
-    while r <= far {
-        painter.circle_stroke(origin, (r / cam.km_per_px) as f32, Stroke::new(1.0, line));
-        // Label where the ring crosses the view's horizontal centre line, if it does.
-        let dy = (rect.center().y - origin.y) as f64 * cam.km_per_px;
-        if r > dy.abs() {
-            let dx = (r * r - dy * dy).sqrt() / cam.km_per_px;
-            for x in [origin.x + dx as f32, origin.x - dx as f32] {
-                let p = Pos2::new(x, rect.center().y);
-                if rect.contains(p) {
-                    painter.text(p + EVec2::new(3.0, 0.0), egui::Align2::LEFT_CENTER, fmt_distance(r), egui::FontId::proportional(10.0), text);
-                }
+}
+
+/// Glyphs along an arc, tops facing the center. Reading runs toward decreasing
+/// screen angle, so a label on the far side is upside down, matching weapon rings.
+fn paint_inward_arc(painter:&egui::Painter,center:Pos2,text_radius:f32,anchor:f32,glyphs:&[std::sync::Arc<egui::Galley>],color:Color32) {
+    if text_radius<1.0 {return;}
+    let clip=painter.clip_rect().expand(1.0);
+    let mut offset=-glyphs.iter().map(|g|g.size().x).sum::<f32>()*0.5;
+    for glyph in glyphs {
+        let angle=anchor-(offset+glyph.size().x*0.5)/text_radius;
+        let at=center+EVec2::new(angle.cos(),angle.sin())*text_radius;
+        if clip.expand(glyph.size().length()).contains(at) {
+            painter.add(egui::epaint::TextShape::new(at-glyph.size()*0.5,glyph.clone(),color)
+                .with_angle_and_anchor(angle-std::f32::consts::FRAC_PI_2,egui::Align2::CENTER_CENTER));
+        }
+        offset+=glyph.size().x;
+    }
+}
+
+/// One label inside this body's own orbit, beside the disk. The star keeps a plain name.
+fn draw_orbit_label(painter:&egui::Painter,cam:&Camera,rect:Rect,view:&View,index:usize,body:Pos2,color:Color32)->bool {
+    let Some(body_def)=view.system.bodies.get(index) else {return false};
+    let (parent,radius)=match body_def.orbit {
+        Orbit::Circular {parent,radius,..} | Orbit::Frozen {parent,radius,..} => (parent,radius),
+        Orbit::Fixed(_) => return false,
+    };
+    let orbit_px=(radius/cam.km_per_px) as f32;
+    if !orbit_px.is_finite() || orbit_px<8.0 {return false;}
+    let center=to_screen(cam,rect,view.system.state(parent,view.time).pos);
+    let rel=body-center;
+    if rel.length()<1.0 {return false;}
+    let text=celestial_distance_label(view,index);
+    let label_color=Color32::from_rgba_unmultiplied(color.r(),color.g(),color.b(),128);
+    let body_px=((view.celestials[index].radius/cam.km_per_px) as f32).max(3.0);
+    let glyphs:Vec<_>=text.chars().map(|c|painter.layout_no_wrap(c.to_string(),mono(9.0),label_color)).collect();
+    let width:f32=glyphs.iter().map(|g|g.size().x).sum();
+    let text_radius=orbit_px-14.0;
+    if orbit_px>=32.0 && text_radius>=18.0 && width<=text_radius*std::f32::consts::PI {
+        // First glyph sits just clear of the disk; the rest read away from it.
+        let body_angle=rel.y.atan2(rel.x);
+        let anchor=body_angle-(body_px+6.0)/text_radius-width*0.5/text_radius;
+        paint_inward_arc(painter,center,text_radius,anchor,&glyphs,label_color);
+        return true;
+    }
+    let outward=rel.normalized();
+    let tangent=EVec2::new(outward.y,-outward.x);
+    let inward=14.0_f32.min(orbit_px*0.35).max(4.0);
+    let at=body-outward*inward+tangent*(body_px+6.0);
+    let align=if tangent.x>=0.0 {egui::Align2::LEFT_CENTER} else {egui::Align2::RIGHT_CENTER};
+    painter.text(at,align,text,mono(9.0),label_color);
+    true
+}
+
+const GRID_DOT: Color32 = Color32::from_rgba_unmultiplied_const(168, 196, 220, 64);
+/// Below this pitch the dots clot, so the lattice waits until it reads as points.
+const GRID_MIN_PX: f32 = 12.0;
+
+/// 1 AU across the system. 1 light-second once that pitch is wide enough to separate.
+fn grid_spacing(km_per_px: f64) -> Option<f64> {
+    if !km_per_px.is_finite() || km_per_px <= 0.0 { return None; }
+    if LIGHT_SECOND / km_per_px >= GRID_MIN_PX as f64 { return Some(LIGHT_SECOND); }
+    if AU / km_per_px >= GRID_MIN_PX as f64 { return Some(AU); }
+    None
+}
+
+fn draw_point_grid(painter: &egui::Painter, cam: &Camera, rect: Rect) {
+    let Some(spacing) = grid_spacing(cam.km_per_px) else { return };
+    let corners = [rect.left_top(), rect.right_top(), rect.left_bottom(), rect.right_bottom()];
+    let mut min_x = f64::INFINITY;
+    let mut max_x = f64::NEG_INFINITY;
+    let mut min_y = f64::INFINITY;
+    let mut max_y = f64::NEG_INFINITY;
+    for corner in corners {
+        let world = to_world(cam, rect, corner);
+        min_x = min_x.min(world.x); max_x = max_x.max(world.x);
+        min_y = min_y.min(world.y); max_y = max_y.max(world.y);
+    }
+    let pad = cam.km_per_px;
+    let x0 = ((min_x - pad) / spacing).ceil();
+    let x1 = ((max_x + pad) / spacing).floor();
+    let y0 = ((min_y - pad) / spacing).ceil();
+    let y1 = ((max_y + pad) / spacing).floor();
+    if ![x0, x1, y0, y1].iter().all(|n| n.is_finite()) { return; }
+    let columns = (x1 - x0).round() as i64 + 1;
+    let rows = (y1 - y0).round() as i64 + 1;
+    if columns <= 0 || rows <= 0 || columns > 800 || rows > 800 { return; }
+    let mut mesh = egui::Mesh::default();
+    let count = (columns * rows) as usize;
+    mesh.reserve_vertices(count * 4);
+    mesh.reserve_triangles(count * 2);
+    let x0 = x0 as i64;
+    let y0 = y0 as i64;
+    for row in 0..rows {
+        for col in 0..columns {
+            let world = Vec2::new((x0 + col) as f64 * spacing, (y0 + row) as f64 * spacing);
+            let at = to_screen(cam, rect, world);
+            if rect.expand(1.0).contains(at) {
+                mesh.add_colored_rect(Rect::from_center_size(at, EVec2::splat(2.0)), GRID_DOT);
             }
         }
-        r += spacing;
     }
+    if !mesh.is_empty() { painter.add(Shape::mesh(mesh)); }
 }
 
 fn draw_orbits(painter: &egui::Painter, cam: &Camera, rect: Rect, view: &View) {

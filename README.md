@@ -132,7 +132,25 @@ not an omniscient live view. Long-range contacts may be bearings only; active
 pings improve the picture but reveal your presence.
 
 **Status:** an actively changing playtest, developed and tested on Linux.
-Balance and interface details are experimental. No packaged releases yet.
+Balance and interface details are experimental.
+
+The game stamp is CalVer `YY.MM.SERIAL` (UTC). A clean checkout of tag `vYY.MM.N`
+reports that version. `N` starts at 1 each month, so the first September 2026
+release is `v26.09.1`. Every other tree, including local edits, reports
+`YY.MM.0-dev`. The startup screen, the tactical panel, `logs/latest.log`, and
+`--version` show the stamp beside the git commit. Cargo keeps the workspace
+package version at `0.1.0` because a zero-padded month is not valid semver;
+the stamp is applied when the binary is built.
+
+```sh
+cargo +1.98.0 run --locked -p luminal-cli -- --version
+```
+
+Tag a clean commit with the next free serial, then rebuild:
+
+```sh
+git tag -a v26.09.1 -m "Luminal 26.09.1"
+```
 
 ## Install and run
 

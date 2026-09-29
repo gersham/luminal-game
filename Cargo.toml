@@ -3,6 +3,7 @@ resolver = "3"
 members = ["crates/luminal-core", "crates/luminal-app", "crates/luminal-cli"]
 
 [workspace.package]
+# Crate coordinate only. The game stamp is CalVer `YY.MM.SERIAL` from `crates/calver.rs`.
 version = "0.1.0"
 edition = "2024"
 license = "UNLICENSED"

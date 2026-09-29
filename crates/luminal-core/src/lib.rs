@@ -19,3 +19,6 @@ pub mod world;
 pub mod thermal;
 pub mod doctrine;
 pub mod damage;
+
+#[cfg(test)]
+mod calver;

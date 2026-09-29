@@ -89,6 +89,14 @@ pub(super) struct Refinements {
     lost_tracks: std::collections::BTreeSet<(FactionId,ContactId)>,
     pub(super) hostile_pings: BTreeMap<(FactionId,ContactId), crate::session::PingSighting>,
     biases: BTreeMap<(BodyId,ContactId,u8), (f64,f64)>,
+    build_version: Option<String>,
+    build_commit: Option<String>,
+    build_dirty: bool,
+}
+
+fn log_token(value:&str)->String {
+    let clean:String=value.chars().filter(|c|c.is_ascii_graphic()).collect();
+    if clean.is_empty() {"unknown".into()} else {clean}
 }
 
 impl Refinements {
@@ -112,11 +120,24 @@ impl World {
         }
     }
 
+    /// Record the compiled game stamp before `enable_debug_log`. The session line keeps it.
+    pub fn set_build_identity(&mut self, version:&str, commit:&str, dirty:bool) {
+        self.refinement.build_version=Some(log_token(version));
+        self.refinement.build_commit=Some(log_token(commit));
+        self.refinement.build_dirty=dirty;
+    }
+
     pub fn enable_debug_log(&mut self, path:&std::path::Path)->std::io::Result<()> {
         let file=std::fs::OpenOptions::new().write(true).create(true).truncate(true).open(path)?;
         self.refinement.logfile=Some(file);
         self.refinement.log_path=Some(path.to_path_buf());
-        self.debug_note("SESSION",format!("seed={} start_time={} format=1",self.refinement.bias_seed,self.time));
+        self.debug_note("SESSION",format!(
+            "seed={} start_time={} version={} commit={} dirty={} format=1",
+            self.refinement.bias_seed,self.time,
+            self.refinement.build_version.as_deref().unwrap_or("unknown"),
+            self.refinement.build_commit.as_deref().unwrap_or("unknown"),
+            u8::from(self.refinement.build_dirty),
+        ));
         for p in crate::params::ALL {self.debug_note("PARAM",format!("{}={} {}",p.key,p.value,p.unit));}
         for i in 0..self.bodies.len() {
             let b=&self.bodies[i];

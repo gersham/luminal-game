@@ -73,6 +73,7 @@ def main() -> None:
             '  --property="StandardError=append:$state_dir/launcher.log" "$@"\n')
         atomic_install(wrapper, launcher, 0o755)
         entry = staging / "luminal.desktop"
+        # Version=1.0 is the desktop-entry specification, not the game stamp.
         entry.write_text(
             "[Desktop Entry]\nType=Application\nVersion=1.0\nName=Luminal\n"
             "Comment=Command a frigate in light-delayed space combat\n"
@@ -84,6 +85,8 @@ def main() -> None:
         atomic_install(entry, desktop, 0o644)
     if shutil.which("update-desktop-database"):
         subprocess.run(["update-desktop-database", str(desktop.parent)], check=True)
+    identity = subprocess.check_output([binary, "--version"], text=True).strip()
+    print(identity)
     print(f"Installed {binary}\nLauncher: {desktop}\nIcon: {icon}")
     print("Open the Omarchy application launcher and search for Luminal.")
     print(f"Or run {launcher}. Re-run this installer after pulling updates.")

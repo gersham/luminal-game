@@ -417,6 +417,10 @@ pub struct Objective {
     pub player:Option<BodyId>,
     /// When set, defeating this body (destruction, surrender or withdrawal) wins; transport arrival/loss is not terminal.
     pub defeat: Option<BodyId>,
+    /// When set, destroying this body wins for the attacker. Arrival is not terminal.
+    pub prize: Option<BodyId>,
+    /// When set, the side that loses its last armed ship loses. Arrival is not terminal.
+    pub wipe: bool,
     /// The side trying to get `protect` there.
     pub defender: FactionId,
     /// The side trying to stop it.
@@ -1732,9 +1736,16 @@ impl World {
         if cause != LossCause::Expended {
             self.delay_alert(id, t, AlertKind::ShipLost(id));
         }
-        if let Some(o) = &self.objective {
-            let winner=if o.player==Some(id) || (o.defeat.is_none() && o.protect==id) {Some(o.attacker)}
-                else if o.defeat==Some(id) {Some(o.defender)} else {None};
+        if let Some(o) = self.objective.clone() {
+            let side=self.bodies[id.0 as usize].faction;
+            let armed=|faction:FactionId| self.bodies.iter().any(|b| b.faction==faction && b.kind==BodyKind::Ship && b.armed && b.alive_at(t));
+            let winner=if o.player==Some(id) {Some(if side==o.attacker {o.defender} else {o.attacker})}
+                else if o.prize==Some(id) {Some(o.attacker)}
+                else if o.defeat==Some(id) {Some(o.defender)}
+                else if o.defeat.is_none() && o.prize.is_none() && o.protect==id {Some(o.attacker)}
+                else if o.wipe && side==o.attacker && !armed(o.attacker) {Some(o.defender)}
+                else if o.wipe && side==o.defender && !armed(o.defender) {Some(o.attacker)}
+                else {None};
             if let Some(winner)=winner {
                 let reason=match cause {LossCause::Withdrawn=>"withdrew from combat",LossCause::Surrendered=>"surrendered",_=>"was destroyed"};
                 if departure {
@@ -1747,7 +1758,7 @@ impl World {
     /// Has the protected body reached the objective?
     fn check_objective(&mut self, id: BodyId) {
         let Some(o) = &self.objective else { return };
-        if o.defeat.is_some() || o.protect != id || self.outcome.is_some() {
+        if o.defeat.is_some() || o.prize.is_some() || o.wipe || o.protect != id || self.outcome.is_some() {
             return;
         }
         let Some(s) = self.bodies[id.0 as usize].trajectory.state_at(self.time) else { return };
@@ -2344,6 +2355,8 @@ mod tests {
                 protect: BodyId(0),
                 player:None,
                 defeat: None,
+                prize: None,
+                wipe: false,
                 defender: FactionId(0),
                 attacker: FactionId(1),
             });
@@ -2375,6 +2388,44 @@ mod tests {
         assert!(w.alerts.iter().any(|a|a.kind==AlertKind::GameOver));
         w.destroy(BodyId(0),0.0,LossCause::Impact(0));
         assert_eq!(w.outcome,Some(outcome),"later losses cannot overwrite the result");
+    }
+
+    #[test]
+    fn prize_wipe_and_player_faction_award_the_other_side() {
+        let make=|prize:Option<BodyId>,wipe:bool,attacker:FactionId,defender:FactionId| {
+            let specs=vec![
+                ship("Player",0,Vec2::new(AU,0.0),Vec2::ZERO,Vec2::ZERO),
+                ship("Ally",0,Vec2::new(AU,1e5),Vec2::ZERO,Vec2::ZERO),
+                ship("Enemy",1,Vec2::new(-AU,0.0),Vec2::ZERO,Vec2::ZERO),
+                ship("Wing",1,Vec2::new(-AU,1e5),Vec2::ZERO,Vec2::ZERO),
+            ];
+            let mut w=World::new(sun(),specs,0.0,1);
+            w.objective=Some(Objective {sensor_site:None,name:"fleet".into(),center:Vec2::ZERO,radius:1.0,
+                protect:BodyId(0),player:Some(BodyId(0)),defeat:None,prize,wipe,defender,attacker});
+            w
+        };
+        let mut w=make(Some(BodyId(3)),false,FactionId(0),FactionId(1));
+        w.destroy(BodyId(2),0.0,LossCause::Impact(0));
+        assert!(w.outcome.is_none(),"a screening ship is not the prize");
+        w.destroy(BodyId(3),0.0,LossCause::Impact(0));
+        assert_eq!(w.outcome.as_ref().unwrap().winner,FactionId(0));
+
+        let mut w=make(Some(BodyId(3)),false,FactionId(0),FactionId(1));
+        w.destroy(BodyId(0),0.0,LossCause::Impact(0));
+        assert_eq!(w.outcome.as_ref().unwrap().winner,FactionId(1),"the attacker's death awards the defender");
+        assert!(w.bodies[1].alive_at(0.0));
+
+        let mut w=make(None,false,FactionId(1),FactionId(0));
+        w.destroy(BodyId(0),0.0,LossCause::Impact(0));
+        assert_eq!(w.outcome.as_ref().unwrap().winner,FactionId(1),"the defender's death still awards the attacker");
+
+        let mut w=make(None,true,FactionId(0),FactionId(1));
+        w.destroy(BodyId(2),0.0,LossCause::Impact(0));
+        assert!(w.outcome.is_none());
+        w.destroy(BodyId(1),0.0,LossCause::Impact(0));
+        assert!(w.outcome.is_none(),"the flagship still fights");
+        w.destroy(BodyId(3),0.0,LossCause::Impact(0));
+        assert_eq!(w.outcome.as_ref().unwrap().winner,FactionId(0));
     }
 
     #[test]

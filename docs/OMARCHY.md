@@ -42,6 +42,9 @@ git pull --ff-only
 ./scripts/install-omarchy.py
 ```
 
+The installer prints the build stamp, `YY.MM.SERIAL` or `YY.MM.0-dev`. The same
+stamp is on the startup screen, the tactical panel, and in the game log.
+
 The installer replaces its own files and can be run repeatedly. It copies the
 executable, so launching the installed game does not depend on the checkout or
 its `target` directory. Audio and the window icon are embedded in the executable.

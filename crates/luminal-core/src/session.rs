@@ -326,6 +326,8 @@ pub struct LocalSession {
     event_wait:Option<event_wait::EventWait>,
     bot_debug: VecDeque<(f64, FactionId, String)>,
     bots: BTreeMap<FactionId, crate::doctrine::Doctrine>,
+    /// Set only while applying doctrine, so fleet orders are not player commands.
+    issuing_bot_order: bool,
     next_doctrine: f64,
     world: World,
     warp: f64,
@@ -337,7 +339,7 @@ pub struct LocalSession {
 
 impl LocalSession {
     pub fn new(world: World) -> Self {
-        Self { event_wait:None,bot_debug: VecDeque::new(), world, warp: 1.0, paused: true, watch: None, last_alert: None, bots: BTreeMap::new(), next_doctrine: 0.0 }
+        Self { event_wait:None,bot_debug: VecDeque::new(), world, warp: 1.0, paused: true, watch: None, last_alert: None, bots: BTreeMap::new(), issuing_bot_order:false, next_doctrine: 0.0 }
     }
 
     /// Explicit omniscient local debug feed, separate from faction sensor views.
@@ -364,8 +366,18 @@ impl LocalSession {
             if deadline.is_some_and(|d|std::time::Instant::now()>=d) {break;}
             if !self.bots.is_empty() && self.world.time() >= self.next_doctrine {
                 for f in self.bots.keys().copied().collect::<Vec<_>>() {
-                    let v = self.view(Role::Faction(f));
+                    let mut v = self.view(Role::Faction(f));
+                    let human=self.watch;
+                    let player=v.objective.as_ref().and_then(|o|o.player);
+                    let player_faction=player.and_then(|id|v.bodies.iter().find(|b|b.id==id).map(|b|b.faction));
+                    // The human's ship stays manual. An unset watch does the same, so tests and the first tick do not fly it.
+                    let hold=human.is_none_or(|h|player_faction.is_none_or(|faction|faction==h));
+                    for body in &mut v.bodies {
+                        if hold && Some(body.id)==player {body.controllable=false;}
+                        else if body.kind==BodyKind::Ship && body.armed && body.faction==f {body.controllable=true;}
+                    }
                     let orders = self.bots.get_mut(&f).unwrap().orders(&v);
+                    self.issuing_bot_order=true;
                     for cmd in orders {
                         let description=match &cmd {
                             Command::Ping {..} => "Active ping".into(),
@@ -382,6 +394,7 @@ impl LocalSession {
                             if self.bot_debug.len()>128 {self.bot_debug.pop_front();}
                         }
                     }
+                    self.issuing_bot_order=false;
                 }
                 self.next_doctrine = self.world.time() + params::SENSOR_FRAME_S.value;
             }
@@ -437,6 +450,8 @@ impl LocalSession {
         result
     }
 
+    /// Call before `enable_debug_log` so the session line records this build.
+    pub fn set_build_identity(&mut self, version:&str, commit:&str, dirty:bool) {self.world.set_build_identity(version,commit,dirty);}
     pub fn enable_debug_log(&mut self,path:&std::path::Path)->std::io::Result<()> {self.world.enable_debug_log(path)}
     pub fn debug_log_path(&self)->Option<&std::path::Path> {self.world.debug_log_path()}
     pub fn debug_log_error(&self)->Option<&str> {self.world.debug_log_error()}
@@ -551,7 +566,9 @@ impl LocalSession {
         if b.faction != faction {
             return Err(Rejection::NotYourBody);
         }
-        if !b.controllable || self.world.decider(faction,self.world.time()) != Some(body) {
+        let player=self.world.objective.as_ref().and_then(|o|o.player);
+        let fleet=self.issuing_bot_order && player!=Some(body) && b.kind==BodyKind::Ship && b.armed && b.controllable;
+        if !b.controllable || (self.world.decider(faction,self.world.time()) != Some(body) && !fleet) {
             return Err(Rejection::NotControllable);
         }
         Ok(b.kind)
@@ -987,12 +1004,14 @@ mod tests {
         let mut s=running(0.0);
         let stamp=std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
         let path=std::env::temp_dir().join(format!("luminal-test-{stamp}-{}.log",std::process::id()));
+        s.set_build_identity("26.09.1\nbad","abc def",false);
         s.enable_debug_log(&path).unwrap();
         s.command(Role::Faction(ESCORT),Command::Ping {body:BodyId(1)}).unwrap();
         assert!(s.command(Role::Faction(ESCORT),Command::Ping {body:BodyId(2)}).is_err());
         s.world.debug_note("COMBAT","test event".into());
         let log=std::fs::read_to_string(&path).unwrap();
         assert!(log.contains("SESSION") && log.contains("PARAM") && log.contains("PLATFORM"));
+        assert!(log.contains("version=26.09.1bad") && log.contains("commit=abcdef") && log.contains("dirty=0") && log.contains("format=1"));
         assert!(log.contains("PING") && log.contains("ORDER") && log.contains("result=Err"));
         assert!(log.contains("COMBAT\ttest event"));
         drop(s);

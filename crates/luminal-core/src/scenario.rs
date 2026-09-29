@@ -1,11 +1,12 @@
-//! Starting situations. Geometry here is placeholder, not a balanced scenario.
+//! Starting situations.
 use crate::celestial::System;
 use crate::kinematics::{State, Vec2};
 use crate::params::{MAGAZINE_CRUISER, MAGAZINE_FRIGATE};
-use crate::units::AU;
+use crate::rng::Rng;
+use crate::units::{AU, LIGHT_SECOND};
 #[cfg(test)]
 use crate::units::G0;
-use crate::world::{BodyId, BodyKind, BodySpec, FactionId, Objective, World};
+use crate::world::{BodyId, BodyKind, BodySpec, FactionId, Objective, ShipClass, World};
 
 pub const ESCORT: FactionId = FactionId(0);
 pub const RAIDER: FactionId = FactionId(1);
@@ -167,6 +168,8 @@ pub fn transport_intercept_in_system(seed:u64,system:System)->World {
         protect: BodyId(0),
         player:Some(BodyId(1)),
         defeat: Some(BodyId(2)),
+        prize: None,
+        wipe: false,
         defender: ESCORT,
         attacker: RAIDER,
     });
@@ -199,6 +202,204 @@ pub fn transport_intercept_in_system(seed:u64,system:System)->World {
         b.interceptor_battery=Some(crate::world::interceptor::Battery {
             rounds:if b.kind==BodyKind::Station {20} else if b.magazine.iter().any(|n|*n>0) {40} else {30},launched:0,ready_at:0.0,status:"Ready"});
     }
+    world
+}
+
+/// Player-facing situations. Escort keeps the transport mission; the others are standalone fights.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Scenario { Escort, Raid, HideAndSeek, Armada }
+
+const ARMADA_MIX:[ShipClass;10]=[
+    ShipClass::Battleship,ShipClass::Cruiser,ShipClass::Destroyer,ShipClass::Destroyer,
+    ShipClass::Frigate,ShipClass::Frigate,ShipClass::Frigate,ShipClass::Picket,ShipClass::Picket,ShipClass::Picket,
+];
+const RAID_SCREEN:[ShipClass;3]=[ShipClass::Destroyer,ShipClass::Frigate,ShipClass::Frigate];
+
+impl Scenario {
+    pub const ALL:[Self;4]=[Self::Escort,Self::Raid,Self::HideAndSeek,Self::Armada];
+    pub fn name(self)->&'static str {match self {Self::Escort=>"Escort",Self::Raid=>"Raid",Self::HideAndSeek=>"Hide and Seek",Self::Armada=>"Armada"}}
+    pub fn token(self)->&'static str {match self {Self::Escort=>"escort",Self::Raid=>"raid",Self::HideAndSeek=>"hide",Self::Armada=>"armada"}}
+    pub fn brief(self)->&'static str {match self {
+        Self::Escort=>"Escort the transport past a destroyer.",
+        Self::Raid=>"A cruiser raid on a screened station.",
+        Self::HideAndSeek=>"Two frigates. Find the other one.",
+        Self::Armada=>"Ten ships each, from opposite ends.",
+    }}
+    pub fn forces(self)->&'static str {match self {
+        Self::Escort=>"Destroyer versus destroyer",
+        Self::Raid=>"Cruiser versus a station and its escorts",
+        Self::HideAndSeek=>"Frigate versus frigate",
+        Self::Armada=>"Battleship and a mixed fleet of nine",
+    }}
+    pub fn detail(self)->&'static str {match self {
+        Self::Escort=>"Both sides field a destroyer. The transport runs for the departure region. Defeat the raider.",
+        Self::Raid=>"Your cruiser starts away from the base. A destroyer and two frigates screen the station. Destroy the station.",
+        Self::HideAndSeek=>"You and the quarry are frigates, placed at random and out of contact. Destroy the quarry.",
+        Self::Armada=>"Your battleship leads a cruiser, two destroyers, three frigates and three pickets. The enemy fleet matches you.",
+    }}
+    pub fn bots(self)->&'static [FactionId] {
+        const BOTH:[FactionId;2]=[ESCORT,RAIDER];
+        const ONE:[FactionId;1]=[RAIDER];
+        match self {Self::Armada=>&BOTH,_=>&ONE}
+    }
+    pub fn parse(name:&str)->Option<Self> {
+        let name=name.trim();
+        Self::ALL.into_iter().find(|scenario|scenario.name().eq_ignore_ascii_case(name)||scenario.token().eq_ignore_ascii_case(name))
+    }
+    pub fn build(self,seed:u64,system:System)->World {
+        match self {
+            Self::Escort=>transport_intercept_class_in_system(seed,ShipClass::Destroyer,system),
+            Self::Raid=>raid(seed,system),
+            Self::HideAndSeek=>hide_and_seek(seed,system),
+            Self::Armada=>armada(seed,system),
+        }
+    }
+}
+
+fn clear_of_celestials(system:&System,pos:Vec2)->bool {
+    system.bodies.iter().enumerate().all(|(i,b)|(pos-system.state(i,0.0).pos).length()>b.radius+0.03*AU)
+}
+fn spec(name:&str,kind:BodyKind,faction:FactionId,pos:Vec2,magazine:u32)->BodySpec {
+    BodySpec {name:name.into(),kind,faction,state:State {pos,vel:Vec2::ZERO},thrust:Vec2::ZERO,magazine}
+}
+fn fit_combatant(world:&mut World,id:BodyId,class:ShipClass,screens:bool) {
+    {
+        let b=&mut world.bodies[id.0 as usize];
+        b.controls.ecm_rating=class.sensor_rating();b.controls.eccm_rating=class.sensor_rating()*0.5;b.baseline_emission_factor=0.5;
+        b.ship_class=Some(class);
+        b.damage.hull_max=crate::damage::FRIGATE_HULL_HP*class.scale();b.damage.hull=b.damage.hull_max;
+        b.damage.armour_max=500.0*class.protection();b.damage.armour=b.damage.armour_max;
+        b.magazine=class.magazine();b.armed=true;
+        b.thermal.capacity_scale=class.scale();
+        b.thermal.capacitor_multiplier=if class==ShipClass::Battleship {2.0} else {1.0};
+        b.thermal.capacitor_j=b.thermal.capacitor_capacity();
+        b.drive_limit=class.max_g()*crate::units::G0;
+        b.beam_auto=class!=ShipClass::Picket;b.controllable=true;b.has_screen=true;
+    }
+    world.fit_point_defence(id);
+    {let pd=world.bodies[id.0 as usize].point_defence.as_mut().unwrap();pd.lasers=class.pd_lasers();pd.rate_hz=0.2;}
+    world.bodies[id.0 as usize].interceptor_battery=Some(crate::world::interceptor::Battery {rounds:class.interceptors(),launched:0,ready_at:0.0,status:"Ready"});
+    if screens {
+        world.set_screen(id,true).expect("combatant has screens");
+        let b=&mut world.bodies[id.0 as usize];
+        b.thermal.field=1.0;b.controls.screens=crate::world::controls::Mode::Auto;
+    } else {
+        world.set_screen(id,false).expect("combatant has screens");
+        world.bodies[id.0 as usize].controls.ecm=crate::world::controls::Mode::Off;
+    }
+    if class!=ShipClass::Picket {world.arm_beams(id).expect("combatant mounts a beam");}
+    world.reset_platform_history(id);
+}
+fn fit_station(world:&mut World,id:BodyId) {
+    {
+        let b=&mut world.bodies[id.0 as usize];
+        b.sensors=crate::sensors::SensorSuite::FULL;b.controllable=false;b.armed=false;
+        b.damage.hull_max=crate::damage::FRIGATE_HULL_HP*ShipClass::Cruiser.scale();b.damage.hull=b.damage.hull_max;
+        b.damage.armour_max=500.0*ShipClass::Cruiser.protection();b.damage.armour=b.damage.armour_max;
+    }
+    world.fit_point_defence(id);
+    {let pd=world.bodies[id.0 as usize].point_defence.as_mut().unwrap();pd.lasers=ShipClass::Cruiser.pd_lasers();pd.rate_hz=1.0;}
+    world.bodies[id.0 as usize].interceptor_battery=Some(crate::world::interceptor::Battery {rounds:ShipClass::Cruiser.interceptors(),launched:0,ready_at:0.0,status:"Ready"});
+    world.reset_platform_history(id);
+}
+fn silence_probes(world:&mut World) {
+    world.probes_enabled=crate::params::PROBES_ENABLED;
+    if !world.probes_enabled {for b in &mut world.bodies {b.probes=0;}}
+}
+fn fleet_slots(anchor:Vec2,facing:Vec2)->Vec<Vec2> {
+    let facing=facing.normalized();
+    let back=facing*-1.0;
+    let side=Vec2::new(-facing.y,facing.x);
+    let spacing=0.045*AU;
+    let mut slots=vec![anchor];
+    for row in 1..=3 {for col in [-1.0_f64,0.0,1.0] {slots.push(anchor+back*(row as f64*spacing)+side*(col*spacing));}}
+    slots
+}
+fn screen_offsets()->[Vec2;3] {[Vec2::new(3.0,0.0)*LIGHT_SECOND,Vec2::new(-2.0,2.2)*LIGHT_SECOND,Vec2::new(-2.0,-2.2)*LIGHT_SECOND]}
+
+fn raid(seed:u64,system:System)->World {
+    let home=system.state(1,0.0).pos;
+    let mut rng=Rng::stream(seed,0x52414944);
+    let base=std::f64::consts::TAU*rng.uniform();
+    let (player_pos,station_pos)=(0..72).find_map(|step| {
+        let angle=base+step as f64*std::f64::consts::TAU/72.0;
+        let axis=Vec2::new(angle.cos(),angle.sin());
+        let station=home+axis*(5.0*AU);
+        let player=home-axis*(4.0*AU);
+        let screens=screen_offsets().map(|off|station+off);
+        (clear_of_celestials(&system,station)&&clear_of_celestials(&system,player)&&screens.iter().all(|p|clear_of_celestials(&system,*p))).then_some((player,station))
+    }).unwrap_or((home-Vec2::new(8.0*AU,0.0),home+Vec2::new(8.0*AU,0.0)));
+    let mut specs=vec![spec("Cruiser",BodyKind::Ship,ESCORT,player_pos,1),spec("Station",BodyKind::Station,RAIDER,station_pos,0)];
+    for (i,off) in screen_offsets().into_iter().enumerate() {specs.push(spec(&format!("Screen {i}"),BodyKind::Ship,RAIDER,station_pos+off,1));}
+    let mut world=World::new(system,specs,12000.0,seed);
+    fit_combatant(&mut world,BodyId(0),ShipClass::Cruiser,true);
+    fit_station(&mut world,BodyId(1));
+    for (i,class) in RAID_SCREEN.into_iter().enumerate() {
+        let id=BodyId(2+i as u32);
+        fit_combatant(&mut world,id,class,true);
+        let limit=class.max_g()*crate::units::G0;
+        world.set_follow(id,BodyId(1)).expect("escorts screen the station");
+        world.bodies[id.0 as usize].drive_limit=limit;
+    }
+    world.objective=Some(Objective {sensor_site:None,name:"enemy station".into(),center:station_pos,radius:0.08*AU,
+        protect:BodyId(0),player:Some(BodyId(0)),defeat:None,prize:Some(BodyId(1)),wipe:false,defender:RAIDER,attacker:ESCORT});
+    silence_probes(&mut world);
+    world
+}
+
+fn placed(rng:&mut Rng,system:&System,home:Vec2,avoid:&[Vec2])->Vec2 {
+    for attempt in 0..4000 {
+        let span=10.0+attempt as f64*0.002;
+        let radius=(2.0+(span-2.0)*rng.uniform())*AU;
+        let angle=std::f64::consts::TAU*rng.uniform();
+        let pos=home+Vec2::new(angle.cos(),angle.sin())*radius;
+        let separation=if attempt>2500 {3.0*AU} else {4.0*AU};
+        if clear_of_celestials(system,pos)&&avoid.iter().all(|p|(pos-*p).length()>=separation) {return pos;}
+    }
+    home+Vec2::new(8.0*AU,4.0*AU)
+}
+fn hide_and_seek(seed:u64,system:System)->World {
+    let home=system.state(1,0.0).pos;
+    let mut rng=Rng::stream(seed,0x48494445);
+    let player=placed(&mut rng,&system,home,&[]);
+    let quarry=placed(&mut rng,&system,home,&[player]);
+    let hunt=placed(&mut rng,&system,home,&[player,quarry]);
+    let mut world=World::new(system,vec![spec("Hunter",BodyKind::Ship,ESCORT,player,1),spec("Quarry",BodyKind::Ship,RAIDER,quarry,1)],0.0,seed);
+    fit_combatant(&mut world,BodyId(0),ShipClass::Frigate,false);
+    fit_combatant(&mut world,BodyId(1),ShipClass::Frigate,false);
+    world.set_move(BodyId(1),hunt).expect("the quarry can cross open space");
+    world.objective=Some(Objective {sensor_site:None,name:"hunting ground".into(),center:hunt,radius:0.5*AU,
+        protect:BodyId(0),player:Some(BodyId(0)),defeat:Some(BodyId(1)),prize:None,wipe:false,defender:ESCORT,attacker:RAIDER});
+    silence_probes(&mut world);
+    world
+}
+
+fn armada(seed:u64,system:System)->World {
+    let home=system.state(1,0.0).pos;
+    let mut rng=Rng::stream(seed,0x41524D41);
+    let base=std::f64::consts::TAU*rng.uniform();
+    let (player_slots,enemy_slots)=(0..72).find_map(|step| {
+        let angle=base+step as f64*std::f64::consts::TAU/72.0;
+        let axis=Vec2::new(angle.cos(),angle.sin());
+        let player=fleet_slots(home-axis*(7.0*AU),axis);
+        let enemy=fleet_slots(home+axis*(7.0*AU),-axis);
+        player.iter().chain(&enemy).all(|p|clear_of_celestials(&system,*p)).then_some((player,enemy))
+    }).unwrap_or_else(|| {
+        let axis=Vec2::new(1.0,0.0);
+        (fleet_slots(home-axis*(16.0*AU),axis),fleet_slots(home+axis*(16.0*AU),-axis))
+    });
+    let mut specs=Vec::new();
+    for (i,pos) in player_slots.iter().enumerate() {specs.push(spec(&format!("Ally {i}"),BodyKind::Ship,ESCORT,*pos,1));}
+    for (i,pos) in enemy_slots.iter().enumerate() {specs.push(spec(&format!("Enemy {i}"),BodyKind::Ship,RAIDER,*pos,1));}
+    let mut world=World::new(system,specs,12000.0,seed);
+    for (i,class) in ARMADA_MIX.into_iter().enumerate() {
+        fit_combatant(&mut world,BodyId(i as u32),class,true);
+        fit_combatant(&mut world,BodyId(10+i as u32),class,true);
+        world.set_move(BodyId(10+i as u32),player_slots[i]).expect("the enemy fleet can close");
+    }
+    world.objective=Some(Objective {sensor_site:None,name:"opposing fleet".into(),center:enemy_slots[0],radius:0.25*AU,
+        protect:BodyId(0),player:Some(BodyId(0)),defeat:None,prize:None,wipe:true,defender:RAIDER,attacker:ESCORT});
+    silence_probes(&mut world);
     world
 }
 
@@ -351,5 +552,84 @@ mod tests {
         let goal=world.objective.as_ref().unwrap();
         assert!((world.bodies[0].trajectory.state_at(world.time()).unwrap().pos-goal.center).length()<goal.radius);
         assert!(!world.losses.iter().any(|l| l.body == BodyId(0)));
+    }
+
+    #[test]
+    fn escort_scenario_is_destroyer_versus_destroyer() {
+        let w=Scenario::Escort.build(42,home_system());
+        assert_eq!(w.bodies[1].ship_class,Some(ShipClass::Destroyer));
+        assert_eq!(w.bodies[2].ship_class,Some(ShipClass::Destroyer));
+        let o=w.objective.as_ref().unwrap();
+        assert_eq!((o.player,o.defeat,o.prize,o.wipe),(Some(BodyId(1)),Some(BodyId(2)),None,false));
+    }
+
+    #[test]
+    fn raid_is_a_cruiser_against_a_screened_station() {
+        let w=Scenario::Raid.build(42,home_system());
+        assert_eq!(w.bodies[0].ship_class,Some(ShipClass::Cruiser));
+        assert_eq!(w.bodies[0].faction,ESCORT);
+        assert_eq!(w.bodies[1].kind,BodyKind::Station);
+        assert_eq!(w.bodies[1].faction,RAIDER);
+        assert!(w.bodies[1].sensors.active&&w.bodies[1].sensors.passive&&w.bodies[1].damage.hull>=ShipClass::Cruiser.scale()*1000.0);
+        assert_eq!(w.bodies[2..].iter().map(|b|b.ship_class.unwrap()).collect::<Vec<_>>(),RAID_SCREEN.to_vec());
+        for b in &w.bodies[2..] {
+            assert_eq!(b.faction,RAIDER);
+            assert!(b.ship_class.unwrap().scale()<ShipClass::Cruiser.scale());
+            assert!(matches!(b.autopilot.map(|a|a.order),Some(crate::world::Order::Follow {target:BodyId(1),..})));
+        }
+        let o=w.objective.as_ref().unwrap();
+        assert_eq!((o.prize,o.player,o.attacker,o.defender),(Some(BodyId(1)),Some(BodyId(0)),ESCORT,RAIDER));
+        let player=w.bodies[0].trajectory.state_at(0.0).unwrap().pos;
+        let station=w.bodies[1].trajectory.state_at(0.0).unwrap().pos;
+        assert!((player-station).length()>6.0*AU);
+        assert_eq!(player,Scenario::Raid.build(42,home_system()).bodies[0].trajectory.state_at(0.0).unwrap().pos);
+    }
+
+    #[test]
+    fn hide_and_seek_places_two_frigates_out_of_contact() {
+        let w=Scenario::HideAndSeek.build(42,home_system());
+        assert_eq!((w.bodies[0].ship_class,w.bodies[1].ship_class),(Some(ShipClass::Frigate),Some(ShipClass::Frigate)));
+        assert_eq!((w.bodies[0].magazine,w.bodies[0].damage.hull,w.bodies[0].damage.armour),(w.bodies[1].magazine,w.bodies[1].damage.hull,w.bodies[1].damage.armour));
+        assert!(!w.bodies[0].screen_up&&!w.bodies[1].screen_up);
+        let hunter=w.bodies[0].trajectory.state_at(0.0).unwrap().pos;
+        let quarry=w.bodies[1].trajectory.state_at(0.0).unwrap().pos;
+        assert!((hunter-quarry).length()>=4.0*AU-1.0);
+        let o=w.objective.as_ref().unwrap();
+        assert_eq!((o.player,o.defeat),(Some(BodyId(0)),Some(BodyId(1))));
+        assert!((o.center-hunter).length()>AU&&(o.center-quarry).length()>AU);
+        let session=crate::session::LocalSession::new(w);
+        assert!(session.view(crate::session::Role::Faction(ESCORT)).contacts.is_empty());
+        assert!(session.view(crate::session::Role::Faction(RAIDER)).contacts.is_empty());
+        assert_eq!(hunter,Scenario::HideAndSeek.build(42,home_system()).bodies[0].trajectory.state_at(0.0).unwrap().pos);
+        assert_ne!(hunter,Scenario::HideAndSeek.build(7,home_system()).bodies[0].trajectory.state_at(0.0).unwrap().pos);
+    }
+
+    #[test]
+    fn armada_mirrors_ten_ships_from_opposite_ends() {
+        let w=Scenario::Armada.build(42,home_system());
+        assert_eq!(w.bodies.len(),20);
+        let allies:Vec<_>=w.bodies[..10].iter().map(|b|b.ship_class.unwrap()).collect();
+        let enemies:Vec<_>=w.bodies[10..].iter().map(|b|b.ship_class.unwrap()).collect();
+        assert_eq!(allies,ARMADA_MIX.to_vec());
+        assert_eq!(enemies,allies);
+        assert!(w.bodies[..10].iter().all(|b|b.faction==ESCORT));
+        assert!(w.bodies[10..].iter().all(|b|b.faction==RAIDER));
+        assert!(w.bodies[0].autopilot.is_none());
+        assert!(w.bodies[10..].iter().all(|b|matches!(b.autopilot.map(|a|a.order),Some(crate::world::Order::MoveTo {..}))));
+        let player=w.bodies[0].trajectory.state_at(0.0).unwrap().pos;
+        let enemy=w.bodies[10].trajectory.state_at(0.0).unwrap().pos;
+        assert!((player-enemy).length()>10.0*AU);
+        let o=w.objective.unwrap();
+        assert!(o.wipe&&o.prize.is_none()&&o.player==Some(BodyId(0)));
+        assert!((o.center-enemy).length()<1.0);
+        let mut session=crate::session::LocalSession::new(Scenario::Armada.build(42,home_system()));
+        session.enable_bot(ESCORT,true);session.enable_bot(RAIDER,true);
+        session.command(crate::session::Role::Spectator,crate::session::Command::SetPaused(false)).unwrap();
+        // Wing orders travel at light speed across the formation, about 70s to the back rank.
+        session.tick(120.0);
+        let view=session.view(crate::session::Role::Spectator);
+        assert!(view.bodies.iter().find(|b|b.id==BodyId(0)).unwrap().autopilot.is_none(),"the player's battleship stays on manual helm");
+        let idle:Vec<_>=view.bodies.iter().filter(|b|b.kind==BodyKind::Ship && b.id!=BodyId(0) && b.autopilot.is_none()).map(|b|b.id).collect();
+        assert!(idle.is_empty(),"ships without helm orders: {idle:?}");
     }
 }

@@ -11,6 +11,10 @@ use std::time::Instant;
 fn main() {
     let mut args = std::env::args().skip(1);
     let first = args.next();
+    if matches!(first.as_deref(),Some("--version"|"-V")) {
+        println!("luminal-cli {} commit={} dirty={}",env!("LUMINAL_VERSION"),env!("LUMINAL_COMMIT"),env!("LUMINAL_DIRTY"));
+        return;
+    }
     if matches!(first.as_deref(),Some("--missile-envelope"|"--edge-envelope")) {
         let seeds=args.next().and_then(|s|s.parse::<u64>().ok()).unwrap_or(32);
         println!("payload,range_au,closure_kms,evade,active,seed,hit,time,fuel,boost_au,terminal_au,reversals");
@@ -146,6 +150,7 @@ fn main() {
     let class=luminal_core::world::ShipClass::COMBAT.into_iter().find(|c|c.name().eq_ignore_ascii_case(&class_name)).expect("ship class");
     let seed=args.next().and_then(|s|s.parse().ok()).unwrap_or(42);
     let mut s = LocalSession::new(scenario::transport_intercept_class(seed,class));
+    s.set_build_identity(env!("LUMINAL_VERSION"),env!("LUMINAL_COMMIT"),env!("LUMINAL_DIRTY")=="1");
     if let Some(path)=std::env::var_os("LUMINAL_DUEL_LOG") {s.enable_debug_log(std::path::Path::new(&path)).unwrap();}
     if bots { s.enable_bot(RAIDER,true); s.enable_bot(ESCORT,!raider_only); }
     s.command(Role::Spectator, Command::SetPaused(false)).unwrap();
