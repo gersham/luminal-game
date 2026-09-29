@@ -3,6 +3,7 @@ mod audio;
 mod weapon_effects;
 mod jump_effects;
 mod theme;
+mod star_systems;
 mod startup;
 mod roster;
 mod ship_art;
@@ -1028,7 +1029,7 @@ impl LuminalApp {
             let label=if selecting {"CANCEL DESTINATION".into()} else if recovery>0.0 {format!("RECOVERING · {}",fmt_time(recovery))} else {self.theme.jump().to_string()};
             if tac_button(ui,&label,EVec2::new(ui.available_width(),40.0),ACCENT,selecting,
                 recovery<=0.0 && ship.damage.operating_effectiveness(System::Jump)>0.0)
-                .on_hover_text("Choose a point within 50 AU of Sol. One-hour spool, then 1 AU/s; preserves velocity. Six-hour drive recovery after arrival. Thrust, screens and lasers are offline while spooling.").clicked() {
+                .on_hover_text("Choose a point within 50 AU of the central star. One-hour spool, then 1 AU/s; preserves velocity. Six-hour drive recovery after arrival. Thrust, screens and lasers are offline while spooling.").clicked() {
                 self.jump_select=if selecting {None} else {Some(ship.id)};
                 self.manual_flight=None;
             }
@@ -1316,7 +1317,7 @@ Shift + right click: extend route").monospace().size(9.0).color(TEXT_MUTED));
                 std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos() as u64
             }
         });
-        let mut world=scenario::transport_intercept_class(seed,chosen);
+        let mut world=scenario::transport_intercept_class_in_system(seed,chosen,theme.star_system(seed));
         theme.name_scenario(&mut world,seed);
         let mut session=LocalSession::new(world);
         let log_path=std::path::PathBuf::from("logs/latest.log");
@@ -2750,10 +2751,10 @@ impl LuminalApp {
                     let destination=to_world(&cam,rect,pointer);
                     let valid=destination.length()<=MAX_SOL_RADIUS_AU*AU;
                     ui.ctx().set_cursor_icon(if valid {egui::CursorIcon::Crosshair} else {egui::CursorIcon::NotAllowed});
-                    painter.text(pointer+EVec2::new(14.0,14.0),egui::Align2::LEFT_TOP,format!("JUMP · {:.2} AU from Sol",destination.length()/AU),egui::FontId::monospace(11.0),if valid {ACCENT} else {DANGER});
+                    painter.text(pointer+EVec2::new(14.0,14.0),egui::Align2::LEFT_TOP,format!("JUMP · {:.2} AU from {}",destination.length()/AU,self.theme.star_name()),egui::FontId::monospace(11.0),if valid {ACCENT} else {DANGER});
                     if resp.clicked() {
                         if valid {self.command(Command::Jump {body,destination});self.jump_select=None;}
-                        else {self.last_message=Some("Jump destination must be within 50 AU of Sol".into());}
+                        else {self.last_message=Some(format!("Jump destination must be within 50 AU of {}",self.theme.star_name()));}
                     }
                 }
                 if resp.secondary_clicked() || ui.input(|i|i.key_pressed(egui::Key::Escape)) {self.jump_select=None;}

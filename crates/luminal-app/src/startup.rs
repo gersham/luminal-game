@@ -24,7 +24,8 @@ impl LuminalApp {
                 ui.label(egui::RichText::new("01  /  FLEET VOCABULARY").monospace().color(ACCENT));
                 ui.horizontal_wrapped(|ui| {for theme in theme::Theme::ALL {ui.selectable_value(&mut self.theme,theme,theme.name());}});
                 ui.small(self.theme.description());
-                ui.small("Names only: identical weapons, flight rules, damage and balance in every theme.");
+                ui.small(format!("{} system · {}",self.theme.star_name(),self.theme.system_description()));
+                ui.small("Distinct planetary layouts; identical ship and weapon specifications.");
                 ui.add_space(12.0);
                 ui.horizontal_wrapped(|ui| {for (label,value) in [("LRM",self.theme.weapon(Payload::Nuclear)),("SRM",self.theme.weapon(Payload::Kinetic)),("BEAM",self.theme.weapon(Payload::Beam)),("JUMP",self.theme.jump()),("SCREENS",self.theme.screens())] {ui.label(egui::RichText::new(format!("{label} → {value}   ")).monospace().size(12.0).color(TEXT_MUTED));}});
                 ui.add_space(20.0);
@@ -97,8 +98,9 @@ mod tests {
             app.theme=theme;app.restart_scenario();
             let after=app.session.view(Role::Spectator);
             assert_eq!(before.bodies.len(),after.bodies.len());
+            if theme!=theme::Theme::Culture {assert_ne!(before.bodies[0].pos,after.bodies[0].pos,"themes use distinct physical systems");}
             for (a,b) in before.bodies.iter().zip(&after.bodies) {
-                assert_eq!((a.ship_class,a.magazine,a.pos,a.vel,a.damage.damage),(b.ship_class,b.magazine,b.pos,b.vel,b.damage.damage),"theme must not change the scenario");
+                assert_eq!((a.ship_class,a.magazine,a.damage.damage),(b.ship_class,b.magazine,b.damage.damage),"theme must preserve ship fits");
             }
         }
     }

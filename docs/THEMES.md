@@ -1,8 +1,9 @@
 # Fleet vocabulary and visual direction
 
-Themes are presentation choices in the native app. They never enter a simulation
-command, seed, loadout, sensor calculation or weapon rule. The original Luminal
-vocabulary remains available. The selected theme survives scenario restarts;
+Themes select vocabulary, ship identities and distinct physical star systems.
+Ship fits and weapon rules remain common, while gravity, occlusion and travel
+geometry vary with the selected system. The original Luminal vocabulary and Sol
+system remain available. The selected theme survives scenario restarts;
 a fresh application launch randomly preselects a theme and combat ship class.
 `LUMINAL_THEME` and `LUMINAL_SHIP` override those choices for previews.
 `LUMINAL_SEED` makes the random selections repeatable.
@@ -74,3 +75,26 @@ Mind for the command-computer system. Existing control logic is unchanged.
 The former ocean-ship sketches have been replaced by generated, setting-inspired
 spacecraft line art. See [asset provenance](../assets/ships/README.md). The owner
 intends this as a personal game and does not intend to distribute it.
+
+## Physical systems
+
+These are original setting-inspired locations, not canonical atlas recreations.
+
+| Theme | Star | Planets | Moons | Starting world / station moon |
+| --- | --- | --- | --- | --- |
+| Luminal | Sol | 8 | 13 | Earth / Moon |
+| Grim Dark | Vesper | 6 | 7 | Saint Verena / Reliquary |
+| Imperium | Kestrel | 5 | 6 | Kestrel Prime / Portfall |
+| Culture | Quiet Reach | 4 | 8 | Lilt / Aside |
+
+Vesper has inner furnace/forge worlds, a shrine world at 1.35 AU and gas giants
+at 7.4 and 24 AU. Kestrel's trade world sits at 0.88 AU, with refuelling giants
+at 4.1 and 13.2 AU. Quiet Reach starts at 1.65 AU around a two-moon inhabited
+world, with moon-rich giants at 6.2 and 18.6 AU. Stellar masses, planetary
+masses/radii, satellite spacing and seeded phases differ between systems.
+
+Celestials remain frozen during play as in the original Sol model. Ships still
+experience their gravity and occlusion. The same escort mission is initialized
+using the selected homeworld and station moon. Weapon balance is unchanged;
+mission geometry and therefore difficulty can vary. Jump radius is measured
+from the selected central star, and stays 50 AU.

@@ -14,7 +14,7 @@ headers (`alsa-lib` on Arch, `libasound2-dev` on Debian/Ubuntu).
 ### Jump drives
 
 Destroyers, cruisers and battleships have a **JUMP DRIVE** helm button. Select it,
-then left-click any destination within 50 AU of Sol; the map switches to a crosshair.
+then left-click any destination within 50 AU of the central star; the map switches to a crosshair.
 Escape or right-click cancels destination selection. A jump spools for one simulation
 hour, with a blinking triangle and countdown. During spooling, thrust, evasion,
 screens, beam weapons and PD lasers are disabled. **CANCEL JUMP** aborts the spool;
@@ -140,9 +140,11 @@ Balance and interface details are experimental. No packaged releases yet.
 fullscreen game with an application launcher and icon. From an existing checkout,
 run `./scripts/install-omarchy.py` after installing the listed dependencies.
 
-### Sol backdrop
+### Star systems
 
-The map contains all eight planets, Earth's Moon, Phobos and Deimos, the four
+Luminal uses Sol. Grim Dark uses Vesper, Imperium uses Kestrel, and Culture uses
+Quiet Reach, each with distinct physical planets, moons and orbital layouts.
+See [system details](docs/THEMES.md#physical-systems). The Sol map contains all eight planets, Earth's Moon, Phobos and Deimos, the four
 Galilean moons, Titan/Rhea/Iapetus, Titania/Oberon, and Triton. Sizes and orbital
 distances are rounded real-world values, with simple coplanar circular orbits
 for flavour—not a precision ephemeris. A shared randomized starting epoch sets
@@ -605,8 +607,8 @@ for behavior, screenshots, regression coverage and the 20-mission survey.
 
 The startup screen uses selectable WWII-style naval recognition cards with live
 class stats. Choose Luminal, Grim Dark, Imperium or Culture vocabulary
-before deploying. Each launch randomly preselects a theme and combat class. Theme choices change display terms only; classes, weapons,
-flight rules and balance are identical. Choices survive scenario restart.
+before deploying. Each launch randomly preselects a theme and combat class. Theme choices change vocabulary and the physical star system; ship fits and
+weapon rules remain identical, while travel geometry and gravity differ. Choices survive scenario restart.
 See [theme vocabulary and future styling ideas](docs/THEMES.md).
 For previews, `LUMINAL_THEME=Culture` selects a vocabulary and
 `LUMINAL_SHIP_SELECT=1` includes startup in the screenshot workflow.

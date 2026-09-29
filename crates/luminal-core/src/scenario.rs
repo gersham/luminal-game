@@ -33,7 +33,11 @@ pub fn transport_intercept_debug_seeded(seed: u64)->World {
 
 /// Symmetric combat platforms, configured before either side receives observations.
 pub fn transport_intercept_class(seed:u64,class:crate::world::ShipClass)->World {
-    let mut world=transport_intercept_seeded(seed);
+    transport_intercept_class_in_system(seed,class,crate::sol::system(seed))
+}
+
+pub fn transport_intercept_class_in_system(seed:u64,class:crate::world::ShipClass,system:System)->World {
+    let mut world=transport_intercept_in_system(seed,system);
     for id in [BodyId(1),BodyId(2)] {
         let b=&mut world.bodies[id.0 as usize];
         b.controls.ecm_rating=class.sensor_rating();b.controls.eccm_rating=class.sensor_rating()*0.5;b.baseline_emission_factor=0.5;
@@ -92,7 +96,10 @@ impl RaiderSpawnRegion {
 }
 
 pub fn transport_intercept_seeded(seed: u64) -> World {
-    let system = crate::sol::system(seed);
+    transport_intercept_in_system(seed,crate::sol::system(seed))
+}
+
+pub fn transport_intercept_in_system(seed:u64,system:System)->World {
     let planet = system.state(1, 0.0);
     let ship = |name: &str, faction, pos: Vec2, vel: Vec2, thrust: Vec2, magazine: f64| BodySpec {
         name: name.into(),
