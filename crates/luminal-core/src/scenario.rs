@@ -181,7 +181,7 @@ pub fn transport_intercept_seeded(seed: u64) -> World {
     if !world.probes_enabled {for b in &mut world.bodies {b.probes=0;}}
     for id in [BodyId(0),BodyId(1),BodyId(2),BodyId(3)] {world.fit_point_defence(id);}
     world.bodies[0].point_defence.as_mut().unwrap().rate_hz=0.5;
-    for id in [BodyId(1),BodyId(2)] {world.bodies[id.0 as usize].point_defence.as_mut().unwrap().rate_hz=2.0;}
+    for id in [BodyId(1),BodyId(2)] {world.bodies[id.0 as usize].point_defence.as_mut().unwrap().rate_hz=0.2;}
     for id in [BodyId(1), BodyId(2)] {
         world.bodies[id.0 as usize].damage.hull=crate::damage::FRIGATE_HULL_HP;
         world.bodies[id.0 as usize].damage.hull_max=crate::damage::FRIGATE_HULL_HP;
@@ -297,7 +297,7 @@ mod tests {
     fn scenario_screen_fit_and_initial_posture() {
         let mut world=transport_intercept();
         for (i,b) in world.bodies.iter().enumerate() {
-            assert_eq!(b.point_defence.unwrap().rate_hz,match i {0=>0.5,1|2=>2.0,_=>1.0},"frigates fire twice per second; transport and station retain their rates");
+            assert_eq!(b.point_defence.unwrap().rate_hz,match i {0=>0.5,1|2=>0.2,_=>1.0},"warships recharge each laser in five seconds; transport and station retain their rates");
             assert_eq!(b.interceptor_battery.unwrap().rounds,if b.kind==BodyKind::Station {20} else if b.magazine.iter().any(|n|*n>0) {40} else {30});
         }
         for id in [BodyId(0),BodyId(3)] {

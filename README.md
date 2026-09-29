@@ -27,8 +27,10 @@ Full salvos are dangerous to ships with exhausted interceptor magazines; see
 [salvo calibration](calibration/exhausted-defences.md) for controlled trials.
 Own-ship map rings show LRM (1.4 AU), SRM (0.14 AU), and the nominal beam envelope
 (6 light-seconds). Missile rings disappear when their magazines are empty.
-Beam range is a useful engagement guide, not a hard cutoff against stationary
-targets. Emission footprints and point-defence rings are no longer drawn.
+Beyond the nominal 6 LS beam range, automatic fire requires at least 1 TJ
+and 5% of emitted energy expected to couple, with transverse aim uncertainty
+no wider than twice the beam radius. Coupling tapers smoothly from 6 to 10 LS, reaching zero at 10 LS.
+Explicit directed fire beyond that wastes heat and power. Spinal mounts retain their separate 60 LS envelope. Emission footprints and point-defence rings are no longer drawn.
 Weapon circles use thin yellow dots. Ship forecasts fade toward their endpoints;
 red dashed target links show separation in LS or AU. Observed missile and
 interceptor hits bloom red, while misses fade out over one real-time second.
@@ -213,7 +215,7 @@ thrust replaces the route; adding points preserves your weapon target.
   for positive net advantage; otherwise zero. Bearing/Approximate reach is unaffected,
   and ECM still increases EF by 50%.
 - **SCREENS On/Off/Auto:** defaults Auto and latches on after resolving an enemy ship.
-  Screens recharge at 2% per minute; Off immediately removes absorption.
+  Screens recharge at 0.2% per minute; Off immediately removes absorption.
   Absorbed damage and a small idle load heat the shared reservoir.
 - **LRM / SRM:** click to queue a launch. Long-range nuclear proximity missiles
   allow speculative bearing-only shots; short-range kinetic missiles need a
@@ -293,7 +295,7 @@ on a 35% roll; only a sufficiently damaging puncture guarantees a component shoc
 Damage control repairs one damaged system per **twenty effective minutes**, with
 power first, then damage control itself. A progress line and hover text show the
 current repair. Crew and damage-control damage slow repairs. Destroyed systems
-cannot be repaired. Hull repair is separate: 1% per ten effective minutes.
+cannot be repaired. Hull repair is separate: 1% per effective hour.
 
 The current matched-class balance results, commands, failure investigations, and
 remaining limits are in [the September combat report](calibration/2026-09-28/report.md).
@@ -348,8 +350,13 @@ Flyby burns directly toward the estimated target at full available thrust withou
 approach braking. Evade prioritizes the earliest incoming missile's predicted
 close approach and burns laterally at maximum available thrust, continually
 reassessing threats until none remain, then coasting. It uses received tracks.
-Beam effects connect displayed shooter and target positions. Point-defense laser
-range and its probability curve are doubled (2 LS maximum, 0.012 LS half-chance).
+Beam effects connect displayed shooter and target positions. Point-defence lasers
+engage inside 3 LS and fire repeatedly. Per-pulse odds are calibrated to about
+50% cumulative interception over a full unsaturated approach, using observed
+closing speed and the fitted battery cadence. Warship mounts recharge every
+five seconds; larger batteries handle more simultaneous threats. Partial
+coverage, saturation, heat and damage reduce interception. Both SRMs and LRMs
+can be engaged before their respective burst ranges.
 The escort scenario ends in defeat if the player's frigate is destroyed, and in
 victory if the raider is destroyed. Transport arrival or destruction alone does
 not end this scenario.
@@ -374,7 +381,7 @@ Main beams and point-defense lasers share the heat budget and hold fire at its
 150 PJ ceiling. Absorbed shield damage enters the ship heat reservoir immediately. Screens are
 rechargeable hit-point capacity, not a separate thermal reservoir. Heat remains visible after engines stop; screens have no direct
 signature multiplier. Enabled screens add 1% of rated full-drive heat, including
-at full charge. They regenerate 2 percentage points of capacity per minute and
+at full charge. They regenerate 0.2 percentage points of capacity per minute and
 show 0% immediately when off or disabled. Routine navigation reserves heat headroom during
 acceleration for braking and defence; Flyby and Evade use all thermally available
 thrust. Manual commands also obey thermal limits.
@@ -460,11 +467,26 @@ frigates at otherwise equal signature factors. Normal heat amplification is
 Sensor ratings are Picket 80, Frigate 100, Destroyer 125, Cruiser 160, Battleship 200.
 Active/passive ranges scale by rating/100; ECM equals rating, ECCM half rating.
 
-Resolved launchers reveal missile launches immediately. Once a missile is resolved,
+Resolved launchers reveal missile and interceptor launches immediately. Once either is resolved,
 it remains tracked for its live flight; this gameplay exception does not expose its seeker reports.
 
 Point-defence laser batteries scale by class: Picket 1, Frigate 2, Destroyer 4,
-Cruiser 6, Battleship 8. Each laser fires at 2 shots/s with an independent recharge
-clock. Ready lasers distribute shots across locally detected missiles, prioritizing
-the closest threats; surplus lasers concentrate on those targets. Every shot adds
+Cruiser 6, Battleship 8. Each warship laser fires once per five seconds with an independent recharge
+clock. Each laser stays assigned to one locally detected missile through reload,
+prioritizing the closest unassigned threat when it becomes free. Larger batteries
+therefore defend against more simultaneous arrivals. Every shot adds
 heat, and heat dumping, thermal limits, and subsystem damage still constrain fire.
+
+### Fire-control solutions
+
+The full-height fire-control panel shows separate LRM, SRM and beam cards.
+Missiles show estimated hit chance before defence/ECM, arrival time, energy per
+hit, available ammunition, effective volley size, queue and reload status.
+Beams show predicted coupled energy, coupling fraction and transverse aim
+uncertainty using the same prediction as automatic fire control. These are
+estimates from received tracks; unknown values stay unknown. PD shows laser
+heat/dump inhibition separately from interceptor stock. The first resolved enemy
+ship is selected when there is no hostile target, without changing movement orders.
+
+Each interceptor gets one burst against one missile and is spent on hit or miss.
+A defending ship may launch a fresh interceptor at a surviving missile.

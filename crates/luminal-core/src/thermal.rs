@@ -126,15 +126,15 @@ mod tests {
     #[test]
     fn shields_generate_idle_heat_and_all_hit_heat_uses_master_reservoir() {
         let mut thermal=Thermal::default();
-        thermal.advance(3000.0,true);assert!((thermal.field-1.0).abs()<1e-9);
+        thermal.advance(30000.0,true);assert!((thermal.field-1.0).abs()<1e-9);
         assert!(thermal.heating_w>0.0 && thermal.heat_j==0.0);
         let before=thermal.heat_j;let ef=thermal.signature_multiplier();
         thermal.absorb(1e15);assert_eq!(thermal.heat_j,before+1e15);
         assert!(thermal.signature_multiplier()>ef);
-        thermal.advance(3000.0,false);assert_eq!(thermal.field,0.0);assert_eq!(thermal.heat_j,before+1e15);
-        thermal.advance(3060.0,true);assert!((thermal.field-0.02).abs()<1e-9);
+        thermal.advance(30000.0,false);assert_eq!(thermal.field,0.0);assert_eq!(thermal.heat_j,before+1e15);
+        thermal.advance(30060.0,true);assert!((thermal.field-0.002).abs()<1e-9);
         assert!(thermal.balance_error().abs()<1e3);
-        thermal.advance(3660.0,false);assert!(thermal.heating_w<1.0);
+        thermal.advance(30660.0,false);assert!(thermal.heating_w<1.0);
         assert!(thermal.balance_error().abs()<1e3);
     }
     #[test]

@@ -155,6 +155,39 @@ mod tests {
         w
     }
     #[test]
+    fn resolved_launcher_reveals_interceptors_and_retains_them_until_destroyed() {
+        let mut w=fixture(123);
+        let mut observer=w.bodies[0].clone();
+        observer.faction=FactionId(1);
+        observer.trajectory=Trajectory::new(0.0,State {pos:Vec2::new(20.0*AU,10.0*LIGHT_SECOND),vel:Vec2::ZERO});
+        w.bodies.push(observer);w.last_step.push(0.0);
+        let viewer=FactionId(1);let sensor=BodyId(2);
+        let target=w.state(BodyId(1),0.0).unwrap();
+        let fix=sensors::SeekerFix::update(None,0.0,target.pos,target.vel);
+        let hidden=w.launch_interceptor(BodyId(0),BodyId(1),fix);
+        assert!(!w.association.contains_key(&(viewer,hidden)),"unseen launchers must not reveal interceptors");
+        let launcher=w.contact_id(viewer,BodyId(0));
+        let origin=w.state(sensor,0.0).unwrap().pos;
+        let rel=w.state(BodyId(0),0.0).unwrap().pos-origin;
+        w.perceptions.get_mut(&viewer).unwrap().ingest(Observation {
+            contact:launcher,sensor,origin,emitted_at:0.0,sensor_received_at:0.0,decider_received_at:0.0,
+            source:Source::Emission,detection:sensors::DetectionLevel::Resolved,snr:100.0,
+            measurement:Measurement::BearingRange {bearing:bearing_of(rel),range:rel.length(),sigma_range:1.0,sigma_bearing:1e-8}},&w.system);
+        let id=w.launch_interceptor(BodyId(0),BodyId(1),fix);
+        let contact=w.association[&(viewer,id)];
+        assert_eq!(w.perceptions[&viewer].contacts[&contact].detection(0.0),sensors::DetectionLevel::Resolved);
+        w.time=TRACK_LOST_S.value+100.0;
+        w.refresh_resolved_missiles();
+        let c=&w.perceptions[&viewer].contacts[&contact];
+        assert_eq!(c.detection(w.time),sensors::DetectionLevel::Resolved);
+        assert!((c.estimate(w.time,&w.system).unwrap().pos()-w.state(id,w.time).unwrap().pos).length()<1e-6);
+        let hidden=w.launch_interceptor(BodyId(0),BodyId(1),fix);
+        assert!(!w.association.contains_key(&(viewer,hidden)),"expired launcher resolution must not reveal subsequent launches");
+        w.destroy(id,w.time,LossCause::Expended);
+        assert!(w.refinement.retired_contacts.contains(&(viewer,contact)));
+    }
+
+    #[test]
     fn missiles_make_no_bearing_contacts_but_still_allow_resolved_points() {
         let mut w=fixture(123);
         let target=w.state(BodyId(1),0.0).unwrap();

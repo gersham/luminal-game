@@ -433,6 +433,25 @@ enum Event {
     Beam(Beam),
 }
 
+/// Main beams lose effective coupling smoothly between 6 and 10 light-seconds.
+/// Spinal mounts use their own footprint and range envelope.
+pub fn beam_range_factor(range_km:f64)->f64 {
+    let x=((range_km/crate::units::LIGHT_SECOND-6.0)/4.0).clamp(0.0,1.0);
+    1.0-x*x*(3.0-2.0*x)
+}
+
+/// Fire-control prediction from the shooter's received track, before screens or armour.
+#[derive(Clone, Copy, Debug)]
+pub struct BeamSolution {
+    pub range_km:f64,
+    pub flight_s:f64,
+    pub aim_sigma_km:f64,
+    pub spot_km:f64,
+    pub expected_j:f64,
+    pub coupled_fraction:f64,
+    pub worth_firing:bool,
+}
+
 #[derive(Clone, Copy, Debug)]
 struct Beam {
     missile: BodyId,
@@ -975,11 +994,10 @@ impl World {
     /// Expected coupled energy using only the received track and its transverse
     /// uncertainty at pulse arrival, including pointing jitter. This is a firing
     /// policy, not knowledge of the target's actual future manoeuvres.
-    fn beam_worth_firing(&self,id:BodyId,target:ContactId)->bool {
-        let Some(origin)=self.state(id,self.time).map(|s|s.pos) else {return false};
-        let Some(track)=self.received_picture(id).and_then(|p|p.contacts.get(&target)).and_then(|c|c.estimate(self.time,&self.system)) else {return false};
-        let range=(track.at(self.time,&self.system).pos()-origin).length();
-        if range<=SHIP_BEAM_AUTO_RANGE_LS.value*crate::units::LIGHT_SECOND {return true;}
+    pub fn beam_solution(&self,id:BodyId,target:ContactId)->Option<BeamSolution> {
+        let origin=self.state(id,self.time)?.pos;
+        let track=self.received_picture(id)?.contacts.get(&target)?.estimate(self.time,&self.system)?;
+        let range=(track.pos()-origin).length();
         let predicted=track.at(self.time+range/crate::units::C,&self.system);
         let direction=(predicted.pos()-origin).normalized();
         let transverse=Vec2::new(-direction.y,direction.x);
@@ -987,9 +1005,16 @@ impl World {
         let variance=(transverse.x*transverse.x*p[0][0]+2.0*transverse.x*transverse.y*p[0][1]
             +transverse.y*transverse.y*p[1][1]).max(0.0)+(range*SHIP_BEAM_POINTING_RAD.value).powi(2);
         let spot=(range*SHIP_BEAM_DIVERGENCE.value).max(SHIP_RADIUS_KM.value);
-        let expected=SHIP_BEAM_ENERGY_J.value*self.bodies[id.0 as usize].ship_class.map_or(1.0,ShipClass::beam_power)*(SHIP_RADIUS_KM.value/spot).powi(2)
-            / (1.0+2.0*variance/(spot*spot)).sqrt();
-        expected>=SHIP_BEAM_MIN_EXPECTED_J.value
+        let energy=SHIP_BEAM_ENERGY_J.value*self.bodies[id.0 as usize].ship_class.map_or(1.0,ShipClass::beam_power);
+        let fraction=beam_range_factor(range)*(SHIP_RADIUS_KM.value/spot).powi(2)/(1.0+2.0*variance/(spot*spot)).sqrt();
+        let expected=energy*fraction;
+        Some(BeamSolution {range_km:range,flight_s:range/crate::units::C,aim_sigma_km:variance.sqrt(),spot_km:spot,
+            expected_j:expected,coupled_fraction:fraction,
+            worth_firing:range<=SHIP_BEAM_AUTO_RANGE_LS.value*crate::units::LIGHT_SECOND
+                || (variance<=4.0*spot*spot && expected>=SHIP_BEAM_MIN_EXPECTED_J.value.max(0.05*energy))})
+    }
+    fn beam_worth_firing(&self,id:BodyId,target:ContactId)->bool {
+        self.beam_solution(id,target).is_some_and(|s|s.worth_firing)
     }
 
     fn control_beam(&mut self, id: BodyId, order: u64) {
@@ -1119,7 +1144,7 @@ impl World {
                     // Broad terminal footprint, with a hard 10x nominal beam envelope.
                     let broad=spot*10.0;
                     if rel.length()<=10.0*SHIP_BEAM_AUTO_RANGE_LS.value*crate::units::LIGHT_SECOND {(-miss*miss/(broad*broad)).exp()} else {0.0}
-                } else {(SHIP_RADIUS_KM.value / spot).powi(2) * (-miss * miss / (spot * spot)).exp()};
+                } else {beam_range_factor(rel.length())*(SHIP_RADIUS_KM.value / spot).powi(2) * (-miss * miss / (spot * spot)).exp()};
                 let coupled = energy * fraction;
                 if coupled > 0.0 {
                     self.deliver(beam.target, t_arr, coupled, Payload::Beam, beam.missile);
@@ -2210,7 +2235,7 @@ mod tests {
         assert_eq!(b.thermal.heat_j,SCREEN_CAPACITY_J.value*0.5);
         assert!(w.hits[0].energy_j>w.hits[0].screened_j);
         assert!(b.thermal.balance_error().abs()<1.0);
-        w.advance_to(60.0);assert!(w.bodies[1].thermal.field>0.019);
+        w.advance_to(60.0);assert!(w.bodies[1].thermal.field>0.0019);
     }
 
     #[test]
@@ -2269,17 +2294,27 @@ mod tests {
     }
 
     #[test]
-    fn long_range_beams_use_received_confidence_not_a_hard_cutoff() {
+    fn long_range_beams_require_useful_coupling_and_a_credible_aim() {
+        // Excellent tracking allows a modest extension beyond the nominal 6 LS.
         let (mut w,c)=beam_trial();
         let tr=w.perceptions.get_mut(&FactionId(0)).unwrap().contacts.get_mut(&c).unwrap().track.as_mut().unwrap();
-        tr.x[0]+=29.0*LIGHT_SECOND;
-        tr.p=[[0.0;6];6];
+        tr.x[0]+=5.2*LIGHT_SECOND;tr.p=[[0.0;6];6];
         assert!(w.beam_worth_firing(BodyId(0),c));
         w.arm_beams(BodyId(0)).unwrap();
         assert_eq!(w.bodies[0].beam_emitted_j,SHIP_BEAM_ENERGY_J.value);
+        // Even perfect tracks do not make tiny coupled fractions worth firing.
+        for class in [ShipClass::Frigate,ShipClass::Cruiser,ShipClass::Battleship] {
+            let (mut w,c)=beam_trial();w.bodies[0].ship_class=Some(class);
+            let tr=w.perceptions.get_mut(&FactionId(0)).unwrap().contacts.get_mut(&c).unwrap().track.as_mut().unwrap();
+            tr.x[0]+=29.0*LIGHT_SECOND;tr.p=[[0.0;6];6];
+            assert!(!w.beam_worth_firing(BodyId(0),c));
+            w.arm_beams(BodyId(0)).unwrap();
+            assert!(!w.combat_events(None).iter().any(|e|e.kind==CombatKind::BeamPulse));
+        }
         let (mut w,c)=beam_trial();
-        w.perceptions.get_mut(&FactionId(0)).unwrap().contacts.get_mut(&c).unwrap().track.as_mut().unwrap().x[0]+=29.0*LIGHT_SECOND;
-        assert!(!w.beam_worth_firing(BodyId(0),c));
+        let tr=w.perceptions.get_mut(&FactionId(0)).unwrap().contacts.get_mut(&c).unwrap().track.as_mut().unwrap();
+        tr.x[0]+=5.2*LIGHT_SECOND;tr.p=[[0.0;6];6];tr.p[1][1]=100.0;
+        assert!(!w.beam_worth_firing(BodyId(0),c),"uncertain aim must hold fire even at moderately extended range");
         w.engage_beam(BodyId(0),Some(c)).unwrap();
         assert_eq!(w.bodies[0].beam_emitted_j,SHIP_BEAM_ENERGY_J.value,"directed shots accept the player's risk");
     }
@@ -2512,10 +2547,14 @@ mod tests {
             tr.x[1] = pos.y;
             w.fire_beam(BodyId(0), c).unwrap();
             w.advance_to(distance + 1.0);
-            w.hits[0].energy_j
+            assert!(w.bodies[0].beam_emitted_j>0.0,"even ineffective manual shots consume energy");
+            w.hits.iter().map(|h|h.energy_j).sum::<f64>()
         };
-        let (near, far) = (energy(2.0), energy(10.0));
-        assert!(near > far * 20.0 && near < far * 30.0, "{near} vs {far}");
+        assert_eq!(beam_range_factor(6.0*LIGHT_SECOND),1.0);
+        assert_eq!(beam_range_factor(8.0*LIGHT_SECOND),0.5);
+        assert_eq!(beam_range_factor(10.0*LIGHT_SECOND),0.0);
+        assert!(energy(2.0)>energy(6.0));assert!(energy(6.0)>energy(8.0));
+        assert_eq!(energy(11.0),0.0);
     }
 
     #[test]

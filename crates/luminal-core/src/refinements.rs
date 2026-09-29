@@ -126,7 +126,8 @@ impl World {
         let b=&self.bodies[id.0 as usize];
         self.debug_note("LAUNCH",format!("id={id:?} name={:?} faction={:?} missile={:?} interceptor={:?}",b.name,b.faction,b.missile,b.interceptor));
         // Gameplay exception: watching a resolved launcher reveals its launch now.
-        if let Some(launcher)=self.bodies[id.0 as usize].missile.map(|m|m.launcher) {
+        let round=&self.bodies[id.0 as usize];
+        if let Some(launcher)=round.missile.map(|m|m.launcher).or_else(||round.interceptor.map(|i|i.launcher)) {
             let viewers:Vec<_>=self.perceptions.keys().copied().filter(|f| {
                 *f!=self.bodies[id.0 as usize].faction && self.association.get(&(*f,launcher))
                     .and_then(|c|self.perceptions.get(f)?.contacts.get(c))

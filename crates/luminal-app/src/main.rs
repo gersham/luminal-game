@@ -545,6 +545,22 @@ mod tests {
     }
 
     #[test]
+    fn auto_target_waits_for_resolved_ship_and_preserves_orders_and_selection() {
+        let mut app=LuminalApp::new();let mut view=app.session.view(Role::Faction(ESCORT));
+        app.acquire_first_target(&view);
+        assert!(matches!(app.inspected,Some(Selection::Body(BodyId(0)))));
+        view.contacts[0].detection=sensors::DetectionLevel::Resolved;view.contacts[0].stale=false;
+        view.contacts[0].resolved_kind=Some(BodyKind::Missile);
+        app.acquire_first_target(&view);assert!(matches!(app.inspected,Some(Selection::Body(_))));
+        view.contacts[0].resolved_kind=Some(BodyKind::Ship);
+        app.acquire_first_target(&view);assert!(app.inspected==Some(Selection::Contact(view.contacts[0].id)));
+        let mut other=view.contacts[0].clone();other.id=ContactId(999);view.contacts.insert(0,other);
+        app.acquire_first_target(&view);assert!(app.inspected==Some(Selection::Contact(view.contacts[1].id)));
+        let own=app.session.view(Role::Faction(ESCORT));
+        assert!(matches!(own.bodies.iter().find(|b|b.id==BodyId(1)).unwrap().autopilot.map(|a|a.order),Some(Order::Follow {target:BodyId(0),..})));
+    }
+
+    #[test]
     fn hostile_ping_does_not_replace_a_resolved_ship_chevron() {
         let app=LuminalApp::new();
         let mut view=app.session.view(Role::Faction(ESCORT));
@@ -793,7 +809,7 @@ impl LuminalApp {
                 ui.painter().line_segment([rect.left_top()-EVec2::new(4.0,0.0),rect.left_bottom()-EVec2::new(4.0,0.0)],Stroke::new(1.0,EDGE));
             }
             let ui=&mut columns[0];
-            sub_header(ui,"FIRE CONTROL",None);
+            sub_header(ui,"FIRE CONTROL",Some(("PRE-DEFENCE",TEXT_MUTED)));
             if let Some(ship)=own {self.compact_weapons(ui,view,ship);}
             let ui=&mut columns[1];
             sub_header(ui,"OWN SHIP",None);
@@ -957,7 +973,7 @@ impl LuminalApp {
             else {format!("{:.0}% AVAILABLE",ship.damage.screen_available*100.0)};
         let controls=[
             ("ECM",C::Ecm,ship.controls.ecm,ship.controls.ecm_active,if ship.controls.ecm_active {"EMITTING".into()} else {"SILENT".into()},true,"Auto emits while a resolved enemy ship is known. Class-rated ECM/ECCM; maximum 50% resolution reduction."),
-            ("SCREENS",C::Screens,ship.controls.screens,ship.screen_up,screen,ship.has_screen,"Auto latches on after resolving an enemy ship. Charges 2% per minute. Off disables absorption immediately. Hits and idle operation heat the ship."),
+            ("SCREENS",C::Screens,ship.controls.screens,ship.screen_up,screen,ship.has_screen,"Auto latches on after resolving an enemy ship. Charges 0.2% per minute. Off disables absorption immediately. Hits and idle operation heat the ship."),
             ("EVADE",C::Evade,ship.controls.evade,ship.controls.evading,if ship.controls.evading {"EVADING".into()} else if ship.controls.evade==Mode::Auto {"WATCHING".into()} else {"OFF".into()},true,"Auto temporarily evades incoming damaging missiles, then resumes your prior movement order. Off disables automatic evasion."),
             ("ACTIVE",C::Active,ship.controls.active,ship.controls.active==Mode::Auto,if ship.controls.active==Mode::Auto {format!("PING IN {:.0}s",(ship.controls.next_ping_at-view.time).max(0.0))} else {"SILENT".into()},ship.sensors.active,"Auto pings every 60 seconds until switched Off, even without contacts.")
         ];
@@ -985,47 +1001,94 @@ impl LuminalApp {
 
     fn compact_weapons(&mut self,ui:&mut egui::Ui,view:&View,b:&BodyView) {
         let target=match self.inspected {Some(Selection::Contact(id))=>view.contacts.iter().find(|c|c.id==id),_=>None};
-        ui.label(egui::RichText::new("MAIN BEAM").monospace().size(8.0).color(TEXT_MUTED));
-        ui.horizontal(|ui| {
-            let w=(ui.available_width()-2.0*ui.spacing().item_spacing.x)/3.0;
-            if tac_button(ui,"AUTO",EVec2::new(w,20.0),ACCENT,b.beam_auto,true).clicked() {self.command(Command::ArmBeams {body:b.id});}
-            if tac_button(ui,"DIRECT",EVec2::new(w,20.0),ACCENT,!b.beam_auto && b.beam_target.is_some(),target.is_some_and(|c|c.track.is_some() && !c.stale)).clicked() {self.command(Command::EngageBeam {body:b.id,target:target.map(|c|c.id)});}
-            if tac_button(ui,"HOLD",EVec2::new(w,20.0),ACCENT,!b.beam_auto && b.beam_target.is_none(),true).clicked() {self.command(Command::EngageBeam {body:b.id,target:None});}
-        });
-        if b.ship_class==Some(luminal_core::world::ShipClass::Battleship) {
-            let left=(b.spinal_ready_at-view.time).max(0.0);
-            ui.label(egui::RichText::new(if left>0.0 {format!("SPINAL · {left:.0}s")} else {"SPINAL · READY / FORWARD 2°".into()}).monospace().size(9.0).color(WARM));
-        }
-        let left=(b.beam_ready_at-view.time).max(0.0);
-        let status=if b.thermal.dumping {"OFF · HEAT DUMP".into()} else if !b.thermal.can_fire() {"PWR / HEAT".into()} else if left>0.0 {format!("{left:.1}s")} else {"READY".into()};
-        compact_meter(ui,&format!("BEAM · {status}"),Some(1.0-(left/params::SHIP_BEAM_RECHARGE_S.value).clamp(0.0,1.0)),ACCENT);
-        ui.horizontal(|ui| {
-            let w=(ui.available_width()-ui.spacing().item_spacing.x)/2.0;
-            for (p,label) in [(Payload::Kinetic,"SRM"),(Payload::Nuclear,"LRM")] {
-            let count=b.magazine[p.index()].saturating_sub(b.missile_queued[p.index()]);
-            let chance=missile_hit_estimate(b,target,p);
-            let ready=count>0 && missile_solution_launchable(target,p,chance) && b.damage.operating_effectiveness(p.launcher_system())>0.0;
-            let volley=b.ship_class.unwrap_or(luminal_core::world::ShipClass::Frigate).launchers(p);
-            let response=tac_button(ui,&format!("{label} {count} · ×{volley}"),EVec2::new(w,22.0),WARM,false,ready);
-            let bar=Rect::from_min_max(response.rect.left_bottom()+EVec2::new(3.0,-3.0),response.rect.right_bottom()+EVec2::new(-3.0,-1.0));
-            ui.painter().rect_filled(bar,0.0,EDGE);
-            ui.painter().rect_filled(Rect::from_min_size(bar.min,EVec2::new(bar.width()*chance as f32,bar.height())),0.0,if ready {ACCENT} else {SYS_UNKNOWN});
-            if response.on_hover_text(format!("Fire {} · {}\nEach click queues one synchronized volley; launchers reload every {:.0} seconds.\nBefore enemy defence. LRM permits speculative bearing-only shots; its seeker must acquire the target. SRM requires a resolved target and at least 1% estimated chance.",payload_label(p),if target.is_some_and(|c|c.track.is_none()) {"Bearing only · hit chance unknown".into()} else {format!("estimated hit chance {:.0}%",chance*100.0)},p.launch_interval())).clicked() && let Some(c)=target {
-                self.command(Command::Launch {body:b.id,target:c.id,payload:p});
+        let area=ui.available_rect_before_wrap();
+        let title=target.map_or_else(||"SELECT AN ENEMY · NO SOLUTION".into(),|c|format!("{} · {}{}",contact_label(c),c.quality.to_uppercase(),c.track.as_ref().map_or(String::new(),|t|format!(" · {}",fmt_distance((t.pos-b.pos).length())))));
+        ui.painter().text(area.left_top(),egui::Align2::LEFT_TOP,title,mono(10.0),ACCENT);
+        let footer=19.0;let top=area.top()+18.0;let height=(area.height()-18.0-footer-8.0)/3.0;
+        for (row,p) in [Payload::Nuclear,Payload::Kinetic,Payload::Beam].into_iter().enumerate() {
+            let r=Rect::from_min_size(Pos2::new(area.left(),top+row as f32*(height+4.0)),EVec2::new(area.width(),height));
+            ui.painter().rect_filled(r,3.0,Color32::from_rgb(12,22,33));
+            let left=r.left()+7.0;let right=r.right()-7.0;
+            let label=if p==Payload::Beam {"BEAM"} else {payload_label(p)};
+            ui.painter().text(Pos2::new(left,r.top()+5.0),egui::Align2::LEFT_TOP,label,mono(12.0),TEXT);
+            if p!=Payload::Beam {
+                let chance=missile_hit_estimate(b,target,p);
+                let tracked=target.is_some_and(|c|c.track.is_some() && !c.stale);
+                let count=b.magazine[p.index()].saturating_sub(b.missile_queued[p.index()]);
+                let mounts=b.ship_class.unwrap_or(luminal_core::world::ShipClass::Frigate).launchers(p);
+                let mounts=if b.damage.operating_effectiveness(p.launcher_system())<1.0 {mounts.div_ceil(2)} else {mounts};
+                let volley=mounts.min(count);
+                let reload=(b.missile_ready_at[p.index()]-view.time).max(0.0);
+                let ready=count>0 && mounts>0 && missile_solution_launchable(target,p,chance) && b.damage.operating_effectiveness(p.launcher_system())>0.0;
+                let status=if mounts==0 {"NOT FITTED".into()} else if b.damage.operating_effectiveness(p.launcher_system())<=0.0 {"DISABLED".into()}
+                    else if count==0 {"EMPTY".into()} else if target.is_none() {"NO TARGET".into()}
+                    else if p==Payload::Kinetic && !target.is_some_and(|c|!c.stale && c.detection>=sensors::DetectionLevel::Resolved) {"NEEDS RESOLUTION".into()}
+                    else if tracked && chance<=0.0 {"OUT OF RANGE".into()} else if reload>0.0 {format!("RELOAD {reload:.0}s")} else {"READY".into()};
+                let score=if tracked {format!("HIT ≈{:.0}%",chance*100.0)} else {"HIT UNKNOWN".into()};
+                ui.painter().text(Pos2::new(right,r.top()+5.0),egui::Align2::RIGHT_TOP,score,mono(12.0),if chance>=0.5 {SYS_OK} else {WARM});
+                let flight=target.and_then(|c|c.track.as_ref()).map(|t| {
+                    let rel=t.pos-b.pos;let closing=(b.vel-t.vel).dot(rel.normalized());
+                    luminal_core::world::weapon_probability::flight_seconds(p,rel.length(),closing)
+                });
+                let energy=if p==Payload::Nuclear {params::NUCLEAR_ENERGY_J.value} else {luminal_core::world::weapon_probability::SRM_HIT_ENERGY_J};
+                let detail=if tracked {format!("T+{} · {} / hit",fmt_time(flight.unwrap_or(0.0)),fmt_energy(energy))} else if target.is_none() {"Select a target for a firing solution".into()} else if p==Payload::Kinetic {"Resolved contact required".into()} else {"Range / arrival unknown · speculative".into()};
+                ui.painter().text(Pos2::new(left,r.top()+20.0),egui::Align2::LEFT_TOP,detail,mono(9.0),TEXT_MUTED);
+                ui.painter().text(Pos2::new(left,r.top()+31.0),egui::Align2::LEFT_TOP,format!("AMMO {count} · VOLLEY {volley} · QUEUED {}",b.missile_queued[p.index()]),mono(9.0),TEXT_MUTED);
+                let button=Rect::from_min_max(Pos2::new(left,r.bottom()-24.0),Pos2::new(left+r.width()*0.48,r.bottom()-4.0));
+                let mut child=ui.new_child(egui::UiBuilder::new().id_salt(("launch",row)).max_rect(button));
+                let text=format!("{} ×{volley}",if reload>0.0 {"QUEUE"} else {"LAUNCH"});
+                if tac_button(&mut child,&text,button.size(),WARM,false,ready).on_hover_text("Estimated hit chance before enemy defence and ECM. Hit energy before screens and armour. Arrival assumes the current received course. One click orders one volley.").clicked() && let Some(c)=target {
+                    self.command(Command::Launch {body:b.id,target:c.id,payload:p});
+                }
+                ui.painter().text(Pos2::new(right,button.center().y),egui::Align2::RIGHT_CENTER,status,mono(8.0),if ready {ACCENT} else {TEXT_MUTED});
+            } else {
+                let fitted=b.ship_class!=Some(luminal_core::world::ShipClass::Picket) && b.armed;
+                let solution=target.and_then(|c|b.beam_solutions.get(&c.id));
+                let energy=params::SHIP_BEAM_ENERGY_J.value*b.ship_class.map_or(1.0,|c|c.beam_power());
+                let reload=(b.beam_ready_at-view.time).max(0.0);
+                let status=if !fitted {"NOT FITTED".into()} else if b.damage.operating_effectiveness(System::Beam)<=0.0 {"DISABLED".into()}
+                    else if b.thermal.dumping {"DUMPING".into()} else if !b.thermal.can_fire_energy(energy) {"POWER / HEAT".into()}
+                    else if solution.is_none() {"NO SOLUTION".into()} else if reload>0.0 {format!("RELOAD {reload:.0}s")}
+                    else if solution.is_some_and(|s|!s.worth_firing) {"AUTO HOLDS".into()} else {"READY".into()};
+                ui.painter().text(Pos2::new(right,r.top()+5.0),egui::Align2::RIGHT_TOP,&status,mono(10.0),if status=="READY" {SYS_OK} else {WARM});
+                let detail=solution.filter(|_|fitted).map_or_else(||"Expected energy — · coupling —".into(),|s|format!("EXP {} / pulse · {:.1}% coupled",fmt_energy(s.expected_j),100.0*s.coupled_fraction));
+                ui.painter().text(Pos2::new(left,r.top()+20.0),egui::Align2::LEFT_TOP,detail,mono(9.0),TEXT_MUTED);
+                let aim=solution.map_or_else(||"Aim uncertainty — · beam radius —".into(),|s|format!("Aim ±{:.2} km · radius {:.2} km",s.aim_sigma_km,s.spot_km));
+                ui.painter().text(Pos2::new(left,r.top()+31.0),egui::Align2::LEFT_TOP,aim,mono(9.0),TEXT_MUTED);
+                let buttons=Rect::from_min_max(Pos2::new(left,r.bottom()-24.0),Pos2::new(right,r.bottom()-4.0));
+                let mut child=ui.new_child(egui::UiBuilder::new().id_salt("beam_modes").max_rect(buttons));
+                child.horizontal(|ui| {
+                    let w=(buttons.width()-2.0*ui.spacing().item_spacing.x)/3.0;
+                    if tac_button(ui,"AUTO",EVec2::new(w,20.0),ACCENT,b.beam_auto,fitted).clicked() {self.command(Command::ArmBeams {body:b.id});}
+                    if tac_button(ui,"DIRECT",EVec2::new(w,20.0),ACCENT,!b.beam_auto && b.beam_target.is_some(),fitted && target.is_some_and(|c|c.track.is_some() && !c.stale)).on_hover_text("Assign this target; permits risky shots that AUTO would hold.").clicked() {self.command(Command::EngageBeam {body:b.id,target:target.map(|c|c.id)});}
+                    if tac_button(ui,"HOLD",EVec2::new(w,20.0),ACCENT,!b.beam_auto && b.beam_target.is_none(),fitted).clicked() {self.command(Command::EngageBeam {body:b.id,target:None});}
+                });
+                ui.interact(r,ui.id().with("beam_prediction"),Sense::hover()).on_hover_text("Expected energy uses the same received-track prediction as AUTO fire control, before screens and armour. Aim ± is one standard deviation at pulse arrival, including pointing error. Coupling is expected energy delivered, not hit probability.");
             }
-        }});
+        }
         let queued=b.missile_queued.iter().sum::<u32>();
-        ui.horizontal(|ui| {
-            let srm=(b.missile_ready_at[Payload::Kinetic.index()]-view.time).max(0.0);
-            let lrm=(b.missile_ready_at[Payload::Nuclear.index()]-view.time).max(0.0);
-            ui.label(egui::RichText::new(format!("SRM {srm:.0}s · LRM {lrm:.0}s")).monospace().size(8.0).color(TEXT_MUTED));
-            if ui.add_enabled(queued>0,egui::Button::new(format!("× {queued}"))).on_hover_text("Cancel queued salvo").clicked() {self.command(Command::CancelLaunches {body:b.id});}
+        let bottom=Rect::from_min_max(Pos2::new(area.left(),area.bottom()-footer),area.right_bottom());
+        let mut child=ui.new_child(egui::UiBuilder::new().id_salt("defence_footer").max_rect(bottom));
+        child.horizontal(|ui| {
+            let pd_status=if b.thermal.dumping {"OFF: DUMP"} else if b.damage.operating_effectiveness(System::PdLaser)<=0.0 {"DISABLED"}
+                else if b.thermal.heat_j+params::PD_WASTE_HEAT_J>params::BEAM_HEAT_LIMIT_J.value*b.thermal.capacity_scale {"OFF: HEAT"} else {"AUTO"};
+            ui.label(egui::RichText::new(format!("PD {pd_status} · {} INT",b.interceptor_battery.map_or(0,|x|x.rounds))).monospace().size(9.0).color(if pd_status=="AUTO" {TEXT_MUTED} else {WARM}))
+                .on_hover_text(format!("{} laser mounts. Interceptors remain independent of laser heat limits.",b.point_defence.map_or(0,|pd|pd.lasers)));
+            if b.ship_class==Some(luminal_core::world::ShipClass::Battleship) {
+                let left=(b.spinal_ready_at-view.time).max(0.0);
+                ui.label(egui::RichText::new(if left>0.0 {format!("SPINAL {left:.0}s")} else {"SPINAL READY".into()}).monospace().size(9.0).color(WARM)).on_hover_text("Forward mount: requires target alignment within 2°; shares heat and power with beams.");
+            }
+            if queued>0 && ui.small_button(format!("CANCEL {queued}")).clicked() {self.command(Command::CancelLaunches {body:b.id});}
         });
-        let rounds=b.interceptor_battery.map_or(0,|x|x.rounds);
-        ui.label(egui::RichText::new(format!("PD AUTO · {} LASERS · {rounds} INTERCEPTORS",b.point_defence.map_or(0,|pd|pd.lasers))).monospace().size(9.0).color(if rounds>0 {ACCENT} else {SYS_DAMAGED}))
-            .on_hover_text(b.interceptor_battery.map_or("No launcher",|x|x.status));
-        if b.thermal.dumping {ui.label(egui::RichText::new("PD LASER OFF · HEAT DUMP").monospace().size(9.0).color(HEAT));}
-        if let Some(message)=&self.last_message {ui.small(egui::RichText::new(message).color(SYS_DAMAGED));}
+        ui.allocate_space(area.size());
+    }
+
+    fn acquire_first_target(&mut self,view:&View) {
+        if self.own_faction().is_some() && !matches!(self.inspected,Some(Selection::Contact(id)) if view.contacts.iter().any(|c|c.id==id))
+            && let Some(contact)=view.contacts.iter().find(|c|!c.stale && c.detection>=sensors::DetectionLevel::Resolved && c.resolved_kind==Some(BodyKind::Ship)) {
+            // Acquiring a weapon target must not replace follow/route/movement orders.
+            self.inspected=Some(Selection::Contact(contact.id));
+        }
     }
 
     fn select_object(&mut self, selection: Selection, view: &View) {
@@ -1104,6 +1167,8 @@ impl LuminalApp {
     }
 
     fn with_env_setup(mut self) -> Self {
+        // Screenshot pre-runs should exercise the same hostile AI as live play.
+        if self.dev.screenshot.is_some() {self.session.enable_bot(RAIDER,true);}
         // `LUMINAL_ORDERS=orbit:<body>:<celestial>;intercept:<body>:own:<body>;intercept:<body>:contact:<n>;move:<body>:objective;launch:<body>:<contact>:<payload>`
         // `LUMINAL_ORDERS_AT=<sim seconds>` runs the scenario that far before issuing them.
         let orders_at = std::env::var("LUMINAL_ORDERS_AT").ok().and_then(|v| v.parse::<f64>().ok()).unwrap_or(0.0);
@@ -1490,6 +1555,7 @@ impl eframe::App for LuminalApp {
         if !view.bodies.iter().any(|b| self.selected == Some(Selection::Body(b.id)) && b.controllable && b.kind == BodyKind::Ship) {
             self.selected = view.bodies.iter().find(|b| b.controllable && b.kind == BodyKind::Ship).map(|b| Selection::Body(b.id));
         }
+        self.acquire_first_target(&view);
         self.smooth_bearings(&mut view,dt);
         let overlay = match (self.role, self.overlay) {
             (Role::Spectator, Some(f)) => Some((
@@ -1932,7 +1998,7 @@ impl LuminalApp {
         ui.weak(format!("Thermal emission {:.2} TW · emissivity {:.2}×",b.thermal.emission()/1e12,b.emissivity.value()));
         if let Some(pd)=b.point_defence {
             ui.label(format!("Point defence: {} lasers · {:.1}/s each · {} shots",pd.lasers,pd.rate_hz,pd.shots));
-            ui.weak(format!("Laser kill chance: 50% per shot at {} ls; falls sharply beyond.",params::PD_HALF_RANGE_LS.value));
+            ui.weak("PD lasers: 3 LS range; approximately 50% stopped over a full unsaturated approach, across repeated shots.");
             if b.controllable {
                 let interceptors=b.interceptor_battery.is_some_and(|battery|battery.rounds>0) && b.damage.operating_effectiveness(luminal_core::damage::System::PdMissiles)>0.0;
                 let radius=luminal_core::world::point_defence::defence_ring_radius(pd.rate_hz>0.0,interceptors);
@@ -2043,7 +2109,7 @@ impl LuminalApp {
             }
             if b.kind == BodyKind::Ship {
                 let mut up = b.screen_up;
-                if ui.add_enabled(b.has_screen,egui::Checkbox::new(&mut up, "Screen up")).on_hover_text("Charges 2% per minute. Hits reduce capacity and heat the ship. Off disables absorption immediately.").changed() {
+                if ui.add_enabled(b.has_screen,egui::Checkbox::new(&mut up, "Screen up")).on_hover_text("Charges 0.2% per minute. Hits reduce capacity and heat the ship. Off disables absorption immediately.").changed() {
                     self.command(Command::SetScreen { body: b.id, up });
                 }
                 ui.label(format!(

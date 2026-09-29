@@ -154,6 +154,7 @@ pub struct BodyView {
     pub beam_ready_at: f64,
     pub beam_target: Option<ContactId>,
     pub beam_auto: bool,
+    pub beam_solutions: BTreeMap<ContactId,crate::world::BeamSolution>,
     pub beam_emitted_j: f64,
     /// Our emitted shot's aim line; carries no enemy hit result.
     pub last_beam: Option<(f64, Vec2, Vec2)>,
@@ -561,12 +562,15 @@ impl LocalSession {
                 let known;
                 let b = if let Role::Faction(f) = role { known = w.known_body(f, BodyId(i as u32))?; &known } else { b };
                 let s = b.trajectory.state_at(t)?;
-                Some(BodyView {ship_class:b.ship_class,heading:b.heading_at(t),spinal_ready_at:b.spinal_ready_at,
+                Some(BodyView {beam_solutions:if b.controllable && b.kind==BodyKind::Ship {
+                    w.received_picture(BodyId(i as u32)).into_iter().flat_map(|p|p.contacts.keys())
+                        .filter_map(|c|w.beam_solution(BodyId(i as u32),*c).map(|s|(*c,s))).collect()
+                } else {BTreeMap::new()},ship_class:b.ship_class,heading:b.heading_at(t),spinal_ready_at:b.spinal_ready_at,
                     controls:b.controls,
                     emissivity:b.emissivity_factors(t),
                     damage:crate::damage::Report {damage:b.damage,installed:b.installed_systems(),observed_at:b.trajectory.start(),screen_available:b.screen_available()},
                     interceptor_battery:b.interceptor_battery,interceptor:b.interceptor.map(|i|(i.dv_left,i.expires)),
-                    point_defence: b.point_defence.map(|mut pd| {pd.rate_hz*=b.operating_effectiveness(crate::damage::System::PdLaser);pd}),
+                    point_defence: b.point_defence.map(|mut pd| {pd.targets=[None;8];pd.rate_hz*=b.operating_effectiveness(crate::damage::System::PdLaser);pd}),
                     has_screen: b.has_screen,
                     baseline_emission_factor: b.baseline_emission_factor,
                     sensors: b.sensors,

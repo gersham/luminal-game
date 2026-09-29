@@ -15,10 +15,17 @@ pub(super) struct Flight {
 }
 
 pub fn flight_seconds(payload:Payload,range:f64,closing:f64)->f64 {
-    let speed=(payload.delta_v()+closing.max(0.0)).clamp(100.0,0.3*C);
+    if range<=0.0 {return 1.0;}
     let accel=payload.acceleration_g()*G0;
-    let boost_distance=speed*speed/(2.0*accel);
-    (if range<boost_distance {(2.0*range/accel).sqrt()} else {range/speed+speed/(2.0*accel)})
+    let burn=payload.delta_v()/accel;
+    let boost_distance=closing*burn+0.5*accel*burn*burn;
+    let seconds=if range<=boost_distance {
+        // Solve range = inherited closing speed * t + 1/2 a t².
+        // Ignoring the linear term sends fast head-on shots towards a future
+        // meeting point behind their launcher.
+        2.0*range/((closing*closing+2.0*accel*range).sqrt()+closing)
+    } else {burn+(range-boost_distance)/(closing+payload.delta_v()).max(100.0)};
+    seconds
         .min(payload.endurance()).max(range/C).max(1.0)
 }
 pub fn quality(level:sensors::DetectionLevel)->f64 {
@@ -66,7 +73,7 @@ impl World {
         self.probability_flights.insert(id,Flight {due:self.time+seconds,start:self.time,target:m.target_body,
             center_launch,last_course:self.time,closest:f64::INFINITY,correction_left:m.payload.delta_v()*MISSILE_RESERVE_FRACTION.value,
             aim,quality,range,sigma,interceptor:false,chance:0.0,aim_accel:track.as_ref().filter(|_|!center_launch).map_or(Vec2::ZERO,|t|t.accel())});
-        self.debug_note("MISSILE_PLAN",format!("missile={id:?} target={:?} payload={:?} range_km={range} flight_s={seconds} quality={quality} sigma_km={sigma}",m.target_body,m.payload));
+        self.debug_note("MISSILE_PLAN",format!("missile={id:?} target={:?} payload={:?} range_km={range} closing_kms={closing} flight_s={seconds} quality={quality} sigma_km={sigma}",m.target_body,m.payload));
     }
 
     pub(super) fn start_probability_interceptor(&mut self,id:BodyId,fix:sensors::SeekerFix) {
@@ -389,6 +396,12 @@ impl World {
             assert_eq!(world.bodies[1].trajectory.end().is_some(),chance==1.0);
             assert!(world.combat_events(Some(FactionId(0))).iter().any(|e|e.own_body==Some(BodyId(0)) && e.kind==kind),
                 "the outcome must arrive with retirement, not after a light-delay gap");
+            let losses=world.losses.len();
+            let outcomes=world.combat_events(None).iter().filter(|e|e.own_body==Some(BodyId(0)) && e.kind==kind).count();
+            for t in [1.0,10.0,100.0] {world.time=t;world.guide_probability_weapon(BodyId(0));}
+            assert_eq!(world.losses.len(),losses,"a spent interceptor gets no second attempt");
+            assert_eq!(world.combat_events(None).iter().filter(|e|e.own_body==Some(BodyId(0)) && e.kind==kind).count(),outcomes);
+            assert_eq!(world.bodies[1].alive_at(world.time),chance==0.0);
         }
     }
     #[test] fn offensive_retirement_publishes_the_terminal_result_immediately() {
@@ -482,4 +495,75 @@ impl World {
             assert!(fast>=r/C && slow>=r/C);assert!(fast<=slow);
         }}
     }
+    #[test] fn fast_head_on_srm_uses_inherited_closure_in_its_burn_time() {
+        let range=2_000_000.0;let closing=19_000.0;let p=Payload::Kinetic;
+        assert_eq!(flight_seconds(p,0.0,0.0),1.0);
+        let seconds=flight_seconds(p,range,closing);
+        assert!(seconds<range/closing,"boost must beat coasting, not wait until after the ships pass");
+        assert!((closing*seconds+0.5*p.acceleration_g()*G0*seconds*seconds-range).abs()<1e-6);
+        // Its initial straight-course representation must add forward speed,
+        // rather than reversing relative to the launch platform.
+        assert!(range/seconds-closing>0.0);
+        assert!(flight_seconds(p,range,-3000.0)>flight_seconds(p,range,0.0));
+    }
+    #[test] fn head_on_srm_launches_forward_and_local_lasers_can_stop_it() {
+        let mut intercepted=0;let mut hits=0;
+        for seed in 0..48 {
+            let specs=vec![
+                BodySpec {name:"Fast launcher".into(),kind:BodyKind::Ship,faction:FactionId(0),state:State {pos:Vec2::ZERO,vel:Vec2::new(19_000.0,0.0)},thrust:Vec2::ZERO,magazine:10},
+                BodySpec {name:"Defender".into(),kind:BodyKind::Ship,faction:FactionId(1),state:State {pos:Vec2::new(2_000_000.0,0.0),vel:Vec2::ZERO},thrust:Vec2::ZERO,magazine:0}];
+            let mut w=World::new(crate::celestial::System {bodies:vec![]},specs,100.0,seed);
+            for b in &mut w.bodies {b.controls.evade=controls::Mode::Off;b.controls.ecm=controls::Mode::Off;b.controls.screens=controls::Mode::Off;}
+            w.bodies[1].ship_class=Some(ShipClass::Frigate);w.fit_point_defence(BodyId(1));
+            w.bodies[1].point_defence.as_mut().unwrap().rate_hz=0.2;
+            let c=w.contact_id(FactionId(0),BodyId(1));
+            w.perceptions.get_mut(&FactionId(0)).unwrap().ingest(Observation {detection:sensors::DetectionLevel::Resolved,
+                contact:c,sensor:BodyId(0),origin:Vec2::ZERO,emitted_at:0.0,sensor_received_at:0.0,decider_received_at:0.0,
+                source:Source::Echo,snr:1e12,measurement:Measurement::BearingRange {bearing:0.0,range:2_000_000.0,sigma_range:0.1,sigma_bearing:1e-7}},&w.system);
+            let id=w.launch(BodyId(0),c,Payload::Kinetic).unwrap();let due=w.probability_flights[&id].due;
+            w.advance_to(0.001);
+            assert!(w.state(id,w.time).unwrap().vel.x>19_000.0,"missile must gain on its launcher toward the enemy");
+            w.advance_to(due+2.0);
+            intercepted+=usize::from(w.losses.iter().any(|l|l.body==id && matches!(l.cause,LossCause::PointDefence {..})));
+            hits+=usize::from(w.hits.iter().any(|h|h.missile==id));
+        }
+        println!("Fast SRMs: laser kills {intercepted}/48, hull hits {hits}/48");
+        assert!(intercepted>=16,"local lasers must engage before the 5000 km burst: {intercepted}");
+        assert!(hits>0,"point defence must still allow occasional leaks");
+    }
+    #[test]
+    #[ignore = "unsaturated two-layer defence survey"]
+    fn unsaturated_defence_survey() {
+        let trials=std::env::var("LUMINAL_DEFENCE_TRIALS").ok().and_then(|s|s.parse::<usize>().ok()).unwrap_or(96);
+        println!("payload,closing_kms,interceptor_stock,shots,int_kills,pd_engaged,pd_kills,warhead_hits,other_misses");
+        for payload in [Payload::Kinetic,Payload::Nuclear] {for closing in [0.0,2000.0,19000.0] {for depth in [0,1,40] {
+        let mut intercepted=0;let mut hits=0;let mut outer=0;let mut engaged=0;
+        for seed in 0..trials {
+            let specs=vec![
+                BodySpec {name:"Fast launcher".into(),kind:BodyKind::Ship,faction:FactionId(0),state:State {pos:Vec2::ZERO,vel:Vec2::new(closing,0.0)},thrust:Vec2::ZERO,magazine:10},
+                BodySpec {name:"Defender".into(),kind:BodyKind::Ship,faction:FactionId(1),state:State {pos:Vec2::new(0.03*crate::units::AU,0.0),vel:Vec2::ZERO},thrust:Vec2::ZERO,magazine:0}];
+            let mut w=World::new(crate::celestial::System {bodies:vec![]},specs,100.0,seed as u64);
+            for b in &mut w.bodies {b.controls.evade=controls::Mode::Off;b.controls.ecm=controls::Mode::Off;b.controls.screens=controls::Mode::Off;}
+            w.bodies[1].ship_class=Some(ShipClass::Frigate);w.fit_point_defence(BodyId(1));
+            w.bodies[1].point_defence.as_mut().unwrap().rate_hz=0.2;
+            w.bodies[1].interceptor_battery=Some(interceptor::Battery {rounds:depth,launched:0,ready_at:0.0,status:"Ready"});
+            let c=w.contact_id(FactionId(0),BodyId(1));
+            w.perceptions.get_mut(&FactionId(0)).unwrap().ingest(Observation {detection:sensors::DetectionLevel::Resolved,
+                contact:c,sensor:BodyId(0),origin:Vec2::ZERO,emitted_at:0.0,sensor_received_at:0.0,decider_received_at:0.0,
+                source:Source::Echo,snr:1e12,measurement:Measurement::BearingRange {bearing:0.0,range:(0.03*crate::units::AU),sigma_range:0.1,sigma_bearing:1e-7}},&w.system);
+            let id=w.launch(BodyId(0),c,payload).unwrap();let due=w.probability_flights[&id].due;
+            w.advance_to(0.001);
+
+            w.advance_to(due+2.0);
+            intercepted+=usize::from(w.losses.iter().any(|l|l.body==id && matches!(l.cause,LossCause::PointDefence {..})));
+            hits+=usize::from(w.hits.iter().any(|h|h.missile==id));
+            outer+=usize::from(w.losses.iter().any(|l|l.body==id && matches!(l.cause,LossCause::Interceptor {..})));
+            engaged+=usize::from(w.bodies[1].point_defence.unwrap().shots>0);
+        }
+        println!("{payload:?},{closing},{depth},{trials},{outer},{engaged},{intercepted},{hits},{}",trials-outer-intercepted-hits);
+        assert!(outer+intercepted+hits<=trials);
+        if depth==0 {assert!((0.35..=0.65).contains(&(intercepted as f64/trials as f64)),"unsaturated full-pass laser stop rate should remain near 50%: {payload:?} at {closing}: {intercepted}/{trials}");}
+        }}}
+    }
+
 }

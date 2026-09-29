@@ -40,9 +40,8 @@ pub const INTERCEPTOR_HALF_SPEED_C:Param=Param {key:"interceptor.half_speed",val
 pub const INTERCEPTOR_MAX_SPEED_C:Param=Param {key:"interceptor.max_speed",value:0.5,unit:"c",commitment:Proposal,note:"No engagement or kill probability at or above this encounter speed."};
 
 pub const PD_RATE_HZ: Param=Param {key:"point_defence.rate",value:1.0,unit:"shots/s",commitment:Established,note:"Default firing rate per fitted emplacement."};
-pub const PD_HALF_RANGE_LS: Param=Param {key:"point_defence.half_range",value:0.012,unit:"ls",commitment:Proposal,note:"Last-ditch laser defence: 50% per shot at 0.012 ls; hard maximum is 2 ls."};
-pub const PD_LASER_MAX_RANGE_LS: Param=Param {key:"point_defence.laser_last_ditch_range",value:2.0,unit:"ls",commitment:Proposal,note:"Lasers fire within 2 ls; interceptors are the primary outer defence. Hit probability still falls with range."};
-pub const PD_FALLOFF_POWER: Param=Param {key:"point_defence.falloff",value:6.0,unit:"exponent",commitment:Proposal,note:"Hit chance 1/(1+(range/half_range)^6), rapid falloff beyond."};
+pub const PD_PASS_KILL_CHANCE:Param=Param {key:"point_defence.pass_kill_chance",value:0.5,unit:"probability",commitment:Proposal,note:"Nominal cumulative laser kill chance across a complete unsaturated approach, before thermal and subsystem limits."};
+pub const PD_LASER_MAX_RANGE_LS: Param=Param {key:"point_defence.laser_last_ditch_range",value:3.0,unit:"ls",commitment:Proposal,note:"Repeated laser fire across a 3 LS envelope; per-pulse odds use observed closure and fitted battery cadence."};
 pub const PD_MAX_RANGE_LS: Param=Param {key:"point_defence.max_range",value:INTERCEPTOR_RANGE_LS.value,unit:"ls",commitment:Proposal,note:"Interceptor fire-control acquisition reaches 0.27 AU; laser firing retains its separate close-in cutoff."};
 pub const PD_SENSOR_NOISE_FLOOR: Param=Param {key:"point_defence.sensor_noise_floor",value:1e-22,unit:"W/m²",commitment:Proposal,note:"Dedicated missile fire control supports the extended envelope; local passive channel and light-time still required."};
 pub const PD_FLASH_W: Param=Param {key:"point_defence.flash",value:1e9,unit:"W",commitment:Placeholder,note:"Detectable signature of a point-defence discharge; dedicated emplacement power is not yet in the offensive beam capacitor model."};
@@ -103,10 +102,10 @@ pub const MISSILE_MASS_KG: Param = Param {
 
 pub const SCREEN_BUILD_TIME_S: Param = Param {
     key: "screen.build_time",
-    value: 3000.0,
+    value: 30000.0,
     unit: "s",
     commitment: Placeholder,
-    note: "Fifty minutes from empty: 2 percentage points of field charge per minute.",
+    note: "Eight hours twenty minutes from empty: 0.2 percentage points of field charge per minute.",
 };
 
 
@@ -432,7 +431,7 @@ pub const ALL: &[Param] = &[
     PASSIVE_SYSTEMATIC_FRACTION, ACTIVE_SYSTEMATIC_FRACTION, DIRECTION_SYSTEMATIC_RAD,
     SEEKER_RESOLVE_LS, SEEKER_FIX_INTERVAL_S, SEEKER_RANGE_SIGMA_KM,
     HOSTILE_PING_LIFETIME_S,
-    PD_RATE_HZ, PD_HALF_RANGE_LS, PD_LASER_MAX_RANGE_LS, PD_FALLOFF_POWER, PD_MAX_RANGE_LS, PD_SENSOR_NOISE_FLOOR, PD_FLASH_W,
+    PD_RATE_HZ, PD_PASS_KILL_CHANCE, PD_LASER_MAX_RANGE_LS, PD_MAX_RANGE_LS, PD_SENSOR_NOISE_FLOOR, PD_FLASH_W,
     INTERCEPTOR_RANGE_LS, INTERCEPTOR_BURN_S, INTERCEPTOR_LIFETIME_S,
     INTERCEPTOR_LAUNCH_INTERVAL_S, INTERCEPTOR_GUIDE_S, INTERCEPTOR_KILL_RADIUS_KM, INTERCEPTOR_ACCEL_G,
     INTERCEPTOR_HALF_SPEED_C, INTERCEPTOR_MAX_SPEED_C,
@@ -526,9 +525,9 @@ pub const BOT_SALVO_S: Param = Param { key: "doctrine.salvo_interval", value: 12
 
 pub const SHIP_BEAM_AUTO_RANGE_LS: Param = Param {
     key: "ship_beam.auto_range", value: 6.0, unit: "ls", commitment: Placeholder,
-    note: "Close-combat automatic engagement band. Beyond it, automatic fire requires useful predicted energy; directed fire has no range cutoff.",
+    note: "Close-combat automatic engagement band. Beyond it, automatic fire requires useful predicted energy; main-beam coupling tapers to zero at 10 LS, including directed fire.",
 };
-pub const SHIP_BEAM_MIN_EXPECTED_J:Param=Param {key:"ship_beam.min_expected_energy",value:1e9,unit:"J",commitment:Proposal,note:"Minimum expected coupled energy for automatic shots outside knife-fight range, estimated from received track covariance and beam spreading."};
+pub const SHIP_BEAM_MIN_EXPECTED_J:Param=Param {key:"ship_beam.min_expected_energy",value:1e12,unit:"J",commitment:Proposal,note:"Minimum expected coupled energy beyond 6 LS; also requires 5% of emitted energy and transverse uncertainty within two beam radii."};
 
 pub const SHIP_BEAM_ENERGY_J: Param = Param {
     key: "ship_beam.pulse_energy", value: 7.5e13, unit: "J", commitment: Placeholder,
@@ -540,7 +539,7 @@ pub const SHIP_BEAM_RECHARGE_S: Param = Param {
 };
 pub const SHIP_BEAM_DIVERGENCE: Param = Param {
     key: "ship_beam.divergence", value: 1.5e-7, unit: "rad", commitment: Placeholder,
-    note: "Gaussian beam radius per distance. Coupling falls with spot area; useful combat envelope is several light-seconds, without a hard range cutoff.",
+    note: "Gaussian beam radius per distance. Coupling falls with spot area; additional smooth coupling taper applies from 6 to 10 LS.",
 };
 pub const SHIP_BEAM_POINTING_RAD: Param = Param {
     key: "ship_beam.pointing_sigma", value: 5e-8, unit: "rad", commitment: Placeholder,

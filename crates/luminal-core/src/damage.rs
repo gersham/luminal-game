@@ -10,6 +10,7 @@ pub const CRITICAL_MIN_HULL_FRACTION:f64=0.01;
 pub const MISSILE_SCREEN_LEAK_CHANCE:f64=0.35;
 pub const FRIGATE_HULL_HP:f64=1000.0;
 pub const SYSTEM_REPAIR_SECONDS:f64=1200.0;
+pub const HULL_REPAIR_SECONDS_PER_PERCENT:f64=3600.0;
 
 #[derive(Clone,Copy,Debug,PartialEq,Eq)]
 pub enum Condition {Intact,Damaged,Destroyed}
@@ -95,7 +96,7 @@ impl Damage {
         // Emergency damage-control work can restart power without powered systems.
         // Other repair work, including hull restoration, waits for power.
         if self.state(System::Power)==Condition::Intact {
-            self.hull=(self.hull+self.hull_max*0.01*work/600.0).min(self.hull_max);
+            self.hull=(self.hull+self.hull_max*0.01*work/HULL_REPAIR_SECONDS_PER_PERCENT).min(self.hull_max);
         }
         let damaged:Vec<_>=System::ALL.into_iter().filter(|s|self.state(*s)==Condition::Damaged).collect();
         if damaged.is_empty() {self.repair_progress=0.0;self.repair_target=None;return None;}
@@ -189,13 +190,13 @@ mod tests {
         assert_eq!(d.repair(3600.0,&mut rng),Some(System::Repair));
         assert!(d.hull>50.0);
     }
-    #[test] fn hull_repairs_one_percent_per_ten_minutes_without_repairing_armour() {
+    #[test] fn hull_repairs_one_percent_per_hour_without_repairing_armour() {
         let mut d=Damage {hull:400.0,hull_max:500.0,armour:50.0,..Default::default()};
         let mut rng=Rng::new(8);
-        d.repair(600.0,&mut rng);
+        d.repair(3600.0,&mut rng);
         assert_eq!(d.hull,405.0);assert_eq!(d.armour,50.0);
         d.systems[System::Repair as usize]=Condition::Damaged;
-        d.repair(600.0,&mut rng);assert_eq!(d.hull,407.5);
+        d.repair(3600.0,&mut rng);assert_eq!(d.hull,407.5);
     }
     #[test] fn penetrating_hits_damage_systems_twenty_percent_of_the_time() {
         let mut rng=Rng::new(314);
@@ -247,10 +248,10 @@ mod tests {
         d.systems[System::Beam as usize]=Condition::Destroyed;
         for _ in 0..3599 {assert_eq!(d.repair(1.0,&mut rng),None);}
         assert_eq!(d.repair(1.0,&mut rng),Some(System::Repair));
-        assert!((d.hull-43.0).abs()<1e-8);
+        assert!((d.hull-40.5).abs()<1e-8);
         for _ in 0..1199 {assert_eq!(d.repair(1.0,&mut rng),None);}
         assert_eq!(d.repair(1.0,&mut rng),Some(System::Passive));
-        assert!((d.hull-45.0).abs()<1e-8);
+        assert!((d.hull-(40.5+1.0/3.0)).abs()<1e-8);
         assert_eq!(d.armour,0.0);assert_eq!(d.state(System::Beam),Condition::Destroyed);
     }
     #[test] fn disabled_repairs_and_dead_hulls_cannot_regenerate() {

@@ -1,3 +1,5 @@
+Later changes and final 3 LS defence validation: [fire-control-and-defence.md](fire-control-and-defence.md).
+
 # Matched-class combat balance — 28 September 2026
 
 Two passes were run: initial weapon/defence tuning, then a larger validation pass
