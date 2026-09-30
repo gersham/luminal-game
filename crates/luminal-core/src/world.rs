@@ -1433,9 +1433,8 @@ impl World {
         if t<b.spinal_ready_at {return Err(OrderError::BeamRecharging);}
         b.advance_thermal(t);
         let energy=10.0*SHIP_BEAM_ENERGY_J.value*b.ship_class.map_or(1.0,ShipClass::beam_power);
-        let input=energy/BEAM_EFFICIENCY.value;
         let effectiveness=b.operating_effectiveness(crate::damage::System::Beam);
-        if effectiveness<=0.0 || b.thermal.dumping || b.thermal.capacitor_j<input || b.thermal.heat_j+input-energy>BEAM_HEAT_LIMIT_J.value*b.thermal.capacity_scale {return Err(OrderError::PowerOrHeat);}
+        if effectiveness<=0.0 || !b.thermal.can_fire_energy(energy) {return Err(OrderError::PowerOrHeat);}
         let faction=b.faction;let origin=b.trajectory.state_at(t).unwrap().pos;let heading=b.heading_at(t);
         let tr=self.received_picture(id).and_then(|p|p.contacts.get(&target))
             .filter(|c|c.detection(t)>=sensors::DetectionLevel::Resolved).and_then(|c|c.estimate(t,&self.system)).ok_or(OrderError::NoTrack)?;
@@ -1445,7 +1444,7 @@ impl World {
         let target_body=self.body_for_contact(faction,target).ok_or(OrderError::InvalidTarget)?;
         let b=&mut self.bodies[id.0 as usize];
         b.spinal_ready_at=t+120.0/effectiveness;
-        b.thermal.capacitor_j-=input;b.thermal.heat_j+=input-energy;b.thermal.heating_w+=(input-energy)/5.0;b.thermal.emitted_j+=energy;
+        b.thermal.fire_energy(energy);
         b.beam_emitted_j+=energy;b.last_beam=Some((t,origin,origin+aim));
         self.record_beam(t,origin,CombatKind::SpinalPulse,id,target_body,faction);
         self.scheduler.schedule(t+flight.max(0.001),Event::Beam(Beam {interference:false,coherence:self.bodies[id.0 as usize].beam_coherence(t),missile:id,target:target_body,front:Front {origin,t_emit:t},direction:aim.normalized(),ship_energy_j:energy,spinal:true}));
@@ -1934,7 +1933,8 @@ impl World {
         let screened_j=(energy_j-leak).min(room);
         let capacity=SCREEN_CAPACITY_J.value*b.ship_class.map_or(1.0,|c|c.protection());
         if capacity>0.0 {b.thermal.field=(b.thermal.field-screened_j/capacity).max(0.0);}
-        b.thermal.absorb(screened_j);
+        // The screen's stored joules are unchanged. The shared tank feels a full rated screen as a third of its hour.
+        b.thermal.absorb(screened_j*screen_heat_multiplier());
         let installed=b.installed_systems();
         let before=b.damage;
         let mut casualty=b.damage.penetrate(energy_j-screened_j,&installed,&mut self.rng);
@@ -2172,21 +2172,25 @@ impl World {
                 if ping.search_heading.is_none_or(|heading|out_km<=MISSILE_ACTIVE_RANGE_LS*crate::units::LIGHT_SECOND && missile::in_search_cone(heading,rx-ping.front.origin)) {
                     self.echoes.push(Echo { target,emitter: ping.emitter, front: Front { origin: rx, t_emit: t_hit }, out_km, power_w: ping.power_w });
                 }
-                if let Some((_, snr)) = sensors::receive_measurement_scaled(
+                if let Some((measurement, snr)) = sensors::receive_measurement_scaled(
                         self.bodies[target.0 as usize].sensors,
                         ping.signature_w / (1.0 + self.bodies[target.0 as usize].thermal.emission() / SCREEN_GLARE_W.value), out_km, bearing_of(ping.front.origin - rx),self.bodies[target.0 as usize].sensor_effectiveness(), &mut self.rng,
                     ) {
-                    let listener=&self.bodies[target.0 as usize];
-                    if self.bodies[ping.emitter.0 as usize].kind==BodyKind::Missile
-                        || !listener.sensors.direction_finding || listener.sensor_effectiveness()[1]<=0.0 {continue;}
-                    reports.push(Observation {detection:crate::sensors::DetectionLevel::Bearing,
+                    // A missile seeker pulse is not a ship ping. A range the listener
+                    // actually measured is a firing solution; class stays off this report.
+                    if self.bodies[ping.emitter.0 as usize].kind==BodyKind::Missile {continue;}
+                    let detection=match measurement {
+                        Measurement::BearingRange {..}=>sensors::DetectionLevel::Resolved,
+                        Measurement::Bearing {..}=>sensors::DetectionLevel::Bearing,
+                    };
+                    reports.push(Observation {detection,
                         contact: self.contact_id(target_faction, ping.emitter),
                         sensor: target,
                         origin: rx,
                         emitted_at: ping.front.t_emit,
                         sensor_received_at: t_hit,
                         decider_received_at: f64::NAN,
-                        measurement:Measurement::Bearing {bearing:bearing_of(ping.front.origin-rx),sigma:0.002},
+                        measurement,
                         snr,
                         source: Source::Ping,
                     });
@@ -3094,9 +3098,14 @@ mod tests {
         let cold=w.bodies[0].emissivity_factors(0.0).value();
         w.bodies[0].screen_up=true;w.bodies[0].thermal.field=1.0;
         assert_eq!(w.bodies[0].emissivity_factors(0.0).value(),cold,"screens do not inflate EF");
-        w.bodies[0].thermal.add_waste_heat(SHIP_HEAT_LIMIT_J*1.25);
+        w.bodies[0].thermal.add_waste_heat(SHIP_HEAT_LIMIT_J*0.75);
         w.set_thrust(id,Vec2::new(full,0.0)).unwrap();
-        assert!((w.bodies[0].trajectory.last().thrust.length()-full*0.5).abs()<1e-8);
+        assert!((w.bodies[0].trajectory.last().thrust.length()-full*0.5).abs()<1e-6,"75% heat is half thrust");
+        w.bodies[0].thermal.heat_j=SHIP_HEAT_LIMIT_J;
+        w.set_thrust(id,Vec2::new(full,0.0)).unwrap();
+        assert_eq!(w.bodies[0].trajectory.last().thrust,Vec2::ZERO,"a full tank cannot sprint");
+        w.bodies[0].thermal.heat_j=SHIP_HEAT_LIMIT_J*0.75;
+        w.set_thrust(id,Vec2::new(full,0.0)).unwrap();
         let hot=w.bodies[0].emissivity_factors(0.0).value();
         w.set_heat_dump(id,true).unwrap();
         assert!(w.bodies[0].emissivity_factors(0.0).value()>hot*2.0);
@@ -3118,8 +3127,9 @@ mod tests {
         b.damage.hull=1e6;b.damage.hull_max=1e6;
         w.deliver(BodyId(1),0.0,SCREEN_CAPACITY_J.value,Payload::Beam,BodyId(0));
         let b=&w.bodies[1];assert_eq!(b.thermal.field,0.0);
-        assert_eq!(b.thermal.captured_j,SCREEN_CAPACITY_J.value*0.5);
-        assert_eq!(b.thermal.heat_j,SCREEN_CAPACITY_J.value*0.5);
+        let credited=SCREEN_CAPACITY_J.value*0.5*screen_heat_multiplier();
+        assert!((b.thermal.captured_j-credited).abs()<credited*1e-9+1.0);
+        assert!((b.thermal.heat_j-credited).abs()<credited*1e-9+1.0);
         assert!(w.hits[0].energy_j>w.hits[0].screened_j);
         assert!(b.thermal.balance_error().abs()<1.0);
         w.advance_to(60.0);assert!(w.bodies[1].thermal.field>0.0019);
@@ -3413,7 +3423,8 @@ mod tests {
         w.advance_to(2.0);
         assert!(w.bodies[1].thermal.heat_j > 0.0);
         assert_eq!(w.bodies[1].hull_j, 0.0);
-        assert_eq!(w.bodies[1].thermal.captured_j, w.hits[0].energy_j);
+        let credited=w.hits[0].screened_j*screen_heat_multiplier();
+        assert!((w.bodies[1].thermal.captured_j-credited).abs()<credited*1e-9+1.0);
         assert!(w.bodies[1].thermal.balance_error().abs() < 100.0);
 
         let (mut w, c) = beam_trial();
@@ -3434,8 +3445,9 @@ mod tests {
             w.bodies[1].screen_up=true;
             w.bodies[1].thermal.field=1.0;
             w.deliver(BodyId(1),0.0,1e5,payload,BodyId(0));
-            assert_eq!(w.bodies[1].thermal.heat_j,1e5);
-            assert_eq!(w.bodies[1].thermal.captured_j,1e5);
+            let credited=1e5*screen_heat_multiplier();
+            assert!((w.bodies[1].thermal.heat_j-credited).abs()<1.0);
+            assert!((w.bodies[1].thermal.captured_j-credited).abs()<1.0);
             assert_eq!(w.bodies[1].hull_j,0.0);
             let (mut bare, _) = beam_trial();
             bare.bodies[1].has_screen=false;
@@ -4054,11 +4066,53 @@ mod tests {
         assert!(w.perception(FactionId(1)).unwrap().log.iter().all(|o| o.source != Source::Ping));
         w.advance_to(20.0);
         let observer = w.perception(FactionId(1)).unwrap();
-        assert!(observer.log.iter().any(|o| o.source == Source::Ping && matches!(o.measurement, Measurement::Bearing { .. })),"signature {:?}, log {:?}",w.historical_signature(BodyId(0),0.0),observer.log);
+        assert!(observer.log.iter().any(|o| o.source == Source::Ping && o.detection==sensors::DetectionLevel::Resolved && matches!(o.measurement, Measurement::BearingRange { .. })),"a close ping is a position, signature {:?}, log {:?}",w.historical_signature(BodyId(0),0.0),observer.log);
         let ping=observer.log.iter().find(|o|o.source==Source::Ping).unwrap();
         let echo=w.perception(FactionId(0)).unwrap().log.iter().find(|o|o.source==Source::Echo).unwrap();
         assert!(ping.sensor_received_at>=0.01*AU/crate::units::C-0.01);
         assert!(echo.sensor_received_at>ping.sensor_received_at);
+    }
+
+    #[test]
+    fn a_ping_inside_the_boosted_lock_is_a_firing_solution_without_a_class() {
+        use sensors::DetectionLevel as D;
+        let base=Vec2::new(30.0*AU,0.0);
+        let range=1.4*AU;
+        let mut w=World::new(sun(),vec![
+            ship("Pinger",0,base,Vec2::ZERO,Vec2::new(0.0,10.0*G0)),
+            ship("Observer",1,base+Vec2::new(range,0.0),Vec2::ZERO,Vec2::ZERO),
+        ],3000.0,42);
+        for _ in 0..8 {assert!(w.ping(BodyId(0)));}
+        w.advance_to(range/crate::units::C+40.0);
+        let p=w.perception(FactionId(1)).unwrap();
+        let pings:Vec<_>=p.log.iter().filter(|o|o.source==Source::Ping).collect();
+        assert!(pings.iter().any(|o|o.detection==D::Resolved && matches!(o.measurement,Measurement::BearingRange {..})));
+        assert!(pings.iter().all(|o|o.detection!=D::Identity));
+        let c=p.contacts.values().next().unwrap();
+        assert_eq!(c.detection(w.time),D::Resolved);
+        assert!(c.track.is_some());
+        assert!(!c.resolved,"the pulse does not name the hull");
+        let id=*p.contacts.keys().next().unwrap();
+        assert!(w.known_damage(FactionId(1),id).is_none());
+    }
+
+    #[test]
+    fn a_distant_ping_stays_a_bearing() {
+        use sensors::DetectionLevel as D;
+        let base=Vec2::new(40.0*AU,0.0);
+        let range=20.0*AU;
+        let mut w=World::new(sun(),vec![
+            ship("Pinger",0,base,Vec2::ZERO,Vec2::new(0.0,10.0*G0)),
+            ship("Observer",1,base+Vec2::new(range,0.0),Vec2::ZERO,Vec2::ZERO),
+        ],15000.0,42);
+        for _ in 0..8 {assert!(w.ping(BodyId(0)));}
+        w.advance_to(range/crate::units::C+40.0);
+        let p=w.perception(FactionId(1)).unwrap();
+        let pings:Vec<_>=p.log.iter().filter(|o|o.source==Source::Ping).collect();
+        assert!(!pings.is_empty(),"the pulse outruns passive bearing range");
+        assert!(pings.iter().all(|o|o.detection==D::Bearing && matches!(o.measurement,Measurement::Bearing {..})));
+        let c=p.contacts.values().next().unwrap();
+        assert!(c.track.is_none() && !c.resolved);
     }
 
     #[test]

@@ -43,9 +43,9 @@ mod tests {
         w.perceptions.get_mut(&FactionId(0)).unwrap().contacts.clear();
         w.update_system_controls(id);
         assert_eq!(w.bodies[0].drive_limit,50.0*G0);
-        w.bodies[0].thermal.add_waste_heat(SHIP_HEAT_LIMIT_J*1.25);
+        w.bodies[0].thermal.add_waste_heat(SHIP_HEAT_LIMIT_J*0.75);
         w.guide(id);
-        assert!((w.bodies[0].trajectory.last().thrust.length()/G0-25.0).abs()<1e-9);
+        assert!((w.bodies[0].trajectory.last().thrust.length()/G0-25.0).abs()<1e-9,"three quarters of the tank is half of the 50 g sprint");
     }
 
     #[test]

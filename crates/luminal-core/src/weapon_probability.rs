@@ -45,10 +45,11 @@ pub fn hit_chance(payload:Payload,range:f64,quality:f64,sigma:f64,evasion:f64,ec
         *(1.0-0.65*evasion.clamp(0.0,1.0)*(range/nominal).powi(2).min(1.0))*ecm_factor.clamp(0.5,1.0)).clamp(0.0,ceiling)
 }
 
-/// A recent resolved ping removes 40% of the residual fire-control miss chance.
+/// A fresh ship echo closes 90% of the residual fire-control miss. A 75% shot
+/// becomes 97.5% for the minute `active_fire_control` stays up.
 /// Physical interception is checked separately before this is allowed to apply.
 pub fn ping_supported_chance(base:f64,support:f64)->f64 {
-    (base+(1.0-base)*0.4*support.clamp(0.0,1.0)).min(0.995)
+    (base+(1.0-base)*0.9*support.clamp(0.0,1.0)).min(0.995)
 }
 
 impl World {

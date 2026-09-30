@@ -190,7 +190,7 @@ pub const DIRECTION_RANGE_RATIO: Param = Param {
 };
 pub const ACTIVE_EXPOSURE_RANGE: Param = Param {
     key: "active.exposure_range_multiplier", value: 10.0, unit: "", commitment: Established,
-    note: "A ping exposes the emitter at ten times its passive and direction-finding ranges; travels at c.",
+    note: "A ping exposes the emitter at ten times its passive and direction-finding ranges. Inside the boosted passive-lock range that is a position; farther out it stays a bearing. Class is not on the pulse. Travels at c.",
 };
 pub const PASSIVE_RANGE_FRACTION: Param = Param {
     key: "passive.range_sigma_fraction", value: 0.001, unit: "", commitment: Proposal,
@@ -554,6 +554,21 @@ pub const HEAT_FULL_BURN_S: f64 = 3600.0;
 pub const HEAT_DUMP_RATE: f64 = 5.0;
 pub const HEAT_DUMP_SIGNATURE: f64 = 10.0;
 pub const PD_WASTE_HEAT_J: f64 = 5e12;
+/// One full rated screen (protection 1) credits this fraction of a scale-1 tank.
+pub const SCREEN_HEAT_TANK_FRACTION: f64 = 1.0 / 3.0;
+/// One frigate beam shot credits this fraction of a scale-1 tank as waste heat.
+pub const BEAM_SHOT_HEAT_FRACTION: f64 = 0.01;
+
+/// Screen absorption is stored energy. Scale it into the shared tank at the credit site.
+pub const fn screen_heat_multiplier() -> f64 {
+    SHIP_HEAT_LIMIT_J * SCREEN_HEAT_TANK_FRACTION / SCREEN_CAPACITY_J.value
+}
+
+/// Beam waste is `energy * (1/efficiency - 1)` before this scale. Point defence stays unscaled.
+pub const fn beam_waste_multiplier() -> f64 {
+    let raw = SHIP_BEAM_ENERGY_J.value * (1.0 / BEAM_EFFICIENCY.value - 1.0);
+    SHIP_HEAT_LIMIT_J * BEAM_SHOT_HEAT_FRACTION / raw
+}
 
 #[cfg(test)]
 mod tests {

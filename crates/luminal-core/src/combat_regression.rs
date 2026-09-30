@@ -68,7 +68,7 @@ fn nominal_lrm_is_75_percent_and_active_support_improves_both_payloads() {
         assert!(ping_supported_chance(passive,1.0)>passive);
         assert_eq!(ping_supported_chance(passive,0.0),passive);
     }
-    assert!((ping_supported_chance(0.75,1.0)-0.85).abs()<1e-12);
+    assert!((ping_supported_chance(0.75,1.0)-0.975).abs()<1e-12);
 }
 
 #[test]

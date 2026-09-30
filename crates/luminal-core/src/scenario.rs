@@ -893,7 +893,13 @@ mod tests {
         assert!(9.0*HIDE_ESCAPE_S<to_quarry,"a 9 km/s coast cannot reach the hunting ground");
         let burn=50.0*60.0;
         let reach=ShipClass::Frigate.max_g()*G0*burn*(HIDE_ESCAPE_S-burn/2.0);
-        assert!(burn<3600.0 && reach>to_quarry,"a burn under the heat wall can still arrive");
+        // Thrust stays full until half a tank. That is one rated hour, so fifty minutes still arrives.
+        let mut rated=crate::thermal::Thermal::default();
+        rated.advance_with_drive(burn,false,1.0,1.0,crate::thermal::Thermal::drive_power(1.0));
+        assert_eq!(rated.thrust_factor(),1.0,"fifty minutes of rated thrust is still under half a tank");
+        assert!(rated.heat_fraction()<0.5);
+        assert!(reach>HIDE_QUARRY_LEG_AU*AU,"the longest quarry leg is inside that burn");
+        assert!(burn<3600.0 && reach>to_quarry,"a fifty-minute burn still has full acceleration and can arrive");
         for seed in [1_u64,7,99,256,1024] {
             let placed=Scenario::HideAndSeek.build(seed,home_system());
             let hunter=placed.bodies[0].trajectory.state_at(0.0).unwrap().pos;

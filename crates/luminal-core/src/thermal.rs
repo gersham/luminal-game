@@ -31,7 +31,14 @@ impl Thermal {
     pub fn capacitor_capacity(&self)->f64 {BEAM_CAPACITOR_J.value*self.capacity_scale*self.capacitor_multiplier}
     pub fn cooling_rate(&self)->f64 {if self.dumping {HEAT_DUMP_RATE} else {1.0}}
     pub fn heat_fraction(&self)->f64 {self.heat_j/(SHIP_HEAT_LIMIT_J*self.capacity_scale)}
-    pub fn thrust_factor(&self)->f64 {(1.0-2.0*(self.heat_fraction()-1.0).max(0.0)).clamp(0.0,1.0)}
+    /// Full thrust through half a tank, then a straight fall to zero at the limit.
+    pub fn thrust_factor(&self)->f64 {(1.0-2.0*(self.heat_fraction()-0.5).max(0.0)).clamp(0.0,1.0)}
+    pub fn at_fraction(heat_fraction:f64,capacity_scale:f64)->Self {
+        Self {capacity_scale,heat_j:heat_fraction*SHIP_HEAT_LIMIT_J*capacity_scale,..Self::default()}
+    }
+    /// Seconds of rated thrust until the tank is full. `Some(0)` at or past the limit.
+    pub fn rated_burn_left(&self)->Option<f64> {self.time_to_throttle(Self::drive_power(1.0)*self.capacity_scale)}
+    pub fn beam_waste(energy:f64)->f64 {energy*(1.0/BEAM_EFFICIENCY.value-1.0)*beam_waste_multiplier()}
     pub fn drive_power(fraction:f64)->f64 {
         0.5*SHIP_HEAT_LIMIT_J/(HULL_COOLING_S.value*(1.0-(-HEAT_FULL_BURN_S/HULL_COOLING_S.value).exp()))/(1.0-HEAT_BALANCED_THRUST.powi(2)-SCREEN_IDLE_HEAT_FRACTION)*fraction.max(0.0).powi(2)
     }
@@ -104,14 +111,18 @@ impl Thermal {
     pub fn can_fire(&self) -> bool {self.can_fire_energy(SHIP_BEAM_ENERGY_J.value)}
     pub fn can_fire_energy(&self,energy:f64)->bool {
         !self.dumping && self.capacitor_j >= energy / BEAM_EFFICIENCY.value
-            && self.heat_j + energy * (1.0 / BEAM_EFFICIENCY.value - 1.0) <= BEAM_HEAT_LIMIT_J.value*self.capacity_scale
+            && self.heat_j + Self::beam_waste(energy) <= BEAM_HEAT_LIMIT_J.value*self.capacity_scale
     }
     pub fn fire(&mut self) {self.fire_energy(SHIP_BEAM_ENERGY_J.value);}
     pub fn fire_energy(&mut self,energy:f64) {
         let input = energy / BEAM_EFFICIENCY.value;
+        let raw = input - energy;
+        let waste = raw * beam_waste_multiplier();
         self.capacitor_j -= input;
-        self.heat_j += input - energy;
-        self.heating_w+=(input-energy)/5.0;
+        self.heat_j += waste;
+        self.heating_w += waste / 5.0;
+        // The capacitor already paid `raw`. The rest of the scaled waste is new heat.
+        self.generated_j += waste - raw;
         self.emitted_j += energy;
     }
     pub fn balance_error(&self) -> f64 {
@@ -168,9 +179,21 @@ mod tests {
         assert_eq!(thermal.thrust_factor(),1.0);
         thermal.advance_with_drive(3600.0,false,1.0,1.0,power);
         assert!((thermal.heat_fraction()-0.5).abs()<1e-10);
+        // The one-second steps land a hair over half a tank. The curve itself is full thrust at exactly half.
+        assert!((thermal.thrust_factor()-1.0).abs()<1e-9,"a one-hour burn is still full thrust");
+        assert_eq!(Thermal::at_fraction(0.5,1.0).thrust_factor(),1.0,"the fall starts at half a tank");
+        assert!((Thermal::at_fraction(0.75,1.0).thrust_factor()-0.5).abs()<1e-12);
+        assert_eq!(Thermal::at_fraction(1.0,1.0).thrust_factor(),0.0);
+        assert_eq!(Thermal::at_fraction(1.25,1.0).thrust_factor(),0.0);
         thermal.advance_with_drive(threshold+400.0,false,1.0,1.0,power);
-        assert!(thermal.thrust_factor()<1.0);
+        assert_eq!(thermal.thrust_factor(),0.0);
         assert!(thermal.balance_error().abs()<1e5);
+        let cold=Thermal::default().rated_burn_left().unwrap();
+        let half=Thermal::at_fraction(0.5,1.0).rated_burn_left().unwrap();
+        assert!(cold>3.0*3600.0 && cold<3.2*3600.0);
+        assert!(half>0.0 && half<cold);
+        assert_eq!(Thermal::at_fraction(1.0,1.0).rated_burn_left(),Some(0.0));
+        assert_eq!(Thermal::at_fraction(1.2,2.0).rated_burn_left(),Some(0.0));
     }
     #[test]
     fn dump_radiates_faster_stays_conservative_and_remains_on() {
@@ -210,32 +233,35 @@ mod tests {
     }
 
     #[test]
-    fn doubled_beam_cadence_is_supported_by_power_and_cooling() {
+    fn a_frigate_shot_is_one_percent_and_the_gate_matches_the_heat() {
         let mut thermal=Thermal::default();
-        let mut next=0.0;
-        let mut shots=0;
-        let mut old_cap=BEAM_CAPACITOR_J.value;
-        let mut old_heat=0.0;
-        let mut old_next=0.0;
-        let mut old_shots=0;
-        let input=SHIP_BEAM_ENERGY_J.value/BEAM_EFFICIENCY.value;
-        let waste=input-SHIP_BEAM_ENERGY_J.value;
-        for tick in 0..=3600 {
-            let t=tick as f64*0.5;
-            thermal.advance(t,false);
-            if t>=next && thermal.can_fire() {
-                thermal.fire();shots+=1;next=t+SHIP_BEAM_RECHARGE_S.value;
-            }
-            if tick>0 {
-                old_cap=(old_cap+7.5e12*0.5).min(BEAM_CAPACITOR_J.value);
-                old_heat*=(-0.5_f64/120.0).exp();
-            }
-            if t>=old_next && old_cap>=input && old_heat+waste<=BEAM_HEAT_LIMIT_J.value {
-                old_cap-=input;old_heat+=waste;old_shots+=1;old_next=t+10.0;
-            }
+        assert!(thermal.can_fire());
+        thermal.fire();
+        assert!((thermal.heat_fraction()-BEAM_SHOT_HEAT_FRACTION).abs()<1e-12);
+        assert!(thermal.balance_error().abs()<1.0);
+        for _ in 0..3 {
+            thermal.capacitor_j=thermal.capacitor_capacity();
+            assert!(thermal.can_fire());
+            thermal.fire();
         }
-        let ratio=shots as f64/old_shots as f64;
-        assert!((1.9..2.1).contains(&ratio),"new {shots}, old {old_shots}");
+        assert!((thermal.heat_fraction()-4.0*BEAM_SHOT_HEAT_FRACTION).abs()<1e-9);
+        assert!(thermal.can_fire(),"four shots stay inside the beam limit");
+        let waste=Thermal::beam_waste(SHIP_BEAM_ENERGY_J.value);
+        let mut gate=Thermal::default();
+        let limit=BEAM_HEAT_LIMIT_J.value*gate.capacity_scale;
+        gate.heat_j=limit-waste;
+        assert!(gate.can_fire_energy(SHIP_BEAM_ENERGY_J.value),"room for one scaled shot");
+        // One joule is smaller than the unit in the last place of this tank, so the overshoot is a tiny representable margin.
+        let margin=limit*1e-9;
+        gate.heat_j+=margin;
+        assert!(margin>1.0 && !gate.can_fire_energy(SHIP_BEAM_ENERGY_J.value),"the last shot must not overshoot");
+        assert!((screen_heat_multiplier()*SCREEN_CAPACITY_J.value/SHIP_HEAT_LIMIT_J-SCREEN_HEAT_TANK_FRACTION).abs()<1e-12);
+        let mut battleship=Thermal {capacity_scale:8.0,capacitor_j:BEAM_CAPACITOR_J.value*8.0*2.0,capacitor_multiplier:2.0,..Default::default()};
+        let spinal=10.0*SHIP_BEAM_ENERGY_J.value*4.0;
+        assert!(battleship.can_fire_energy(spinal));
+        battleship.fire_energy(spinal);
+        assert!((battleship.heat_fraction()-0.05).abs()<1e-9,"a spinal shot is the same waste scale");
+        assert!(battleship.balance_error().abs()<1.0);
         assert_eq!(SHIP_BEAM_RECHARGE_S.value,5.0);
     }
     #[test]

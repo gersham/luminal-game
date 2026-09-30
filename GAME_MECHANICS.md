@@ -21,9 +21,10 @@ LRM permits speculative launches at bearing-only or low-confidence contacts;
 SRM retains the 1% estimated-hit-chance gate. Neither receives target truth.
 Active detection reaches 1 AU for the reference suite (SNR 9); resolution is
 guaranteed for an unobstructed received return within half that radius (0.5 AU,
-SNR 144). Outer-band returns provide bearings only. Triangulated bearings and
-intercepted pings do not identify a class: these remain T-number bearings until
-direct passive localisation or a usable active return. The station currently
+SNR 144). Outer-band returns provide bearings only. Triangulated bearings do not
+identify a class. An intercepted ping loud enough to localize is a position and a
+firing solution, still without class, screens, or heat; a quieter ping stays a bearing.
+Class waits for direct passive localisation or a usable active return. The station currently
 has direction finding only: active and passive sensors are disabled from startup.
 Clicking LRM or SRM directly queues that type; there is no separate Launch step. Ship interceptor
 stock is 30, station stock 20. Interceptors never target interceptors and do not

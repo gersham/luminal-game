@@ -667,7 +667,7 @@ impl World {
         let Some(id)=self.body_for_contact(f,obs.contact) else {return};
         let Some((at,b))=self.refinement.telemetry.get(&id).and_then(|h|h.iter().rev().find(|(at,_)|*at<=obs.emitted_at)) else {return};
         if !matches!(b.kind,BodyKind::Ship|BodyKind::Station) {return;}
-        let report=crate::damage::Report {damage:b.damage,installed:b.installed_systems(),observed_at:*at,screen_available:b.screen_available()};
+        let report=crate::damage::Report {damage:b.damage,installed:b.installed_systems(),observed_at:*at,screen_available:b.screen_available(),heat_fraction:b.thermal.heat_fraction()};
         let key=(f,obs.contact);
         if self.refinement.damage_reports.get(&key).is_none_or(|old|old.observed_at<report.observed_at) {self.refinement.damage_reports.insert(key,report);}
     }
@@ -820,24 +820,31 @@ mod tests {
         let mut w=fleet();
         w.bodies[1].faction=FactionId(1);
         let c=w.contact_id(FactionId(0),BodyId(1));
+        w.bodies[1].thermal.heat_j=0.4*SHIP_HEAT_LIMIT_J*w.bodies[1].thermal.capacity_scale;
         w.tactical_frame();
         let mut obs=Observation {detection:crate::sensors::DetectionLevel::Identity,contact:c,sensor:BodyId(0),origin:w.state(BodyId(0),0.0).unwrap().pos,
             emitted_at:0.0,sensor_received_at:10.0,decider_received_at:10.0,
             measurement:Measurement::BearingRange {bearing:0.0,range:10.0*LIGHT_SECOND,sigma_range:1.0,sigma_bearing:1e-5},snr:1e6,source:Source::Echo};
         w.bodies[1].damage.systems[crate::damage::System::Passive as usize]=crate::damage::Condition::Destroyed;
         w.bodies[1].screen_up=true;w.bodies[1].controls.screens=controls::Mode::On;w.bodies[1].thermal.field=0.5;
+        w.bodies[1].thermal.heat_j=0.9*SHIP_HEAT_LIMIT_J*w.bodies[1].thermal.capacity_scale;
         w.time=5.0;w.observe_damage(&obs);
         assert!(w.known_damage(FactionId(0),c).is_none());
         w.time=10.0;w.observe_damage(&obs);
         assert_eq!(w.known_damage(FactionId(0),c).unwrap().damage.state(crate::damage::System::Passive),crate::damage::Condition::Intact);
         assert_eq!(w.known_damage(FactionId(0),c).unwrap().screen_available,0.0,"no live shield state leaks into an old echo");
+        assert!((w.known_damage(FactionId(0),c).unwrap().heat_fraction-0.4).abs()<1e-12,"the echo keeps the heat from reflection time");
         w.tactical_frame();
+        let reflected=w.bodies[1].thermal.heat_fraction();
+        assert!(reflected>0.8 && reflected<0.9,"the t=10 sample has cooled off the 0.9 that was set before the frame");
+        w.bodies[1].thermal.heat_j=0.15*SHIP_HEAT_LIMIT_J*w.bodies[1].thermal.capacity_scale;
         obs.emitted_at=10.0;obs.sensor_received_at=20.0;obs.decider_received_at=30.0;
         w.time=20.0;w.observe_damage(&obs);
         assert_eq!(w.known_damage(FactionId(0),c).unwrap().observed_at,0.0);
         w.time=30.0;w.observe_damage(&obs);
         assert_eq!(w.known_damage(FactionId(0),c).unwrap().damage.state(crate::damage::System::Passive),crate::damage::Condition::Destroyed);
         assert!(w.known_damage(FactionId(0),c).unwrap().screen_available>0.0);
+        assert!((w.known_damage(FactionId(0),c).unwrap().heat_fraction-reflected).abs()<1e-12,"a later echo keeps reflection-time heat, not the live tank");
     }
     #[test]
     fn fresh_ping_replaces_its_previous_indication_without_duplicates() {

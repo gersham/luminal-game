@@ -105,6 +105,50 @@ fn station_detour(ship:&BodyView,site:&crate::world::SensorSite,destination:crat
     Some(if (a-destination).length()<(b-destination).length() {a} else {b})
 }
 
+/// A tracked ship, station, or missile inside nuclear range. Probes are not a reason to keep the radiators shut.
+fn threat_in_reach(view:&View,ship:&BodyView)->bool {
+    let reach=Payload::Nuclear.engagement_range();
+    view.contacts.iter().any(|c| {
+        if c.stale {return false;}
+        if matches!(c.resolved_kind,Some(BodyKind::Probe)) {return false;}
+        c.track.as_ref().is_some_and(|tr|(tr.pos-ship.pos).length()<=reach)
+    })
+}
+
+fn cruise_g(thermal:&crate::thermal::Thermal,class:ShipClass)->f64 {
+    let mut steady=*thermal;
+    steady.dumping=false;
+    // Equilibrium at a full tank: about 91% of class maximum, not the cold half-thrust balance.
+    steady.sustainable_thrust_fraction()*class.max_g()
+}
+
+/// Past 70% heat, hold cruise and keep the radiators shut while something is still in reach.
+/// Dump only in a clear picture. A sensor-site detour never opens the radiators, and its 20 g limit is left alone.
+fn push_heat(out:&mut Vec<Command>,b:&BodyView,view:&View,detouring:bool) {
+    let fraction=b.thermal.heat_fraction();
+    let class=b.ship_class.unwrap_or(ShipClass::Frigate);
+    let cruise=cruise_g(&b.thermal,class);
+    let at_cruise=(b.drive_limit/G0-cruise).abs()<=0.01;
+    if detouring {
+        if b.thermal.dumping {out.push(Command::SetHeatDump {body:b.id,enabled:false});}
+        return;
+    }
+    let nearby=threat_in_reach(view,b);
+    if nearby && b.thermal.dumping {
+        out.push(Command::SetHeatDump {body:b.id,enabled:false});
+    } else if fraction>0.7 && !nearby && !b.thermal.dumping {
+        out.push(Command::SetHeatDump {body:b.id,enabled:true});
+    } else if b.thermal.dumping && fraction<0.25 {
+        out.push(Command::SetHeatDump {body:b.id,enabled:false});
+    }
+    if fraction>0.7 && nearby {
+        // Reissued so an earlier full-power limit in this same order list does not win.
+        out.push(Command::SetDriveLimit {body:b.id,g:cruise});
+    } else if at_cruise {
+        out.push(Command::SetDriveLimit {body:b.id,g:class.max_g()});
+    }
+}
+
 impl Doctrine {
     pub fn orders(&mut self, view: &View) -> Vec<Command> {
         let mut out = vec![];
@@ -135,15 +179,12 @@ impl Doctrine {
                     let away=view.contacts.iter().filter_map(|c|c.track.as_ref()).min_by(|a,c|
                         (a.pos-b.pos).length().total_cmp(&(c.pos-b.pos).length())).map_or(crate::kinematics::Vec2::new(1.0,0.0),|tr|(b.pos-tr.pos).normalized());
                     out.push(Command::MoveTo {body:b.id,point:b.pos+away*AU});
-                    if b.thermal.heat_fraction()>1.0 && !b.thermal.dumping {out.push(Command::SetHeatDump {body:b.id,enabled:true});}
-                    else if b.thermal.dumping && b.thermal.heat_fraction()<0.25 {out.push(Command::SetHeatDump {body:b.id,enabled:false});}
+                    push_heat(&mut out,b,view,false);
                 } else {out.push(Command::Surrender {body:b.id});}
                 continue;
             }
             let goal=if b.damage.operating_effectiveness(S::Propulsion)==0.0 {RepairGoal::Automatic} else {RepairGoal::Fight};
             if damage.repair_goal!=goal {out.push(Command::SetRepairGoal {body:b.id,goal});}
-            if b.thermal.heat_fraction()>1.0 && !b.thermal.dumping {out.push(Command::SetHeatDump {body:b.id,enabled:true});}
-            else if b.thermal.dumping && b.thermal.heat_fraction()<0.25 {out.push(Command::SetHeatDump {body:b.id,enabled:false});}
             let (target,engage)=choose_target(view,b);
             let objective=view.objective.as_ref().filter(|o|o.attacker==b.faction);
             let site=objective.and_then(|o|o.sensor_site.as_ref());
@@ -164,6 +205,7 @@ impl Doctrine {
                 out.push(Command::MoveTo {body:b.id,point});
                 if b.beam_auto || b.beam_target.is_some() {out.push(Command::EngageBeam {body:b.id,target:None});}
                 if b.missile_queued.iter().any(|n|*n>0) {out.push(Command::CancelLaunches {body:b.id});}
+                push_heat(&mut out,b,view,true);
                 continue;
             }
             let stance=view.objective.as_ref().map(|o|o.stance).unwrap_or(Stance::Intercept);
@@ -180,6 +222,7 @@ impl Doctrine {
                             out.push(Command::SetDriveLimit {body:b.id,g:class.max_g()});
                         }
                     }
+                    push_heat(&mut out,b,view,false);
                     continue;
                 }
             }
@@ -203,9 +246,10 @@ impl Doctrine {
                     let burning=b.autopilot.is_none() && (b.thrust-thrust).length()<thrust.length()*0.05;
                     if !burning {out.push(Command::SetThrust {body:b.id,thrust});}
                 } else {out.push(Command::MoveTo {body:b.id,point});}
+                push_heat(&mut out,b,view,false);
                 continue;
             }
-            if running && target.is_none() {continue;}
+            if running && target.is_none() {push_heat(&mut out,b,view,false);continue;}
             if target.is_none() && view.time >= *self.ping_at.get(&b.id).unwrap_or(&0.0) {
                 out.push(Command::Ping { body: b.id });
                 self.ping_at.insert(b.id,view.time+BOT_PING_S.value);
@@ -217,7 +261,7 @@ impl Doctrine {
                 out.push(Command::DeployProbe {body:b.id,direction,destination});
                 self.probe_at.insert(b.id,view.time+PROBE_PING_INTERVAL_S.value);
             }
-            let Some(c) = target else { continue };
+            let Some(c) = target else { push_heat(&mut out,b,view,false); continue };
             if self.targets.insert(b.id,c.id).is_some_and(|previous|previous!=c.id) {
                 if b.missile_queued.iter().any(|n|*n>0) {out.push(Command::CancelLaunches {body:b.id});}
                 self.salvo_at.remove(&b.id);
@@ -284,6 +328,7 @@ impl Doctrine {
                 }
                 self.salvo_at.insert(b.id, view.time+if close {1.0} else {BOT_SALVO_S.value*if conserve {3.0} else {1.0}});
             }
+            push_heat(&mut out,b,view,false);
         }
         out
     }
@@ -292,6 +337,7 @@ impl Doctrine {
 #[cfg(test)]
 mod tests {
     use crate::units::LIGHT_SECOND;
+    use crate::world::BodyId;
     use super::*;
     use crate::session::{LocalSession,Role,ContactView,TrackView};
     use crate::mind::{ContactId,Source};
@@ -556,7 +602,7 @@ mod tests {
         let ship=view.bodies.iter().find(|b|b.controllable).unwrap().id;
         let origin=view.bodies.iter().find(|b|b.id==ship).unwrap().pos;
         let mut contact=resolved_ship(7,origin+Vec2::new(4.0*LIGHT_SECOND,0.0));
-        contact.damage=Some(Report {damage:Damage::default(),installed:[true;System::COUNT],observed_at:0.0,screen_available:1.0});
+        contact.damage=Some(Report {damage:Damage::default(),installed:[true;System::COUNT],observed_at:0.0,screen_available:1.0,heat_fraction:0.0});
         view.contacts=vec![contact];
         let body=view.bodies.iter_mut().find(|b|b.id==ship).unwrap();
         body.beam_auto=true;
@@ -602,7 +648,7 @@ mod tests {
         let ship=picket.bodies.iter().find(|b|b.controllable).unwrap().id;
         let origin=picket.bodies.iter().find(|b|b.id==ship).unwrap().pos;
         let mut contact=resolved_ship(7,origin+Vec2::new(4.0*LIGHT_SECOND,0.0));
-        contact.damage=Some(Report {damage:Damage::default(),installed:[true;System::COUNT],observed_at:0.0,screen_available:0.1});
+        contact.damage=Some(Report {damage:Damage::default(),installed:[true;System::COUNT],observed_at:0.0,screen_available:0.1,heat_fraction:0.0});
         picket.contacts=vec![contact];
         picket.bodies.iter_mut().find(|b|b.id==ship).unwrap().beam_auto=false;
         let orders=Doctrine::default().orders(&picket);
@@ -630,6 +676,139 @@ mod tests {
         let orders=Doctrine::default().orders(&stranded);
         assert!(orders.iter().any(|o|matches!(o,Command::Withdraw {..})));
         assert!(!orders.iter().any(|o|matches!(o,Command::Surrender {..}|Command::KeepRange {..})));
+    }
+
+    fn heat_ship(view:&mut View,fraction:f64,dumping:bool)->BodyId {
+        let ship=view.bodies.iter_mut().find(|b|b.controllable).unwrap();
+        let scale=ship.ship_class.unwrap().scale();
+        ship.thermal=crate::thermal::Thermal::at_fraction(fraction,scale);
+        ship.thermal.dumping=dumping;
+        ship.id
+    }
+    fn drive_limits(orders:&[Command],id:BodyId)->Vec<f64> {
+        orders.iter().filter_map(|c|match c {Command::SetDriveLimit {body,g} if *body==id => Some(*g),_=>None}).collect()
+    }
+    fn radiator_commands(orders:&[Command],id:BodyId)->Vec<bool> {
+        orders.iter().filter_map(|c|match c {Command::SetHeatDump {body,enabled} if *body==id => Some(*enabled),_=>None}).collect()
+    }
+    fn tracked(kind:Option<BodyKind>,missile:bool,stale:bool,pos:Vec2)->ContactView {
+        let mut contact=resolved_ship(8,pos);
+        contact.resolved_kind=kind;
+        contact.resolved_missile=missile;
+        contact.stale=stale;
+        if missile || !matches!(kind,Some(BodyKind::Ship)) {contact.resolved_class=None;}
+        contact
+    }
+
+    #[test]
+    fn heat_holds_cruise_near_a_threat_and_dumps_only_when_clear() {
+        let mut clear=encounter_view();
+        let id=heat_ship(&mut clear,0.8,false);
+        let orders=Doctrine::default().orders(&clear);
+        assert_eq!(radiator_commands(&orders,id),vec![true],"a hot ship opens the radiators when nothing is inside 1.4 AU");
+        assert!(drive_limits(&orders,id).is_empty(),"an open picture does not throttle the drive");
+        let cruise=cruise_g(&clear.bodies.iter().find(|b|b.id==id).unwrap().thermal,clear.bodies.iter().find(|b|b.id==id).unwrap().ship_class.unwrap());
+        let max_g=clear.bodies.iter().find(|b|b.id==id).unwrap().ship_class.unwrap().max_g();
+        assert!(cruise>20.0+1.0 && cruise<max_g-1.0,"cruise {cruise:.2}g sits under the class maximum {max_g:.0}g");
+        assert!((cruise-SHIP_MAX_ACCEL_G.value).abs()>1.0,"cruise must not be the sensor-site full-power limit");
+
+        for (label,contact) in [
+            ("ship",tracked(Some(BodyKind::Ship),false,false,Vec2::new(0.5*AU,0.0))),
+            ("station",tracked(Some(BodyKind::Station),false,false,Vec2::new(0.5*AU,0.0))),
+            ("missile",tracked(Some(BodyKind::Missile),true,false,Vec2::new(0.5*AU,0.0))),
+            ("unidentified",tracked(None,false,false,Vec2::new(0.5*AU,0.0))),
+        ] {
+            let mut view=encounter_view();
+            let id=heat_ship(&mut view,0.8,false);
+            view.objective.as_mut().unwrap().sensor_site=Some(crate::world::SensorSite {pos:Vec2::new(40.0*AU,0.0),sensors:crate::sensors::SensorSuite::FULL});
+            view.contacts=vec![contact];
+            let orders=Doctrine::default().orders(&view);
+            let limits=drive_limits(&orders,id);
+            assert!((limits.last().copied().unwrap_or(0.0)-cruise).abs()<1e-6,"{label} in reach cruises, last limit {limits:?}");
+            assert!(!radiator_commands(&orders,id).contains(&true),"{label} in reach keeps the radiators shut");
+        }
+
+        let mut closing=encounter_view();
+        let id=heat_ship(&mut closing,0.4,true);
+        closing.contacts=vec![tracked(Some(BodyKind::Ship),false,false,Vec2::new(0.5*AU,0.0))];
+        let orders=Doctrine::default().orders(&closing);
+        assert_eq!(radiator_commands(&orders,id),vec![false],"an open radiator shuts as soon as a threat is in reach");
+        assert!(drive_limits(&orders,id).is_empty(),"below 0.7 a nearby threat does not impose cruise");
+
+        let mut probe=encounter_view();
+        let id=heat_ship(&mut probe,0.8,false);
+        probe.contacts=vec![tracked(Some(BodyKind::Probe),false,false,Vec2::new(0.2*AU,0.0))];
+        let orders=Doctrine::default().orders(&probe);
+        assert_eq!(radiator_commands(&orders,id),vec![true],"a probe is not a reason to keep the radiators shut");
+        assert!(drive_limits(&orders,id).is_empty());
+
+        let mut stale=encounter_view();
+        let id=heat_ship(&mut stale,0.8,false);
+        let mut bearing=tracked(Some(BodyKind::Ship),false,false,Vec2::new(0.2*AU,0.0));
+        bearing.track=None;
+        stale.contacts=vec![bearing,tracked(Some(BodyKind::Ship),false,true,Vec2::new(0.2*AU,0.0))];
+        let orders=Doctrine::default().orders(&stale);
+        assert_eq!(radiator_commands(&orders,id),vec![true],"a stale track or a bearing with no position is not in reach");
+        assert!(drive_limits(&orders,id).is_empty());
+
+        let mut cool=encounter_view();
+        let id=heat_ship(&mut cool,0.2,true);
+        cool.contacts.clear();
+        let orders=Doctrine::default().orders(&cool);
+        assert_eq!(radiator_commands(&orders,id),vec![false],"radiators close again below a quarter tank");
+
+        let mut held=encounter_view();
+        let id=heat_ship(&mut held,0.4,true);
+        held.contacts.clear();
+        let orders=Doctrine::default().orders(&held);
+        assert!(radiator_commands(&orders,id).is_empty(),"an open dump between 0.25 and 0.7 stays open in a clear picture");
+
+        let mut restore=encounter_view();
+        let id=heat_ship(&mut restore,0.4,false);
+        let cruise=cruise_g(&restore.bodies.iter().find(|b|b.id==id).unwrap().thermal,restore.bodies.iter().find(|b|b.id==id).unwrap().ship_class.unwrap());
+        restore.bodies.iter_mut().find(|b|b.id==id).unwrap().drive_limit=cruise*G0;
+        restore.contacts=vec![tracked(Some(BodyKind::Ship),false,false,Vec2::new(0.5*AU,0.0))];
+        let orders=Doctrine::default().orders(&restore);
+        assert!((drive_limits(&orders,id).last().copied().unwrap_or(0.0)-max_g).abs()<1e-6,"heat at or under 0.7 restores the class maximum from cruise");
+        assert!(radiator_commands(&orders,id).is_empty());
+
+        let mut detour_limit=encounter_view();
+        let id=heat_ship(&mut detour_limit,0.4,false);
+        detour_limit.bodies.iter_mut().find(|b|b.id==id).unwrap().drive_limit=20.0*G0;
+        detour_limit.contacts.clear();
+        let orders=Doctrine::default().orders(&detour_limit);
+        assert!(drive_limits(&orders,id).is_empty(),"a 20 g limit is not cruise and is left alone");
+
+        let mut detour=encounter_view();
+        let id=heat_ship(&mut detour,0.85,false);
+        detour.contacts.clear();
+        detour.bodies.iter_mut().find(|b|b.id==id).unwrap().pos=Vec2::ZERO;
+        detour.objective.as_mut().unwrap().sensor_site=Some(crate::world::SensorSite {pos:Vec2::new(0.2*AU,0.0),sensors:crate::sensors::SensorSuite::FULL});
+        let orders=Doctrine::default().orders(&detour);
+        assert!(!radiator_commands(&orders,id).contains(&true),"a sensor-site detour does not open the radiators");
+        assert!((drive_limits(&orders,id).last().copied().unwrap_or(0.0)-20.0).abs()<1e-6,"the detour keeps 20 g instead of cruise: {:?}",drive_limits(&orders,id));
+
+        let mut dumping_detour=detour;
+        heat_ship(&mut dumping_detour,0.85,true);
+        dumping_detour.bodies.iter_mut().find(|b|b.id==id).unwrap().drive_limit=20.0*G0;
+        let orders=Doctrine::default().orders(&dumping_detour);
+        assert_eq!(radiator_commands(&orders,id),vec![false],"an open radiator closes for the detour immediately");
+        assert!(drive_limits(&orders,id).is_empty(),"closing the radiators during a detour does not touch the 20 g limit");
+
+        let mut repair=LocalSession::new(crate::scenario::transport_intercept_class(42,ShipClass::Destroyer)).view(Role::Faction(crate::scenario::RAIDER));
+        repair.objective.as_mut().unwrap().sensor_site=None;
+        let id=heat_ship(&mut repair,0.8,false);
+        let ship=repair.bodies.iter_mut().find(|b|b.id==id).unwrap();
+        ship.magazine=[0,0];
+        ship.damage.damage.systems[crate::damage::System::Beam as usize]=crate::damage::Condition::Destroyed;
+        ship.damage.damage.systems[crate::damage::System::Jump as usize]=crate::damage::Condition::Damaged;
+        let pos=ship.pos;
+        repair.contacts=vec![tracked(Some(BodyKind::Ship),false,false,pos+Vec2::new(0.4*AU,0.0))];
+        let orders=Doctrine::default().orders(&repair);
+        let cruise=cruise_g(&repair.bodies.iter().find(|b|b.id==id).unwrap().thermal,ShipClass::Destroyer);
+        assert!(orders.iter().any(|c|matches!(c,Command::MoveTo {..})));
+        assert!((drive_limits(&orders,id).last().copied().unwrap_or(0.0)-cruise).abs()<1e-6,"the repair escape uses the same cruise rule");
+        assert!(!radiator_commands(&orders,id).contains(&true));
     }
 }
 

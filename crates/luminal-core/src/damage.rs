@@ -147,7 +147,7 @@ impl Damage {
     }
 }
 #[derive(Clone,Copy,Debug)]
-pub struct Report {pub damage:Damage,pub installed:[bool;System::COUNT],pub observed_at:f64,pub screen_available:f64}
+pub struct Report {pub damage:Damage,pub installed:[bool;System::COUNT],pub observed_at:f64,pub screen_available:f64,pub heat_fraction:f64}
 impl Report {
     pub fn operating_effectiveness(&self,system:System)->f64 {
         if !self.installed[system as usize] {return 0.0;}
@@ -169,7 +169,7 @@ mod tests {
         assert_eq!(d.state(System::Active),Condition::Damaged);assert_eq!(d.repair_progress,0.0);
         d.systems[System::Crew as usize]=Condition::Destroyed;
         assert!(d.lifeless());
-        let report=Report {damage:d,installed:[true;System::COUNT],observed_at:0.0,screen_available:0.0};
+        let report=Report {damage:d,installed:[true;System::COUNT],observed_at:0.0,screen_available:0.0,heat_fraction:0.0};
         for s in System::ALL {assert_eq!(report.operating_effectiveness(s),0.0,"{s:?}");}
         d.systems[System::Mind as usize]=Condition::Intact;
         assert!(!d.lifeless());assert_eq!(d.operating_effectiveness(System::Beam),1.0);
@@ -227,7 +227,7 @@ mod tests {
         let mut d=Damage {hull:50.0,..Default::default()};
         d.systems[System::Power as usize]=Condition::Damaged;
         d.systems[System::Repair as usize]=Condition::Damaged;
-        let report=Report {damage:d,installed:[true;System::COUNT],observed_at:0.0,screen_available:1.0};
+        let report=Report {damage:d,installed:[true;System::COUNT],observed_at:0.0,screen_available:1.0,heat_fraction:0.0};
         for s in System::ALL {
             let expected=if matches!(s,System::Repair|System::Screens) {0.5} else if s.independent_power() {1.0} else {0.0};
             assert_eq!(report.operating_effectiveness(s),expected,"{s:?}");

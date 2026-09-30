@@ -382,7 +382,7 @@ mod tests {
         let app=LuminalApp::new();
         let mut view=app.session.view(Role::Faction(ESCORT));
         let mut contact=view.contacts[0].clone();
-        let mut report=Report {damage:Default::default(),installed:[true;System::COUNT],observed_at:0.0,screen_available:1.0};
+        let mut report=Report {damage:Default::default(),installed:[true;System::COUNT],observed_at:0.0,screen_available:1.0,heat_fraction:0.0};
         report.damage.systems[System::Power as usize]=Condition::Damaged;
         contact.damage=Some(report);contact.last_emitted_at=0.0;contact.last_received_at=600.0;
         view.time=600.0;
@@ -390,6 +390,38 @@ mod tests {
         view.time=600.0+luminal_core::damage::SYSTEM_REPAIR_SECONDS;
         assert!(target_system_report(&contact,&view).is_none());
         assert!(Chip::Unknown.color()!=Chip::Inoperative.color());
+    }
+
+    #[test]
+    fn a_hot_coast_reads_as_waste_heat_and_a_burn_does_not() {
+        let app=LuminalApp::new();
+        let view=app.session.view(Role::Faction(ESCORT));
+        let mut coast=view.contacts[0].clone();
+        coast.resolved_missile=false;
+        coast.resolved_kind=Some(BodyKind::Ship);
+        coast.damage=Some(Report {damage:Default::default(),installed:[true;System::COUNT],observed_at:0.0,screen_available:1.0,heat_fraction:0.11});
+        let mut track=test_track();
+        let gravity=view.system.gravity(track.pos,view.time);
+        track.accel=gravity;
+        coast.track=Some(track);
+        assert!(contact_waste_heat(&view,&coast));
+        coast.track.as_mut().unwrap().accel=gravity+Vec2::new(0.5*G0,0.0);
+        assert!(contact_waste_heat(&view,&coast),"under a g of thrust is still a coast");
+        coast.damage.as_mut().unwrap().heat_fraction=0.1;
+        assert!(!contact_waste_heat(&view,&coast),"exactly a tenth of a tank does not keep a bearing");
+        coast.damage.as_mut().unwrap().heat_fraction=0.4;
+        coast.track.as_mut().unwrap().accel=gravity+Vec2::new(20.0*G0,0.0);
+        assert!(!contact_waste_heat(&view,&coast),"a real burn is the plume");
+        coast.track=None;
+        assert!(contact_waste_heat(&view,&coast),"a bearing with no track is a coast");
+        coast.damage=None;
+        assert!(!contact_waste_heat(&view,&coast));
+        coast.damage=Some(Report {damage:Default::default(),installed:[true;System::COUNT],observed_at:0.0,screen_available:1.0,heat_fraction:0.4});
+        coast.resolved_missile=true;
+        assert!(!contact_waste_heat(&view,&coast));
+        coast.resolved_missile=false;
+        coast.resolved_kind=Some(BodyKind::Probe);
+        assert!(!contact_waste_heat(&view,&coast));
     }
     fn test_track()->luminal_core::session::TrackView {
         luminal_core::session::TrackView {velocity_sigma:1.0,pos:Vec2::new(2.0*AU,0.0),vel:Vec2::new(1.0,0.0),accel:Vec2::ZERO,cov:[[1.0,0.0],[0.0,1.0]],updated_at:0.0,updates:4}
@@ -1124,7 +1156,7 @@ mod tests {
 
     #[test]
     fn power_outage_chips_preserve_backup_and_crew_conditions() {
-        let mut report=Report {damage:Default::default(),installed:[true;System::COUNT],observed_at:0.0,screen_available:1.0};
+        let mut report=Report {damage:Default::default(),installed:[true;System::COUNT],observed_at:0.0,screen_available:1.0,heat_fraction:0.0};
         report.damage.systems[System::Power as usize]=Condition::Damaged;
         for system in System::ALL {
             let chip=Chip::of(Some(report),system);
@@ -1142,7 +1174,7 @@ mod tests {
 
     #[test]
     fn dead_mind_greys_dependent_systems_and_lifeless_hulk_greys_every_chip() {
-        let mut report=Report {damage:Default::default(),installed:[true;System::COUNT],observed_at:0.0,screen_available:1.0};
+        let mut report=Report {damage:Default::default(),installed:[true;System::COUNT],observed_at:0.0,screen_available:1.0,heat_fraction:0.0};
         report.damage.systems[System::Mind as usize]=Condition::Destroyed;
         for system in [System::Repair,System::Ecm,System::Eccm,System::Propulsion,System::Beam,System::Active] {
             assert!(Chip::of(Some(report),system)==Chip::Inoperative,"{}",system.code());
@@ -1351,7 +1383,7 @@ impl LuminalApp {
             let mind_offline=format!("{} OFFLINE",self.theme.system(System::Mind).to_uppercase());
             sub_header(ui,"OWN SHIP",own.and_then(|b|if b.damage.damage.lifeless() {Some(("LIFELESS HULK",TEXT_MUTED))} else if b.damage.damage.state(System::Mind)==Condition::Destroyed {Some((mind_offline.as_str(),TEXT_MUTED))} else {None}));
             if let Some(b)=own {ui.label(egui::RichText::new(&b.name).strong().color(FRIEND));ui.small(b.display_class.as_deref().unwrap_or("Ship"));}
-            compact_status(ui,own.map(|b|&b.damage),own.map(|b|b.thrust.length()/G0),own.and_then(|b|b.ship_class).map(|c|c.max_g()),false);
+            compact_status(ui,own.map(|b|&b.damage),own.map(|b|b.thrust.length()/G0),own.and_then(|b|b.ship_class).map(|c|c.max_g()),false,own.and_then(|b|b.ship_class).map(|c|c.scale()));
             compact_systems(ui,"own_deck",own.map(|b|b.damage),self.theme);
             if let Some(ship)=own {if ship.interference_remaining>0.0 {ui.small(egui::RichText::new(format!("FIRE CONTROL -15% · {:.0}s",ship.interference_remaining)).color(WARM));}}
             self.central_controls(&mut columns[2],own,view);
@@ -1362,7 +1394,8 @@ impl LuminalApp {
             if let Some(c)=target {ui.label(egui::RichText::new(contact_label(c)).strong().color(CONTACT));ui.small(contact_class(c));}
             let thrust=target.filter(|c|contact_has_course(c)).and_then(|c|c.track.as_ref()).map(|t|t.accel.length()/G0)
                 .filter(|_|systems.is_some_and(|r|r.operating_effectiveness(System::Propulsion)>0.0));
-            compact_status(ui,target.and_then(|c|c.damage.as_ref()),thrust,target.and_then(|c|c.resolved_class).map(|c|c.max_g()),true);
+            compact_status(ui,target.and_then(|c|c.damage.as_ref()),thrust,target.and_then(|c|c.resolved_class).map(|c|c.max_g()),true,target.and_then(|c|c.resolved_class).map(|c|c.scale()));
+            if target.is_some_and(|c|contact_waste_heat(view,c)) {ui.small(egui::RichText::new("Coasting bearing is waste heat").color(WARM));}
             compact_systems(ui,"target_deck",systems,self.theme);
             let ui=&mut columns[4];
             if let Some(ship)=own {self.movement_panel(ui,view,ship);}
@@ -2196,6 +2229,17 @@ fn missile_hit_estimate(ship:&BodyView,target:Option<&ContactView>,payload:Paylo
 fn contact_has_course(c:&ContactView)->bool {
     !c.stale && c.detection>=sensors::DetectionLevel::Resolved && c.resolved_kind==Some(BodyKind::Ship)
         && c.track.as_ref().is_some_and(|t|t.vel.length().is_finite() && t.vel.length()>1e-6)
+}
+
+/// A resolved coast whose waste heat still makes a bearing. Missiles and probes are excluded.
+fn contact_waste_heat(view:&View,c:&ContactView)->bool {
+    if c.resolved_missile || matches!(c.resolved_kind,Some(BodyKind::Probe)|Some(BodyKind::Missile)) {return false;}
+    let Some(report)=c.damage.as_ref() else {return false;};
+    if !sensors::heat_keeps_a_bearing(report.heat_fraction) {return false;}
+    match c.track.as_ref() {
+        None=>true,
+        Some(t)=> (t.accel-view.system.gravity(t.pos,view.time)).length()/G0<1.0,
+    }
 }
 
 fn target_system_report(c:&ContactView,view:&View)->Option<Report> {
@@ -3770,6 +3814,7 @@ fn draw_contact(
                 let p=to_screen(cam,rect,t.pos);
                 painter.line_segment([p,to_screen(cam,rect,t.pos+t.vel*60.0)],Stroke::new(1.0,color.gamma_multiply(0.6)));
                 labels.add(p+EVec2::new(10.0,-10.0),contact_label(c),color);
+                if contact_waste_heat(view,c) {labels.add(p+EVec2::new(10.0,6.0),"WASTE HEAT".into(),WARM);}
                 return;
             }
             if contact_has_course(c) {
@@ -3804,6 +3849,7 @@ fn draw_contact(
             if !c.resolved_missile || selected {
                 labels.add(p + EVec2::new(10.0, -10.0), contact_label(c), color);
             }
+            if contact_waste_heat(view,c) {labels.add(p+EVec2::new(10.0,6.0),"WASTE HEAT".into(),WARM);}
         }
         None => {
             // A grouped or quiet bearing draws nothing here. The fan is painted once for the group.
@@ -3812,7 +3858,8 @@ fn draw_contact(
             let fade = bearing_opacity(b, view.time);
             if fade <= 0.0 { return; }
             let origin = view.bodies.iter().find(|ship| ship.id == b.sensor).map_or(b.origin, |ship| ship.pos);
-            draw_bearing_fan(painter, cam, rect, origin, b.bearing, (2.0 * b.sigma).min(0.5), fade, b.max_range, selected, contact_label(c), color, labels);
+            let label=if contact_waste_heat(view,c) {format!("{} · WASTE HEAT",contact_label(c))} else {contact_label(c)};
+            draw_bearing_fan(painter, cam, rect, origin, b.bearing, (2.0 * b.sigma).min(0.5), fade, b.max_range, selected, label, color, labels);
         }
     }
 }
@@ -4925,10 +4972,11 @@ fn heat_gauge_fill(rate:f64)->f64 {
 }
 
 fn compact_meter(ui:&mut egui::Ui,label:&str,value:Option<f64>,color:Color32) {
-    compact_meter_readout(ui,label,value,color,value.map_or("—".into(),|v|format!("{:.0}%",100.0*v)));
+    compact_meter_readout(ui,label,value,color,value.map_or("—".into(),|v|format!("{:.0}%",100.0*v)),None);
 }
-fn compact_meter_readout(ui:&mut egui::Ui,label:&str,value:Option<f64>,color:Color32,readout:String) {
-    let (rect,_)=ui.allocate_exact_size(EVec2::new(ui.available_width(),19.0),Sense::hover());
+fn compact_meter_readout(ui:&mut egui::Ui,label:&str,value:Option<f64>,color:Color32,readout:String,hover:Option<&str>) {
+    let (rect,response)=ui.allocate_exact_size(EVec2::new(ui.available_width(),19.0),Sense::hover());
+    if let Some(hover)=hover {response.on_hover_text(hover);}
     let p=ui.painter();
     p.text(rect.left_top(),egui::Align2::LEFT_TOP,label,mono(8.0),TEXT_MUTED);
     p.text(rect.right_top(),egui::Align2::RIGHT_TOP,readout,mono(8.0),color);
@@ -4942,17 +4990,25 @@ fn compact_meter_readout(ui:&mut egui::Ui,label:&str,value:Option<f64>,color:Col
 }
 
 fn compact_damage(ui:&mut egui::Ui,report:Option<&Report>) {
-    compact_meter_readout(ui,"HULL",report.map(|r|r.damage.hull/r.damage.hull_max),SYS_OK,report.map_or("—".into(),|r|format!("{:.0}/{:.0}",r.damage.hull,r.damage.hull_max)));
+    compact_meter_readout(ui,"HULL",report.map(|r|r.damage.hull/r.damage.hull_max),SYS_OK,report.map_or("—".into(),|r|format!("{:.0}/{:.0}",r.damage.hull,r.damage.hull_max)),None);
     compact_meter(ui,"ARMOUR",report.map(|r|r.damage.armour/r.damage.armour_max.max(1.0)),TEXT_MUTED);
 }
 
-fn compact_status(ui:&mut egui::Ui,report:Option<&Report>,thrust_g:Option<f64>,max_g:Option<f64>,estimated:bool) {
-    let (rect,_)=ui.allocate_exact_size(EVec2::new(ui.available_width(),66.0),Sense::hover());
+fn compact_status(ui:&mut egui::Ui,report:Option<&Report>,thrust_g:Option<f64>,max_g:Option<f64>,estimated:bool,scale:Option<f64>) {
+    let burn=report.zip(scale).and_then(|(report,scale)| {
+        let left=luminal_core::thermal::Thermal::at_fraction(report.heat_fraction,scale).rated_burn_left()?;
+        let cold=luminal_core::thermal::Thermal::at_fraction(0.0,scale).rated_burn_left()?;
+        Some((left,if cold>0.0 {left/cold} else {0.0}))
+    });
+    let (rect,_)=ui.allocate_exact_size(EVec2::new(ui.available_width(),if burn.is_some() {85.0} else {66.0}),Sense::hover());
     let (_,span)=section_chip_span(rect.width());
     let bars=Rect::from_min_max(rect.min,Pos2::new(rect.left()+span,rect.bottom()));
     ui.scope_builder(egui::UiBuilder::new().max_rect(bars),|ui| {
         compact_damage(ui,report);
         compact_meter(ui,"SCREENS",report.filter(|r|r.installed[System::Screens as usize]).map(|r|r.screen_available),ARMOUR);
+        if let Some((left,fill))=burn {
+            compact_meter_readout(ui,"BURN",Some(fill),WARM,fmt_time(left),Some("Rated burn left at full thrust"));
+        }
     });
     let gauge=Rect::from_min_max(Pos2::new(bars.right()+THRUST_GAP,rect.top()+9.0),Pos2::new(bars.right()+THRUST_GAP+THRUST_GAUGE_W,rect.bottom()-13.0));
     let p=ui.painter();

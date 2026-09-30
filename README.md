@@ -70,9 +70,11 @@ envelope regardless of cold signature or ECM; reports still obey light delay.
 Pings automatically resolve LRMs within their effective detection radius once
 the echo returns, and extend ship resolution from 1 AU to 2 AU at full sensor
 strength. A fresh resolved ship/station echo supplies missile fire control:
-40% of the remaining hit-roll failure chance is removed (75% becomes 85%).
+90% of the remaining hit-roll failure chance is removed (75% becomes 97.5%).
 Support lasts 60 seconds after receipt and fades over 15 seconds. The weapon
-card marks supported estimates with PING. Pinging also reveals the transmitter.
+card marks supported estimates with PING. A ping loud enough to localize
+hands the listener a firing solution on the transmitter and not its class.
+Farther out the same pulse is only a bearing.
 
 Auto-evade uses received missile motion and class performance to estimate whether
 a dodge would demand a meaningful share of its correction reserve. It accounts

@@ -100,6 +100,9 @@ impl EmissivityFactors {
     }
 }
 
+/// A coast still makes a bearing once waste heat lifts the multiplier past 1.1.
+pub fn heat_keeps_a_bearing(heat_fraction:f64)->bool {1.0+heat_fraction>1.1}
+
 /// Isotropic emission, W, of a ship accelerating at `accel` (km/s²).
 pub fn ship_emission_w(accel: Vec2) -> f64 {
     platform_emission_w(false,1.0,accel,0.0)
@@ -311,6 +314,10 @@ mod tests {
         use DetectionLevel::*;
         let cold=EmissivityFactors {visibility_multiplier:1.0,thrust_percent:0.0,heat_multiplier:1.0,size:7.0,stealth:50.0,ecm_on:false,recent_missiles:false,recent_beams:false};
         assert!((cold.value()-0.35).abs()<1e-12);assert!(!cold.direction_active());
+        assert!(!heat_keeps_a_bearing(0.1));
+        assert!(heat_keeps_a_bearing(0.11));
+        assert!(EmissivityFactors {heat_multiplier:1.11,..cold}.direction_active());
+        assert!(!EmissivityFactors {heat_multiplier:1.1,..cold}.direction_active());
         assert!(!EmissivityFactors {ecm_on:true,..cold}.direction_active());
         let hot=EmissivityFactors {thrust_percent:100.0,heat_multiplier:11.0,ecm_on:true,recent_missiles:true,recent_beams:true,..cold};
         assert!((hot.value()-20.79).abs()<1e-9);
