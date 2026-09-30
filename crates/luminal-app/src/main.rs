@@ -29,10 +29,10 @@ use luminal_core::sensors::{self, wrap_angle};
 use luminal_core::params;
 use luminal_core::scenario::{self, Scenario, ESCORT, RAIDER};
 use luminal_core::session::{
-    AutopilotStatus, BodyId, BodyView, Command, ContactView, InterceptTarget, LocalSession, Order, Payload, Phase, Role, View,
+    AutopilotStatus, BearingView, BodyId, BodyView, Command, ContactView, FleetOrder, InterceptTarget, LocalSession, Order, OwnPing, Payload, Phase, PingSighting, Role, View,
 };
 use luminal_core::units::{AU, C, G0, LIGHT_SECOND};
-use luminal_core::world::{BodyKind, FactionId};
+use luminal_core::world::{BodyKind, FactionId, ShipClass};
 use std::collections::{BTreeMap,BTreeSet,VecDeque};
 use luminal_core::world::CombatKind;
 
@@ -44,24 +44,36 @@ struct TacticalLog {
     lines:VecDeque<LogLine>, contacts:BTreeSet<ContactId>,
     combat:BTreeSet<CombatLogKey>, raider_at:f64,
     hull:BTreeMap<BodyId,(f64,f64)>, now:f64,
+    /// Tracks folded into the current new-target line, so a fleet is one notice.
+    announced_contacts:usize,
 }
 impl TacticalLog {
     fn opacity(age:f64)->f32 {((40.0-age)/32.0).clamp(0.0,1.0) as f32}
-    fn push(&mut self,key:String,text:String,color:Color32,sim:f64) {
-        if let Some(i)=self.lines.iter().position(|line|line.key==key && self.now-line.at<4.0) {
+    fn push(&mut self,key:String,text:String,color:Color32,sim:f64) {self.push_for(key,text,color,sim,4.0);}
+    fn push_for(&mut self,key:String,text:String,color:Color32,sim:f64,window:f64) {
+        if let Some(i)=self.lines.iter().position(|line|line.key==key && self.now-line.at<window) {
             let old=self.lines.remove(i).unwrap();
             self.lines.push_front(LogLine {key,text,color,at:self.now,sim,count:old.count+1});
         } else {self.lines.push_front(LogLine {key,text,color,at:self.now,sim,count:1});}
         self.lines.truncate(8);
     }
-    fn observe(&mut self,view:&View,selected:Option<BodyId>,now:f64) {
+    fn note_contacts(&mut self,new:&[&ContactView],sim:f64) {
+        if new.is_empty() {return;}
+        let live=self.lines.iter().any(|line|line.key=="contacts" && self.now-line.at<20.0);
+        if !live {
+            self.announced_contacts=0;
+            self.lines.retain(|line|line.key!="contacts");
+        }
+        self.announced_contacts+=new.len();
+        let text=if self.announced_contacts==1 {format!("NEW TARGET · {}",contact_label(new[0]))}
+            else {format!("{} NEW TARGETS",self.announced_contacts)};
+        self.push_for("contacts".into(),text,ACCENT,sim,20.0);
+    }
+    fn observe(&mut self,view:&View,selected:Option<BodyId>,now:f64,quiet:bool) {
         self.now=now;
         self.lines.retain(|l|Self::opacity(now-l.at)>0.0);
         let new:Vec<_>=view.contacts.iter().filter(|c|self.contacts.insert(c.id) && !c.resolved_missile).collect();
-        if !new.is_empty() {
-            let text=if new.len()==1 {format!("NEW TARGET · {}",contact_label(new[0]))} else {format!("{} NEW TARGETS",new.len())};
-            self.push("contacts".into(),text,ACCENT,view.time);
-        }
+        if !quiet {self.note_contacts(&new,view.time);}
         // Scan the received picture only: no truth events or unreceived damage.
         let key=|e:&luminal_core::world::CombatEvent|(e.received_at.to_bits(),e.emitted_at.to_bits(),e.kind as u8,e.own_body.map(|b|b.0),e.contact.map(|c|c.0));
         let fresh:Vec<_>=view.combat.iter().filter(|e|!self.combat.contains(&key(e))).collect();
@@ -105,14 +117,29 @@ impl TacticalLog {
                         format!("MISSILE {}{}",if hit {"HIT"} else {"MISSED"},event.own_body.map_or(String::new(),|id|format!(" · ROUND {}",id.0))),
                         if hit {WARM} else {TEXT_MUTED},event.received_at);
                 },
-                CombatKind::BeamPulse|CombatKind::SpinalPulse|CombatKind::PointDefence=>{
-                    let weapon=match event.kind {CombatKind::PointDefence=>"PD LASER",CombatKind::SpinalPulse=>"SPINAL MOUNT",_=>"MAIN BEAM"};
-                    let source=event.own_body.and_then(|id|view.bodies.iter().find(|b|b.id==id)).map_or(
-                        if event.own_body.is_some() {"FRIENDLY"} else {"HOSTILE"},|b|b.name.as_str());
-                    self.push(format!("beam-{weapon}-{source}"),format!("{source} · {weapon} FIRED"),ACCENT,event.received_at);
-                },
-                _=>{}, // Do not flood the display with beams, PD or expended rounds.
+                CombatKind::BeamPulse|CombatKind::SpinalPulse|CombatKind::PointDefence=>{},
+                _=>{}, // Expended rounds stay off the log.
             }
+        }
+        if !quiet {self.note_weapons(view,&fresh);}
+    }
+    /// One shooter keeps its own line. A fleet shares a single weapons line.
+    fn note_weapons(&mut self,view:&View,fresh:&[&luminal_core::world::CombatEvent]) {
+        let fires:Vec<_>=fresh.iter().copied().filter(|event|matches!(event.kind,CombatKind::BeamPulse|CombatKind::SpinalPulse|CombatKind::PointDefence)).collect();
+        if fires.is_empty() {return;}
+        let mut sources=BTreeSet::new();
+        for event in &fires {
+            sources.insert(event.own_body.map(|id|id.0).or_else(||event.contact.map(|c|1_000_000+c.0)));
+        }
+        if sources.len()<=1 {
+            for event in fires.iter().rev() {
+                let weapon=match event.kind {CombatKind::PointDefence=>"PD LASER",CombatKind::SpinalPulse=>"SPINAL MOUNT",_=>"MAIN BEAM"};
+                let source=event.own_body.and_then(|id|view.bodies.iter().find(|b|b.id==id)).map_or(
+                    if event.own_body.is_some() {"FRIENDLY"} else {"HOSTILE"},|b|b.name.as_str());
+                self.push(format!("beam-{weapon}-{source}"),format!("{source} · {weapon} FIRED"),ACCENT,event.received_at);
+            }
+        } else {
+            self.push("weapons-fire".into(),format!("WEAPONS FIRE · {} SHOOTERS",sources.len()),ACCENT,view.time);
         }
     }
 }
@@ -402,12 +429,12 @@ mod tests {
         view.combat=[CombatKind::Destroyed,CombatKind::MissileHit,CombatKind::MissileMiss,CombatKind::BeamPulse].into_iter().enumerate().map(|(i,kind)|
             luminal_core::world::CombatEvent {weapon_visual:luminal_core::world::weapon_fit::WeaponVisual::Standard,target:None,velocity:None,subject_kind:Some(BodyKind::Missile),impact_strength:0.0,damage:None,contact:None,aim:None,pos:None,kind,own_body:Some(BodyId(1)),emitted_at:i as f64,received_at:i as f64}).collect();
         let mut log=TacticalLog::default();
-        log.observe(&view,Some(BodyId(1)),0.0);
+        log.observe(&view,Some(BodyId(1)),0.0,false);
         assert_eq!(log.lines.len(),3);
         for expected in ["MISSILE HIT","MISSILE MISSED","MAIN BEAM FIRED"] {
             assert!(log.lines.iter().any(|line|line.text.contains(expected)));
         }
-        log.observe(&view,Some(BodyId(1)),1.0);
+        log.observe(&view,Some(BodyId(1)),1.0,false);
         assert_eq!(log.lines.len(),3);
         assert!(log.lines.iter().all(|line|line.count==1));
     }
@@ -433,11 +460,11 @@ mod tests {
             luminal_core::world::CombatEvent {weapon_visual:luminal_core::world::weapon_fit::WeaponVisual::Standard,target:None,velocity:None,subject_kind,impact_strength:0.0,damage:None,
                 contact:if i==1 {Some(ContactId(1))} else {None},own_body:if i==0 {Some(BodyId(1))} else {None},
                 aim:None,pos:None,kind:CombatKind::Destroyed,emitted_at:i as f64,received_at:10.0+i as f64}).collect();
-        let mut log=TacticalLog::default();log.observe(&view,Some(BodyId(1)),0.0);
+        let mut log=TacticalLog::default();log.observe(&view,Some(BodyId(1)),0.0,false);
         assert_eq!(log.lines.len(),2);
         assert!(log.lines.iter().any(|l|l.text=="OWN SHIP · DESTROYED"));
         assert!(log.lines.iter().any(|l|l.text=="T1 · DESTROYED"));
-        log.observe(&view,Some(BodyId(1)),1.0);
+        log.observe(&view,Some(BodyId(1)),1.0,false);
         assert_eq!(log.lines.len(),2);assert!(log.lines.iter().all(|l|l.count==1));
     }
 
@@ -446,25 +473,88 @@ mod tests {
         let app=LuminalApp::new();
         let mut view=app.session.view(Role::Faction(ESCORT));
         let mut log=TacticalLog::default();
-        log.observe(&view,Some(BodyId(1)),0.0);
+        log.observe(&view,Some(BodyId(1)),0.0,false);
         assert!(log.lines.iter().any(|l|l.text.contains("NEW TARGET")));
         let n=log.lines.len();
-        log.observe(&view,Some(BodyId(1)),1.0);
+        log.observe(&view,Some(BodyId(1)),1.0,false);
         assert_eq!(log.lines.len(),n);
         view.bodies.iter_mut().find(|b|b.id==BodyId(1)).unwrap().damage.damage.hull*=0.9;
-        log.observe(&view,Some(BodyId(1)),2.0);
+        log.observe(&view,Some(BodyId(1)),2.0,false);
         assert!(log.lines[0].text.contains("OWN SHIP DAMAGE"));
-        log.observe(&view,Some(BodyId(1)),3.0);
+        log.observe(&view,Some(BodyId(1)),3.0,false);
         assert_eq!(log.lines[0].count,1);
-        log.observe(&view,Some(BodyId(1)),43.0);
+        log.observe(&view,Some(BodyId(1)),43.0,false);
         assert!(log.lines.is_empty());
+    }
+
+    #[test]
+    fn fleet_bearings_share_a_fan_and_separated_contacts_do_not() {
+        let sizes=|bearings:&[f64]| fleet_bearing_groups(bearings).into_iter().map(|g|g.len()).collect::<Vec<_>>();
+        assert_eq!(sizes(&[0.0,0.05,-0.04]),vec![3]);
+        let split=sizes(&[0.0,0.1,2.0]);
+        assert_eq!(split.len(),2);
+        assert!(split.contains(&2) && split.contains(&1));
+        assert_eq!(fleet_bearing_groups(&[1.2]),vec![vec![0]]);
+        assert_eq!(sizes(&[3.1,-3.1]),vec![2],"bearings across ±π share a fan");
+        assert_eq!(sizes(&[0.0,0.3,0.6]),vec![2,1],"a chain wider than the cone splits at the anchor");
+    }
+
+    #[test]
+    fn a_fleet_arriving_in_pieces_is_one_notice() {
+        let mut app=LuminalApp::new();
+        assert!(!app.quiet_detections);
+        let mut view=app.session.view(Role::Faction(ESCORT));
+        let template=view.contacts[0].clone();
+        view.contacts.clear();
+        let mut log=TacticalLog::default();
+        for i in 1..=4 {
+            let mut contact=template.clone();
+            contact.id=ContactId(100+i);
+            contact.resolved_missile=false;
+            view.contacts.push(contact);
+            log.observe(&view,Some(BodyId(1)),i as f64,false);
+        }
+        let notices:Vec<_>=log.lines.iter().filter(|line|line.key=="contacts").collect();
+        assert_eq!(notices.len(),1);
+        assert!(notices[0].text.contains("4 NEW TARGETS"));
+        let mut quiet=template.clone();
+        quiet.id=ContactId(999);
+        quiet.resolved_missile=false;
+        view.contacts.push(quiet);
+        log.observe(&view,Some(BodyId(1)),5.0,true);
+        assert_eq!(log.lines.iter().filter(|line|line.key=="contacts").count(),1);
+        assert!(log.lines.iter().any(|line|line.text.contains("4 NEW TARGETS")));
+        log.observe(&view,Some(BodyId(1)),6.0,false);
+        assert!(log.lines.iter().all(|line|!line.text.contains("5 NEW TARGETS")));
+        view.contacts.clear();
+        view.combat=[BodyId(1),BodyId(2)].into_iter().enumerate().map(|(i,body)| luminal_core::world::CombatEvent {
+            weapon_visual:luminal_core::world::weapon_fit::WeaponVisual::Standard,target:None,velocity:None,
+            subject_kind:Some(BodyKind::Ship),impact_strength:0.0,damage:None,contact:None,aim:None,pos:None,
+            kind:CombatKind::BeamPulse,own_body:Some(body),emitted_at:i as f64,received_at:i as f64,
+        }).collect();
+        let mut guns=TacticalLog::default();
+        guns.observe(&view,Some(BodyId(1)),0.0,false);
+        assert!(guns.lines.iter().any(|line|line.text.contains("WEAPONS FIRE · 2 SHOOTERS")));
+        assert!(guns.lines.iter().all(|line|!line.text.contains("MAIN BEAM FIRED")));
+        let mut hushed=TacticalLog::default();
+        view.combat.push(luminal_core::world::CombatEvent {
+            weapon_visual:luminal_core::world::weapon_fit::WeaponVisual::Standard,target:None,velocity:None,
+            subject_kind:Some(BodyKind::Ship),impact_strength:0.0,damage:None,contact:Some(ContactId(1)),aim:None,pos:None,
+            kind:CombatKind::Destroyed,own_body:None,emitted_at:3.0,received_at:3.0,
+        });
+        hushed.observe(&view,Some(BodyId(1)),1.0,true);
+        assert!(hushed.lines.iter().any(|line|line.text.contains("DESTROYED")));
+        assert!(hushed.lines.iter().all(|line|!line.text.contains("FIRED") && !line.text.contains("WEAPONS")));
+        app.quiet_detections=true;
+        app.restart_scenario();
+        assert!(app.quiet_detections);
     }
     #[test]
     fn tactical_log_keeps_each_damage_event_even_in_one_frame() {
         let app=LuminalApp::new();
         let mut view=app.session.view(Role::Faction(ESCORT));
         let mut log=TacticalLog::default();
-        log.observe(&view,Some(BodyId(1)),0.0);
+        log.observe(&view,Some(BodyId(1)),0.0,false);
         view.combat=(1..=2).map(|i|luminal_core::world::CombatEvent {weapon_visual:luminal_core::world::weapon_fit::WeaponVisual::Standard,target:None,velocity:None,
             subject_kind:Some(BodyKind::Ship),
             impact_strength:0.65,
@@ -472,10 +562,10 @@ mod tests {
             contact:None,aim:None,pos:None,kind:CombatKind::Impact,own_body:Some(BodyId(1)),
             emitted_at:i as f64,received_at:i as f64,
         }).collect();
-        log.observe(&view,Some(BodyId(1)),1.0);
+        log.observe(&view,Some(BodyId(1)),1.0,false);
         assert_eq!(log.lines.iter().filter(|l|l.text.contains("OWN SHIP DAMAGE")).count(),2);
         assert!(log.lines.iter().any(|l|l.text.contains("PROP DAMAGED")));
-        log.observe(&view,Some(BodyId(1)),2.0);
+        log.observe(&view,Some(BodyId(1)),2.0,false);
         assert!(log.lines.iter().all(|l|l.count==1));
     }
 
@@ -488,14 +578,18 @@ mod tests {
         app.inspected=None;
         app.opening_fit=false;
         app.bearing_display.insert((ContactId(99),BodyId(99)),(1.0,1.0));
+        app.held_bearings.push(HeldBearing {id:ContactId(99),bearing:0.0,sigma:0.01,reach:1.0,origin:Vec2::ZERO,label:"T99".into(),seen_at:1.0});
+        app.held_pings.push(HeldOwnPing {origin:Vec2::ZERO,t_emit:1.0,useful_range:1.0,seen_at:1.0});
+        app.held_hostile.push(HeldHostile {sighting:PingSighting {contact:ContactId(99),emitted_at:0.0,received_at:0.0,pos:None,vel:Vec2::ZERO,initial_radius:1.0,observer:Vec2::ZERO,bearing:0.0},seen_at:1.0});
         app.restart_scenario();
-        assert!(app.track_player,"restart restores tracking");
+        assert!(app.track_player,"restart keeps tracking until the opening view is applied");
         let view=app.session.view(Role::Faction(ESCORT));
         assert_eq!(view.time,0.0);
         assert_eq!(view.warp,AUTO_MIN_WARP);
         assert!(app.auto_speed);
         assert!(!view.paused);
         assert!(app.fit_pending && app.opening_fit && app.bearing_display.is_empty());
+        assert!(app.held_bearings.is_empty() && app.held_pings.is_empty() && app.held_hostile.is_empty());
         assert!(app.tactical_log.lines.is_empty());
         for id in [BodyId(1), BodyId(2)] {
             let truth = app.session.view(Role::Spectator);
@@ -515,14 +609,14 @@ mod tests {
         assert_eq!(contact_label(enemy),"T1");
         let rect=Rect::from_min_size(Pos2::ZERO,EVec2::new(1000.0,700.0));
         app.fit(&view,rect);
-        let target_pos=view.bodies.iter().find(|b|b.id==BodyId(0)).unwrap().pos;
-        let midpoint=(ship.pos+target_pos)*0.5;
-        assert!((app.camera.center-midpoint).length()<1e-6);
-        for pos in [ship.pos,target_pos] {
-            let delta=pos-app.camera.center;
-            assert!(delta.x.abs()/app.camera.km_per_px<rect.width() as f64*0.5);
-            assert!(delta.y.abs()/app.camera.km_per_px<rect.height() as f64*0.5);
-        }
+        assert!(!app.track_player,"the opening view stays on the system");
+        let star=view.celestials[0].pos;
+        assert!((app.camera.center-star).length()<1.0);
+        let reach=view.system.bodies.iter().filter_map(|body|match body.orbit {
+            Orbit::Circular {parent,radius,..} | Orbit::Frozen {parent,radius,..} if parent==0 => Some(radius),
+            _ => None,
+        }).fold(0.0,f64::max);
+        assert!(rect.shrink(8.0).contains(to_screen(&app.camera,rect,star+Vec2::new(reach,0.0))),"outer orbit fits the opening view");
     }
 
     #[test]
@@ -625,10 +719,113 @@ mod tests {
             let painter=ctx.layer_painter(egui::LayerId::new(egui::Order::Foreground,egui::Id::new("test")));
             let rect=Rect::from_min_size(Pos2::ZERO,EVec2::new(1000.0,700.0));
             let cam=Camera {center:c.track.as_ref().unwrap().pos,km_per_px:AU/100.0};
-            draw_contact(&painter,&cam,rect,&view,&c,CONTACT,true,&mut Labels::default());
+            let seen=BTreeMap::new();
+            draw_contact(&painter,&cam,rect,&view,&c,CONTACT,true,true,&mut Labels::default(),&PingFade {wall_now:0.0,seen:&seen,pings:&view.hostile_pings});
         });
         output.textures_delta.clear();
         assert!(output.shapes.iter().any(|s|matches!(&s.shape,Shape::Path(p) if p.points.len()==4 && p.fill==CONTACT)),"resolved ship must remain a filled red chevron while pinging");
+    }
+
+    #[test]
+    fn bearing_fan_stays_up_on_the_wall_clock() {
+        assert_eq!(indicator_opacity(0.0),1.0);
+        assert_eq!(indicator_opacity(INDICATOR_HOLD_S),1.0);
+        assert!((indicator_opacity(INDICATOR_HOLD_S+0.5*INDICATOR_FADE_S)-0.5).abs()<1e-4);
+        assert_eq!(indicator_opacity(INDICATOR_HOLD_S+INDICATOR_FADE_S+0.01),0.0);
+        let mut app=LuminalApp::new();
+        let mut view=app.session.view(Role::Faction(ESCORT));
+        view.contacts[0].bearings[0].received_at=-10_000.0;
+        assert_eq!(bearing_opacity(&view.contacts[0].bearings[0],1.0e6),1.0);
+        assert!(best_command_bearing(&view,&view.contacts[0]).is_some(),"a listed bearing does not expire on the simulation clock");
+        let id=view.contacts[0].id;
+        app.remember_indicators(&view,5.0);
+        assert!(app.held_bearings.iter().any(|h| h.id==id));
+        let mut gone=view.clone();
+        gone.contacts.clear();
+        app.remember_indicators(&gone,5.0+INDICATOR_HOLD_S);
+        assert!(app.held_bearings.iter().any(|h| h.id==id),"the fan remains for the hold after the contact leaves");
+        app.remember_indicators(&gone,5.0+INDICATOR_HOLD_S+INDICATOR_FADE_S+0.01);
+        assert!(app.held_bearings.iter().all(|h| h.id!=id));
+        app.remember_indicators(&view,1.0);
+        view.contacts[0].track=Some(test_track());
+        app.remember_indicators(&view,1.0);
+        assert!(app.held_bearings.iter().all(|h| h.id!=id),"a ranged track replaces the bearing fan");
+    }
+
+    #[test]
+    fn own_ping_ring_holds_after_the_pulse_leaves_the_picture() {
+        let mut app=LuminalApp::new();
+        let mut view=app.session.view(Role::Faction(ESCORT));
+        view.time=0.0;
+        view.pings.push(OwnPing {origin:Vec2::new(10.0,0.0),t_emit:0.0,useful_range:5.0*AU});
+        app.remember_indicators(&view,2.0);
+        app.remember_indicators(&view,9.0);
+        assert_eq!(app.held_pings.len(),1);
+        assert_eq!(app.held_pings[0].seen_at,2.0,"the hold starts at the first sight");
+        let (range,opacity)=own_ping_appearance(&app.held_pings[0],&view,9.0).unwrap();
+        assert_eq!(range,0.0);
+        assert_eq!(opacity,1.0);
+        view.pings.clear();
+        let (range,opacity)=own_ping_appearance(&app.held_pings[0],&view,9.0).unwrap();
+        assert!((range-5.0*AU).abs()<1.0);
+        assert_eq!(opacity,1.0);
+        app.remember_indicators(&view,2.0+INDICATOR_HOLD_S+INDICATOR_FADE_S+0.01);
+        assert!(app.held_pings.is_empty());
+    }
+
+    #[test]
+    fn hostile_ping_mark_outlasts_the_simulation_fade() {
+        let mut app=LuminalApp::new();
+        let mut view=app.session.view(Role::Faction(ESCORT));
+        let id=view.contacts[0].id;
+        view.hostile_pings.push(PingSighting {contact:id,emitted_at:0.0,received_at:0.0,pos:Some(Vec2::ZERO),vel:Vec2::ZERO,initial_radius:1.0,observer:Vec2::ZERO,bearing:0.0});
+        app.remember_indicators(&view,0.0);
+        app.remember_indicators(&view,3.0);
+        assert_eq!(app.held_hostile[0].seen_at,0.0);
+        view.hostile_pings[0].emitted_at=4.0;
+        view.hostile_pings[0].received_at=4.0;
+        app.remember_indicators(&view,3.0);
+        assert_eq!(app.held_hostile[0].seen_at,3.0,"a new pulse refreshes the mark");
+        view.hostile_pings.clear();
+        app.remember_indicators(&view,3.0);
+        assert!(app.hostile_ping_visible(&view,id,3.0));
+        app.remember_indicators(&view,3.0+INDICATOR_HOLD_S+INDICATOR_FADE_S);
+        assert!(app.held_hostile.is_empty());
+        assert!(!app.hostile_ping_visible(&view,id,3.0+INDICATOR_HOLD_S+INDICATOR_FADE_S));
+    }
+
+    #[test]
+    fn hide_clock_is_named_under_the_time_and_on_the_ground() {
+        let escort=LuminalApp::new();
+        assert!(escape_clock_label(&escort.session.view(Role::Faction(ESCORT))).is_none());
+        let app=LuminalApp::new_with_scenario(Scenario::HideAndSeek,luminal_core::world::ShipClass::Frigate,theme::Theme::Culture);
+        let view=app.session.view(Role::Faction(ESCORT));
+        assert!(!view.jumps_enabled);
+        assert_eq!(escape_clock_label(&view).as_deref(),Some("HUNTING GROUND  36:00:00"));
+        let base="hunting ground (goal: Hunter)";
+        assert_eq!(with_escape_remaining(base.into(),&view),format!("{base} · 36:00:00"));
+        let mut later=view.clone();
+        later.time=36.0*3600.0+1.0;
+        assert_eq!(escape_clock_label(&later).as_deref(),Some("HUNTING GROUND  TIME UP"));
+        assert_eq!(with_escape_remaining(base.into(),&later),base);
+        later.outcome=Some(luminal_core::world::Outcome {winner:ESCORT,t:60.0,reason:"missed".into()});
+        assert!(escape_clock_label(&later).is_none());
+    }
+
+    #[test]
+    fn hide_and_seek_offers_no_jump_control() {
+        let mut app=LuminalApp::new_with_scenario(Scenario::HideAndSeek,luminal_core::world::ShipClass::Destroyer,theme::Theme::Luminal);
+        let ctx=egui::Context::default();
+        let view=app.session.view(app.role);
+        assert!(!view.jumps_enabled);
+        let mut ship=view.bodies.iter().find(|b|b.controllable).unwrap().clone();
+        ship.ship_class=Some(luminal_core::world::ShipClass::Destroyer);
+        let mut output=ctx.run_ui(egui::RawInput {screen_rect:Some(Rect::from_min_size(Pos2::ZERO,EVec2::new(900.0,700.0))),..Default::default()},|ui| {
+            ui.columns(2,|cols| {app.movement_panel(&mut cols[1],&view,&ship);});
+        });
+        output.textures_delta.clear();
+        assert!(output.shapes.iter().all(|s| !matches!(&s.shape,Shape::Text(t) if t.galley.text()=="JUMP DRIVE")));
+        assert!(app.session.command(app.role,Command::Jump {body:ship.id,destination:Vec2::new(3.0*AU,0.0)}).is_err());
     }
 
     #[test]
@@ -758,7 +955,7 @@ mod tests {
     }
 
     #[test]
-    fn planet_name_sits_once_inside_its_orbit_with_star_distance() {
+    fn planet_name_sits_once_outside_its_orbit_or_hides() {
         assert_eq!(star_distance_label("Earth", AU), "Earth - 1 AU");
         assert_eq!(star_distance_label("Mercury", 0.3871 * AU), "Mercury - 0.39 AU");
         assert_eq!(star_distance_label("Jupiter", 5.2029 * AU), "Jupiter - 5.2 AU");
@@ -793,8 +990,23 @@ mod tests {
             }
             let body_angle=(body-center).y.atan2((body-center).x);
             let delta=|angle:f32| {let mut d=angle-body_angle;while d>std::f32::consts::PI {d-=std::f32::consts::TAU;}while d<=-std::f32::consts::PI {d+=std::f32::consts::TAU;}d};
-            glyphs.sort_by(|a,b|delta(b.0).total_cmp(&delta(a.0)));
+            glyphs.sort_by(|a,b|delta(a.0).total_cmp(&delta(b.0)));
             glyphs.into_iter().map(|(_,s)|s).collect()
+        }
+        fn straddles_body(output:&egui::FullOutput,center:Pos2,body:Pos2,min_r:f32,max_r:f32,color:Color32)->bool {
+            let body_angle=(body-center).y.atan2((body-center).x);
+            let mut deltas=Vec::new();
+            for t in texts(output) {
+                if t.fallback_color!=color || t.galley.text().chars().count()!=1 {continue;}
+                let at=glyph_anchor(t);
+                let rel=at-center;
+                if rel.length()<min_r || rel.length()>max_r || at.distance(body)>160.0 {continue;}
+                let mut d=rel.y.atan2(rel.x)-body_angle;
+                while d>std::f32::consts::PI {d-=std::f32::consts::TAU;}
+                while d<=-std::f32::consts::PI {d+=std::f32::consts::TAU;}
+                deltas.push(d);
+            }
+            deltas.iter().any(|d|*d<0.0) && deltas.iter().any(|d|*d>0.0)
         }
         let label_color=|kind| {let c=celestial_color(kind);Color32::from_rgba_unmultiplied(c.r(),c.g(),c.b(),128)};
         let mut app=LuminalApp::new_with_theme(luminal_core::world::ShipClass::Frigate,theme::Theme::Luminal);
@@ -808,8 +1020,9 @@ mod tests {
         let output=frame(&mut app,&ctx);
         let sun_s=to_screen(&app.camera,rect,view.celestials[0].pos);
         let earth_s=to_screen(&app.camera,rect,earth);
-        let joined=arc_label(&output,sun_s,earth_s,370.0,400.0,140.0,label_color(CelestialKind::Planet));
+        let joined=arc_label(&output,sun_s,earth_s,400.0,460.0,160.0,label_color(CelestialKind::Planet));
         assert_eq!(joined,"Earth - 1 AU");
+        assert!(straddles_body(&output,sun_s,earth_s,400.0,460.0,label_color(CelestialKind::Planet)));
         for forbidden in ["Earth","0.5 AU","1 AU","1.5 AU","2 AU"] {
             assert!(!texts(&output).iter().any(|t|t.galley.text()==forbidden),"{forbidden} still painted");
         }
@@ -821,15 +1034,16 @@ mod tests {
         let earth_s=to_screen(&app.camera,rect,view.celestials[parent].pos);
         let moon_s=to_screen(&app.camera,rect,moon);
         let expected=primary_distance_label("Moon",(moon-view.celestials[parent].pos).length());
-        let joined=arc_label(&output,earth_s,moon_s,250.0,278.0,140.0,label_color(CelestialKind::Moon));
+        let joined=arc_label(&output,earth_s,moon_s,280.0,360.0,160.0,label_color(CelestialKind::Moon));
         assert_eq!(joined,expected);
+        assert!(straddles_body(&output,earth_s,moon_s,280.0,360.0,label_color(CelestialKind::Moon)));
         assert!(!texts(&output).iter().any(|t|t.galley.text()=="Moon"));
         app.camera=Camera {center:earth,km_per_px:earth_orbit/24.0};
         let output=frame(&mut app,&ctx);
-        let straight=texts(&output).iter().filter(|t|t.galley.text()=="Earth - 1 AU").count();
-        assert_eq!(straight,1);
+        assert_eq!(texts(&output).iter().filter(|t|t.galley.text()=="Earth - 1 AU").count(),0);
         let sun_s=to_screen(&app.camera,rect,view.celestials[0].pos);
-        assert!(arc_label(&output,sun_s,to_screen(&app.camera,rect,earth),4.0,20.0,80.0,label_color(CelestialKind::Planet)).is_empty());
+        let hidden=arc_label(&output,sun_s,to_screen(&app.camera,rect,earth),8.0,50.0,36.0,label_color(CelestialKind::Planet));
+        assert!(!hidden.contains("Earth"),"a ring too small to wrap still labeled: {hidden}");
     }
 
     #[test]
@@ -978,8 +1192,10 @@ const FORECAST_S: f64 = 8.0 * 3600.0;
 /// Velocity tail length, px per km/s of Sun-frame speed, and its cap.
 const TAIL_PX_PER_KMS: f64 = 0.01;
 const TAIL_MAX_PX: f64 = 2.4;
-/// A bearing-only detection fades out over this much game time unless refreshed, seconds.
-const BEARING_FADE_S: f64 = 300.0;
+/// How long a sensor mark stays fully visible for a person, wall seconds.
+const INDICATOR_HOLD_S: f64 = 12.0;
+/// Then it fades. Game time does not expire these marks.
+const INDICATOR_FADE_S: f64 = 4.0;
 
 const BACKGROUND: Color32 = Color32::from_rgb(6, 8, 14);
 /// Relative to the viewer: our combatants, our non-combatants, enemies (and every
@@ -1042,6 +1258,8 @@ struct LuminalApp {
     manual_flight:Option<ManualFlight>,
     manual_send_elapsed:f64,
     audio:audio::Audio,
+    /// One fan, one notice and one tone for a fleet. Also hides that fan, the notice and routine beam noise.
+    quiet_detections:bool,
     auto_speed:bool,
     auto_speed_elapsed:f64,
     session: LocalSession,
@@ -1066,6 +1284,12 @@ struct LuminalApp {
     /// Displayed bearing per (contact, sensor): a running average of the noisy
     /// measurements, and the emission time of the last one folded in.
     bearing_display: BTreeMap<(ContactId, BodyId), (f64, f64)>,
+    /// Bearing fans kept after the contact leaves the picture, so a person can still see them.
+    held_bearings: Vec<HeldBearing>,
+    /// Own ping rings, timed from the first wall-clock sight.
+    held_pings: Vec<HeldOwnPing>,
+    /// Hostile ping marks, timed from the first sight of that pulse.
+    held_hostile: Vec<HeldHostile>,
     ship_headings: BTreeMap<BodyId, Vec2>,
     selection_pending:bool,
     chosen_class:luminal_core::world::ShipClass,
@@ -1169,7 +1393,7 @@ impl LuminalApp {
                     ui.label(format!("{} remaining",fmt_time((depart_at-view.time).max(0.0))));
                     ui.small("Thrust, evasion, screens, beams and PD lasers offline.");
                     if ui.button(if self.theme==theme::Theme::Luminal {"CANCEL JUMP".into()} else {format!("CANCEL {}",self.theme.jump())}).clicked() {self.command(Command::CancelJump {body:ship.id});}
-                    ui.small("Cancel: screens recharge from zero.");
+                    ui.small("Cancel: screens recharge from zero. The fleet's spool cancels when the order reaches them.");
                 }
                 JumpState::Transit {arrive_at,..}=>{
                     ui.label(egui::RichText::new("JUMP IN TRANSIT").strong().color(ACCENT));
@@ -1178,14 +1402,14 @@ impl LuminalApp {
             }
             return;
         }
-        if ship.ship_class.is_some_and(|c|c.has_jump_drive()) {
+        if view.jumps_enabled && ship.ship_class.is_some_and(|c|c.has_jump_drive()) {
             let selecting=self.jump_select==Some(ship.id);
             let recovery=(ship.jump_ready_at-view.time).max(0.0);
             sub_header(ui,&format!("NAVIGATION / {}",self.theme.jump()),None);
             let label=if selecting {"CANCEL DESTINATION".into()} else if recovery>0.0 {format!("RECOVERING · {}",fmt_time(recovery))} else {self.theme.jump().to_string()};
             if tac_button(ui,&label,EVec2::new(ui.available_width(),40.0),ACCENT,selecting,
                 recovery<=0.0 && ship.damage.operating_effectiveness(System::Jump)>0.0)
-                .on_hover_text("Choose a point within 50 AU of the central star. One-hour spool, then 1 AU/s; preserves velocity. Six-hour drive recovery after arrival. Thrust, screens and lasers are offline while spooling.").clicked() {
+                .on_hover_text("Choose a point within 50 AU of the central star. One-hour spool, then 1 AU/s; preserves velocity. Destroyers, cruisers and battleships of the fleet spool for the same jump and keep station. The order reaches them at light speed. Six-hour drive recovery after arrival. Thrust, screens and lasers are offline while spooling.").clicked() {
                 self.jump_select=if selecting {None} else {Some(ship.id)};
                 self.manual_flight=None;
             }
@@ -1229,9 +1453,40 @@ impl LuminalApp {
                     if let Some(target)=target {self.command(mode.command(ship.id,target));}
                 }
             }
-            if pair.len()==1 && tac_button(ui,"COAST",EVec2::new(width,27.0),ACCENT,order.is_none() && ship.thrust.length()<0.001,true).clicked() {self.command(Command::SetThrust {body:ship.id,thrust:Vec2::ZERO});}
         });}
         ui.add_space(4.0);
+        ui.horizontal(|ui| {
+            let width=(ui.available_width()-ui.spacing().item_spacing.x)/2.0;
+            let coasting=order.is_none() && ship.thrust.length()<0.001;
+            let drive=ship.damage.operating_effectiveness(System::Propulsion)>0.0;
+            if tac_button(ui,"COAST",EVec2::new(width,27.0),ACCENT,coasting,drive).on_hover_text("Hold your vector. Zero thrust, no braking.").clicked() {self.command(Command::Coast {body:ship.id});}
+            if tac_button(ui,"ALL STOP",EVec2::new(width,27.0),ACCENT,false,drive).on_hover_text("Brake to rest in the local frame.").clicked() {self.command(Command::AllStop {body:ship.id});}
+        });
+        let reach=if ship.emissivity.direction_active() {sensors::detection_ranges(ship.emissivity.value())[3]} else {0.0};
+        ui.label(egui::RichText::new(if reach>0.0 {format!("BEARING REACH  {}",fmt_distance(reach))} else {"DARK — NO BEARING".into()}).monospace().size(11.0).color(if reach>0.0 {WARM} else {TEXT_MUTED}));
+        let wings=view.bodies.iter().any(|b|b.id!=ship.id && b.faction==ship.faction && b.kind==BodyKind::Ship && b.armed);
+        if wings {
+            ui.horizontal(|ui| {
+                let width=(ui.available_width()-2.0*ui.spacing().item_spacing.x)/3.0;
+                for (label,order,help) in [("SCREEN",FleetOrder::Screen,"Wingmen stay between you and the enemy, capitals nearest you. A new bearing turns the formation slowly. The order travels at light speed."),("CLOSE",FleetOrder::Close,"Wingmen close on the objective."),("FREE",FleetOrder::WeaponsFree,"Wingmen arm beams.")] {
+                    if tac_button(ui,label,EVec2::new(width,24.0),ACCENT,false,true).on_hover_text(help).clicked() {self.command(Command::Fleet {body:ship.id,order});}
+                }
+            });
+        }
+        let goal=view.objective.as_ref();
+        if goal.is_some_and(|o|o.player==Some(ship.id) && (o.disengage_wins || (o.extract && o.prize_taken))) && ship.ship_class.is_some_and(|c|c.has_jump_drive()) {
+            let note=if goal.is_some_and(|o|o.extract) {"The station is gone. Withdraw to finish the raid."} else {"Withdraw to break contact."};
+            if tac_button(ui,"WITHDRAW",EVec2::new(ui.available_width(),24.0),WARM,false,ship.damage.operating_effectiveness(System::Jump)>0.0).on_hover_text(note).clicked() {self.command(Command::Withdraw {body:ship.id});}
+        }
+        if ship.probes>0 {
+            let contact=match self.inspected {Some(Selection::Contact(id))=>view.contacts.iter().find(|c|c.id==id),_=>None}.or_else(||view.contacts.first());
+            if let Some((direction,destination))=contact.and_then(|c|probe_launch(ship.pos,c)) {
+                if tac_button(ui,&format!("PROBE · {}",ship.probes),EVec2::new(ui.available_width(),24.0),ACCENT,false,true)
+                    .on_hover_text("Flies the bearing and is expended at the aim point. It stays quiet until it detects a ship, then pings to resolve it.").clicked() {
+                    self.command(Command::DeployProbe {body:ship.id,direction,destination});
+                }
+            } else {ui.small(format!("Probes {} · need a bearing",ship.probes));}
+        }
         ui.label(egui::RichText::new(active.unwrap_or(self.movement_mode).help()).size(10.0).color(TEXT_MUTED));
         ui.label(egui::RichText::new("Left click: target   Right click: move
 Shift + right click: extend route").monospace().size(9.0).color(TEXT_MUTED));
@@ -1338,7 +1593,8 @@ Shift + right click: extend route").monospace().size(9.0).color(TEXT_MUTED));
     fn compact_weapons(&mut self,ui:&mut egui::Ui,view:&View,b:&BodyView) {
         let target=match self.inspected {Some(Selection::Contact(id))=>view.contacts.iter().find(|c|c.id==id),_=>None};
         let area=ui.available_rect_before_wrap();
-        let title=target.map_or_else(||"SELECT AN ENEMY · NO SOLUTION".into(),|c|format!("{} · {}{}",contact_label(c),c.quality.to_uppercase(),c.track.as_ref().map_or(String::new(),|t|format!(" · {}",fmt_distance((t.pos-b.pos).length())))));
+        let mut title=target.map_or_else(||"SELECT AN ENEMY · NO SOLUTION".into(),|c|format!("{} · {}{}",contact_label(c),c.quality.to_uppercase(),c.track.as_ref().map_or(String::new(),|t|format!(" · {}",fmt_distance((t.pos-b.pos).length())))));
+        if target.is_some_and(|c| self.hostile_ping_visible(view,c.id,ui.input(|i| i.time))) {title.push_str(" · PINGING");}
         ui.painter().text(area.left_top(),egui::Align2::LEFT_TOP,title,mono(10.0),ACCENT);
         let weapons:Vec<_>=[Payload::Nuclear,Payload::Kinetic,Payload::Beam].into_iter().filter(|p|*p==Payload::Beam || b.magazine[p.index()]>0).collect();
         let footer=19.0;let top=area.top()+18.0;let height=((area.height()-18.0-footer-8.0)/weapons.len() as f32).min(110.0);
@@ -1511,6 +1767,9 @@ Shift + right click: extend route").monospace().size(9.0).color(TEXT_MUTED));
             payload: Payload::Kinetic,
             dev: DevHooks { screenshot: std::env::var_os("LUMINAL_SCREENSHOT").map(Into::into), frames: 0 },
             bearing_display: BTreeMap::new(),
+            held_bearings: Vec::new(),
+            held_pings: Vec::new(),
+            held_hostile: Vec::new(),
             ship_headings: BTreeMap::new(),
             selection_pending:!cfg!(test) && (std::env::var_os("LUMINAL_SCREENSHOT").is_none() || std::env::var_os("LUMINAL_SHIP_SELECT").is_some()),
             chosen_class:chosen,
@@ -1521,6 +1780,7 @@ Shift + right click: extend route").monospace().size(9.0).color(TEXT_MUTED));
             jump_effects:jump_effects::JumpEffects::default(),
             celestial_art:celestial_art::CelestialArt::default(),
             audio:audio::Audio::default(),
+            quiet_detections:false,
             manual_flight:None,manual_send_elapsed:0.0,
         }
         .with_env_setup();
@@ -1543,11 +1803,13 @@ Shift + right click: extend route").monospace().size(9.0).color(TEXT_MUTED));
         let volume=self.audio.volume;
         let music_volume=self.audio.music_volume;
         let muted=self.audio.muted;
+        let quiet_detections=self.quiet_detections;
         *self=Self::new_with_scenario(scenario,class,theme);
         self.theme=theme;
         self.selection_pending=pending;
         if !pending {let _=self.session.command(self.role,Command::SetPaused(false));}
         self.audio.volume=volume;self.audio.music_volume=music_volume;self.audio.muted=muted;self.audio.settings_changed();
+        self.quiet_detections=quiet_detections;
     }
 
     fn with_env_setup(mut self) -> Self {
@@ -1657,6 +1919,9 @@ Shift + right click: extend route").monospace().size(9.0).color(TEXT_MUTED));
             Command::SetHeatDump {enabled,..}=>Some(("thermal",if *enabled {"HEAT DUMP · RADIATORS OPEN".into()} else {"HEAT DUMP STOPPED".into()})),
             Command::Evade {..}=>Some(("helm","EVADE ORDERED".into())),
             Command::AllStop {..}=>Some(("helm","ALL STOP ORDERED".into())),
+            Command::Coast {..}=>Some(("helm","COASTING".into())),
+            Command::Fleet {order,..}=>Some(("fleet",match order {FleetOrder::Screen=>"FLEET · SCREEN",FleetOrder::Close=>"FLEET · CLOSE",FleetOrder::WeaponsFree=>"FLEET · WEAPONS FREE"}.into())),
+            Command::Withdraw {..}=>Some(("helm","WITHDRAW ORDERED".into())),
             Command::SetScreen {up,..}=>Some(("screen",format!("{} {}",self.theme.screens(),if *up {"RAISING"} else {"LOWERING"}))),
             _=>None,
         };
@@ -1811,13 +2076,56 @@ fn contact_label(c: &ContactView) -> String {
     else {format!("T{}",c.id.0)}
 }
 
+/// Five department chips, capped so a wide deck does not stretch them.
+const SECTION_CHIP_MAX:f32=48.0;
+const SECTION_CHIP_GAP:f32=3.0;
+const SECTION_GROUPS:f32=5.0;
+const THRUST_GAUGE_W:f32=16.0;
+const THRUST_GAP:f32=8.0;
+const THRUST_TAIL:f32=6.0;
+const DECK_INSET:f32=8.0;
+
+/// Chip width and the bar/chip row span for one status column's inner width.
+/// The thrust gauge sits to the right of that span, so it is not part of the row.
+fn section_chip_span(column_inner:f32)->(f32,f32) {
+    let bar_budget=(column_inner-THRUST_GAP-THRUST_GAUGE_W-THRUST_TAIL).max(0.0);
+    if bar_budget<=4.0*SECTION_CHIP_GAP {return (0.0,bar_budget);}
+    let chip=((bar_budget-4.0*SECTION_CHIP_GAP)/SECTION_GROUPS).min(SECTION_CHIP_MAX);
+    (chip,chip*SECTION_GROUPS+4.0*SECTION_CHIP_GAP)
+}
+
+fn status_column_outer()->f32 {
+    let (_,span)=section_chip_span(1.0e6);
+    span+THRUST_GAP+THRUST_GAUGE_W+THRUST_TAIL+DECK_INSET*2.0
+}
+
+/// Own ship and target hug the status block. Fire control, heat and helm share what remains
+/// in their previous proportion.
+fn deck_column_widths(total:f32)->[f32;5] {
+    let total=total.max(0.0);
+    let preferred=status_column_outer();
+    let flex_floor=96.0*3.0;
+    let (status,flex_room)=if total<=flex_floor {
+        let status=total*0.18;
+        (status,total-2.0*status)
+    } else if total-2.0*preferred<flex_floor {
+        ((total-flex_floor)/2.0,flex_floor)
+    } else {
+        (preferred,total-2.0*preferred)
+    };
+    let fire=flex_room*0.175/0.6;
+    let center=flex_room*0.25/0.6;
+    [fire,status,center,status,flex_room-fire-center]
+}
+
 /// LRM seekers support speculative bearing searches even without a range fix.
 fn command_columns(ui:&mut egui::Ui,content:impl FnOnce(&mut [egui::Ui])) {
     let rect=ui.available_rect_before_wrap();let mut x=rect.left();
     let mut columns=Vec::new();
-    for (i,weight) in [0.175,0.20,0.25,0.20,0.175].into_iter().enumerate() {
-        let width=rect.width()*weight;
-        let r=Rect::from_min_max(Pos2::new(x+8.0,rect.top()),Pos2::new(x+width-8.0,rect.bottom()));
+    for (i,width) in deck_column_widths(rect.width()).into_iter().enumerate() {
+        let left=x+DECK_INSET;
+        let right=(x+width-DECK_INSET).max(left);
+        let r=Rect::from_min_max(Pos2::new(left,rect.top()),Pos2::new(right,rect.bottom()));
         columns.push(ui.new_child(egui::UiBuilder::new().id_salt(i).max_rect(r)));x+=width;
     }
     content(&mut columns);
@@ -1900,8 +2208,44 @@ fn target_system_report(c:&ContactView,view:&View)->Option<Report> {
         e.contact==Some(c.id) && matches!(e.kind,CombatKind::BeamPulse|CombatKind::SpinalPulse) && e.emitted_at>report.observed_at) {return None;}
     Some(report)
 }
-fn bearing_opacity(b:&luminal_core::session::BearingView,now:f64)->f32 {
-    (1.0-((now-b.received_at)/BEARING_FADE_S).clamp(0.0,1.0)) as f32
+/// A bearing the simulation still lists stays fully visible. Wall time, not game time, fades a mark that has already left.
+fn bearing_opacity(_b:&BearingView,_now:f64)->f32 {1.0}
+
+fn indicator_opacity(wall_age:f64)->f32 {
+    if wall_age<=INDICATOR_HOLD_S {1.0}
+    else {(1.0-(wall_age-INDICATOR_HOLD_S)/INDICATOR_FADE_S).clamp(0.0,1.0) as f32}
+}
+
+fn escape_clock_label(view:&View)->Option<String> {
+    let o=view.objective.as_ref()?;
+    let deadline=o.escape_by?;
+    if view.outcome.is_some() {return None;}
+    let left=deadline-view.time;
+    Some(if left>0.0 {format!("{}  {}",o.name.to_uppercase(),fmt_time(left))} else {format!("{}  TIME UP",o.name.to_uppercase())})
+}
+
+fn with_escape_remaining(label:String,view:&View)->String {
+    let Some(o)=view.objective.as_ref() else {return label;};
+    let Some(deadline)=o.escape_by else {return label;};
+    if view.outcome.is_some() {return label;}
+    let remaining=deadline-view.time;
+    if remaining>0.0 {format!("{label} · {}",fmt_time(remaining))} else {label}
+}
+
+fn displayed_ping_opacity(ping:&PingSighting,sim_now:f64,fade:&PingFade)->f32 {
+    let wall=fade.seen.get(&ping.contact).map(|seen| indicator_opacity(fade.wall_now-*seen)).unwrap_or(0.0);
+    ping.opacity(sim_now).max(wall)
+}
+
+fn own_ping_appearance(held:&HeldOwnPing,view:&View,wall_now:f64)->Option<(f64,f32)> {
+    let live=view.pings.iter().find(|p| p.t_emit.to_bits()==held.t_emit.to_bits());
+    let (range,physical)=if let Some(front)=live {
+        let range=((view.time-front.t_emit).max(0.0)*LIGHT_SECOND/2.0).min(front.useful_range);
+        let opacity=((1.0-range/front.useful_range)/0.3).clamp(0.0,1.0) as f32;
+        (range,opacity)
+    } else {(held.useful_range,0.0)};
+    let opacity=physical.max(indicator_opacity(wall_now-held.seen_at));
+    (opacity>0.0).then_some((range,opacity))
 }
 
 impl eframe::App for LuminalApp {
@@ -1948,6 +2292,7 @@ impl eframe::App for LuminalApp {
         }
         self.acquire_first_target(&view);
         self.smooth_bearings(&mut view,dt);
+        self.remember_indicators(&view,ui.input(|i| i.time));
         let overlay = match (self.role, self.overlay) {
             (Role::Spectator, Some(f)) => Some((
                 self.session.view(Role::Faction(f)),
@@ -1959,7 +2304,7 @@ impl eframe::App for LuminalApp {
         self.update_tactical_log(&view,ui.input(|i|i.time));
         self.jump_effects.observe(&view,ui.input(|i|i.time));
         self.weapon_effects.observe(&view,self.own_faction(),ui.input(|i|i.time));
-        self.audio.observe(&view,match self.selected {Some(Selection::Body(id))=>Some(id),_=>None});
+        self.audio.observe(&view,match self.selected {Some(Selection::Body(id))=>Some(id),_=>None},self.quiet_detections);
         if ui.input(|i|i.pointer.button_clicked(egui::PointerButton::Primary)) {self.audio.play(audio::Cue::Click);}
         let deck_height=(ui.available_height()*0.26).clamp(332.0,348.0);
         let frame=panel_frame().inner_margin(egui::Margin {left:0,right:0,top:5,bottom:4});
@@ -1999,6 +2344,9 @@ impl LuminalApp {
         ui.spacing_mut().item_spacing=EVec2::new(4.0,4.0);
         sub_header(ui,"LUMINAL / TACTICAL",Some((if view.paused {"PAUSED"} else {"LIVE"},ACCENT)));
         ui.label(egui::RichText::new(format!("T+ {}",fmt_time(view.time))).monospace().size(18.0).color(TEXT_HI));
+        if let Some(text)=escape_clock_label(view) {
+            ui.label(egui::RichText::new(text).monospace().size(11.0).color(Color32::from_rgb(120,220,140)));
+        }
         let mut restart=false;
         ui.horizontal(|ui| {
             if tac_button(ui,if view.paused {"RUN"} else {"PAUSE"},EVec2::new(66.0,23.0),ACCENT,!view.paused,true).clicked() {
@@ -2041,6 +2389,9 @@ impl LuminalApp {
             ui.spacing_mut().slider_width=130.0;
             if ui.add(egui::Slider::new(&mut self.audio.music_volume,0.0..=1.0).show_value(false)).on_hover_text("Ambient music · default 25% · slide to zero to disable").changed() {self.audio.settings_changed();}
         });
+        if tac_button(ui,if self.quiet_detections {"DETECTIONS QUIET"} else {"QUIET DETECTIONS"},EVec2::new(206.0,23.0),ACCENT,self.quiet_detections,true)
+            .on_hover_text("Fleet bearings share one fan, and new tracks share one notice and one tone. Quiet also hides that fan, the notice, and routine beam noise. A selected track keeps its bearing. Hits, launches and losses still report.")
+            .clicked() {self.quiet_detections=!self.quiet_detections;}
         restart
     }
     #[allow(dead_code)] // Legacy detailed inspector retained while the compact deck settles.
@@ -2112,7 +2463,7 @@ impl LuminalApp {
                         self.command(Command::AllStop { body: b.id });
                     }
                     if tac_button(ui, "COAST", EVec2::new(w, 22.0), ACCENT, false, true).clicked() {
-                        self.command(Command::SetThrust { body: b.id, thrust: Vec2::ZERO });
+                        self.command(Command::Coast { body: b.id });
                     }
                 });
             });
@@ -2127,7 +2478,7 @@ impl LuminalApp {
             egui::ScrollArea::vertical().id_salt("contact_list").max_height(180.0).show(ui, |ui| {
                 for c in &view.contacts {
                     let (status, color) = if c.stale { ("STALE", SYS_DAMAGED) } else if c.track.is_some() { ("TRACK", ACCENT) } else { ("BEARING", TEXT_MUTED) };
-                    let pinging = view.hostile_pings.iter().any(|p| p.contact == c.id);
+                    let pinging = self.hostile_ping_visible(view, c.id, ui.input(|i| i.time));
                     let tag = if pinging { format!("PING · {status}") } else { status.to_string() };
                     let glyph = if c.resolved_missile { Glyph::HostileMissile } else { Glyph::Hostile };
                     if list_row(ui, self.inspected == Some(Selection::Contact(c.id)), Some((glyph, CONTACT)), &contact_label(c),
@@ -2222,7 +2573,7 @@ impl LuminalApp {
             ui.horizontal(|ui| {
                 ui.label(egui::RichText::new(contact_class(c)).monospace().size(9.5).color(TEXT));
                 ui.label(egui::RichText::new(quality).monospace().size(9.5).color(quality_color));
-                if view.hostile_pings.iter().any(|p| p.contact == c.id) {
+                if self.hostile_ping_visible(view, c.id, ui.input(|i| i.time)) {
                     ui.label(egui::RichText::new("PINGING").monospace().size(9.5).color(DANGER));
                 }
             });
@@ -2384,11 +2735,9 @@ impl LuminalApp {
         if b.controllable && b.kind==BodyKind::Ship && b.probes>0 {
             ui.label(format!("Reconnaissance probes: {}",b.probes));
             for c in &view.contacts {
-                let direction=c.track.as_ref().map(|tr|(tr.pos-b.pos).normalized()).or_else(||
-                    c.bearings.iter().max_by(|a,b| a.emitted_at.total_cmp(&b.emitted_at)).map(|bearing|Vec2::new(bearing.bearing.cos(),bearing.bearing.sin())));
-                if let Some(direction)=direction
-                    && ui.button(format!("Send probe toward {}",c.id)).on_hover_text("Launch a weaker sensor platform: 500g fixed-heading burn, then coast. Reports take light time to reach you. No automatic target identity.").clicked() {
-                    self.command(Command::DeployProbe {body:b.id,direction});
+                if let Some((direction,destination))=probe_launch(b.pos,c)
+                    && ui.button(format!("Send probe toward {}",c.id)).on_hover_text("Flies the bearing and is expended at the aim point. It stays quiet until it detects a ship, then pings to resolve it.").clicked() {
+                    self.command(Command::DeployProbe {body:b.id,direction,destination});
                 }
             }
         }
@@ -2441,7 +2790,11 @@ impl LuminalApp {
         if let Some(ap) = b.autopilot {
             let what = match ap.order {
                 Order::Alongside {target,..}=>format!("alongside {target} · 1 LS"),
-                Order::Follow {target,..}=>format!("escort {} · 1 LS alongside / 10 LS screen",view.bodies.iter().find(|b|b.id==target).map_or("?",|b|b.name.as_str())),
+                Order::Follow {target,offset}=>{
+                    let name=view.bodies.iter().find(|b|b.id==target).map_or("?",|b|b.name.as_str());
+                    if offset.length()>5.0*LIGHT_SECOND {format!("escort {name} · screening ahead of the admiral")}
+                    else {format!("escort {name} · 1 LS alongside / 10 LS screen")}
+                },
                 Order::Route=>format!("fly-through route · {} points remaining",b.route.as_ref().map_or(0,|r|r.points.len().saturating_sub(r.progress.floor() as usize+1))),
                 Order::Orbit { celestial, radius, .. } => {
                     format!("orbit {} at {} altitude", view.celestials[celestial].name, fmt_distance(radius - view.celestials[celestial].radius))
@@ -2454,7 +2807,7 @@ impl LuminalApp {
                 Order::Flyby(InterceptTarget::Contact(c)) => format!("fly by {c}"),
                 Order::CombatRange(_,standoff)=>if standoff {"standoff".into()} else {"close to beam range".into()},
                 Order::KeepRange(_,range)=>format!("hold range {}",fmt_distance(range)),
-                Order::Evade(_)=>"evade · incoming missiles / coast when clear".into(),
+                Order::Evade(_)=>"evade · step off the bearing, then coast".into(),
                 Order::MoveTo { frame, .. } => format!("move and stop (frame: {})", view.celestials[frame].name),
             };
             let status = match ap.status {
@@ -2495,7 +2848,7 @@ impl LuminalApp {
                     self.command(Command::AllStop { body: b.id });
                 }
                 if ui.button(if b.autopilot.is_some() { "Cancel order" } else { "Cut thrust" }).on_hover_text("Stop thrusting and coast").clicked() {
-                    self.command(Command::SetThrust { body: b.id, thrust: Vec2::ZERO });
+                    self.command(Command::Coast { body: b.id });
                 }
             });
             if b.kind == BodyKind::Ship {
@@ -2589,7 +2942,7 @@ impl LuminalApp {
         painter.rect_filled(rect, 0.0, BACKGROUND);
 
         if self.fit_pending {
-            if !self.opening_fit {self.track_player=false;}
+            self.track_player=false;
             let safe = Rect::from_min_max(rect.min + EVec2::new(0.0, 150.0_f32.min(rect.height()*0.25)), rect.max - EVec2::new(0.0, 85.0));
             self.fit(view, safe);
             self.camera.center.y += (safe.center().y-rect.center().y) as f64*self.camera.km_per_px;
@@ -2645,9 +2998,9 @@ impl LuminalApp {
                 })
                 .collect();
             painter.extend(Shape::dashed_line(&pts, Stroke::new(1.0, col.gamma_multiply(0.7)), 8.0, 5.0));
-            let label = if o.prize.is_some() || o.wipe {o.name.clone()} else {
+            let label = with_escape_remaining(if o.prize.is_some() || o.wipe {o.name.clone()} else {
                 format!("{} (goal: {})", o.name, view.bodies.iter().find(|b| b.id == o.protect).map_or("the transport".into(), |b| b.name.clone()))
-            };
+            }, view);
             if rect.contains(center) {
                 labels.add(center + EVec2::new(r * 0.7 + 4.0, -r * 0.7), label, col);
             } else {
@@ -2711,14 +3064,15 @@ impl LuminalApp {
 
         self.weapon_effects.draw(&painter,&cam,rect,ui.input(|i|i.time));
 
-        // Round-trip range, not the outbound light front. Anchor at emission.
-        for front in &view.pings {
-            let range = (view.time - front.t_emit).max(0.0) * LIGHT_SECOND / 2.0;
-            let opacity = ((1.0 - range / front.useful_range) / 0.3).clamp(0.0, 1.0) as f32;
-            if opacity > 0.0 {
-                painter.circle_stroke(to_screen(&cam, rect, front.origin), (range / cam.km_per_px) as f32,
-                    Stroke::new(1.5, Color32::WHITE.gamma_multiply(opacity)));
-            }
+        // Round-trip range while the pulse is in the picture. After it leaves, the ring stays at full range until the wall-clock fade ends.
+        let wall_now = ui.input(|i| i.time);
+        let held_pings = self.held_pings.clone();
+        let held_bearings = self.held_bearings.clone();
+        let held_hostile = self.held_hostile.clone();
+        for held in &held_pings {
+            let Some((range, opacity)) = own_ping_appearance(held, view, wall_now) else { continue; };
+            painter.circle_stroke(to_screen(&cam, rect, held.origin), (range / cam.km_per_px) as f32,
+                Stroke::new(1.5, Color32::WHITE.gamma_multiply(opacity)));
         }
 
         if let Some((_, pos)) = resp.hover_pos().and_then(|pointer| selectable_at(view, &cam, rect, pointer)) {
@@ -2743,10 +3097,10 @@ impl LuminalApp {
                 self.celestial_art.draw(ui.ctx(),&painter,view,i,self.theme,p,r,ui.input(|i|i.time));
             }
             if rect.contains(p) {
-                let labeled=c.kind!=CelestialKind::Star && draw_orbit_label(&painter,&cam,rect,view,i,p,col);
-                if !labeled {
-                    let text=if c.kind==CelestialKind::Star {c.name.clone()} else {celestial_distance_label(view,i)};
-                    labels.add(p + EVec2::new(r + 4.0, -r - 2.0), text, col.gamma_multiply(0.8));
+                if c.kind==CelestialKind::Star {
+                    labels.add(p + EVec2::new(r + 4.0, -r - 2.0), c.name.clone(), col.gamma_multiply(0.8));
+                } else {
+                    draw_orbit_label(&painter,&cam,rect,view,i,p,col);
                 }
             } else {
                 let origin=view.bodies.iter().find(|b|b.controllable && Some(b.faction)==self.own_faction()).map_or(cam.center,|b|b.pos);
@@ -2755,13 +3109,32 @@ impl LuminalApp {
             }
         }
 
-        // Contacts: estimates with uncertainty, or bare bearing lines.
+        // Contacts: estimates with uncertainty, or one fan per tight bearing group.
+        let inspected_contact=match self.inspected {Some(Selection::Contact(id))=>Some(id),_=>None};
+        let grouped=paint_fleet_fans(&painter,&cam,rect,view,CONTACT,inspected_contact,self.quiet_detections,&mut labels);
+        let mut displayed_pings=view.hostile_pings.clone();
+        let mut ping_seen:BTreeMap<ContactId,f64>=BTreeMap::new();
+        for held in &held_hostile {
+            ping_seen.insert(held.sighting.contact,held.seen_at);
+            if !displayed_pings.iter().any(|p| p.contact==held.sighting.contact) {displayed_pings.push(held.sighting);}
+        }
+        let ping_fade=PingFade {wall_now,seen:&ping_seen,pings:&displayed_pings};
         for c in &view.contacts {
-            let selected = self.inspected == Some(Selection::Contact(c.id));
+            let selected = inspected_contact==Some(c.id);
             if let Some(track)=&c.track {
                 draw_hit_bloom(&painter,to_screen(&cam,rect,track.pos),CONTACT,view,None,Some(c.id));
             }
-            draw_contact(&painter, &cam, rect, view, c, CONTACT, selected, &mut labels);
+            draw_contact(&painter, &cam, rect, view, c, CONTACT, selected, !grouped.contains(&c.id) && (!self.quiet_detections || selected), &mut labels, &ping_fade);
+        }
+        // A bearing that has already left the picture. Quiet still hides a live fleet fan; this is the one the simulation dropped.
+        let live_contacts:BTreeSet<ContactId>=view.contacts.iter().map(|c| c.id).collect();
+        for held in &held_bearings {
+            if live_contacts.contains(&held.id) {continue;}
+            let fade=indicator_opacity(wall_now-held.seen_at);
+            if fade<=0.0 {continue;}
+            let selected=inspected_contact==Some(held.id);
+            let color=if held_hostile.iter().any(|p| p.sighting.contact==held.id && indicator_opacity(wall_now-p.seen_at)>0.0) {Color32::from_rgb(255,155,45)} else {CONTACT};
+            draw_bearing_fan(&painter,&cam,rect,held.origin,held.bearing,f64::min(2.0*held.sigma,0.5),fade,held.reach,selected,held.label.clone(),color,&mut labels);
         }
 
         // Standing orders: target orbits and intercept lines.
@@ -2843,6 +3216,8 @@ impl LuminalApp {
                 else {draw_missile(&painter, p, c, selected);}
             } else if b.kind == BodyKind::Station {
                 painter.rect_filled(Rect::from_center_size(p,EVec2::splat(7.0)),0.0,c);
+            } else if b.kind == BodyKind::Probe {
+                draw_probe(&painter, p, c, selected);
             } else {
                 // Only the player's command ship needs a route forecast. Allied
                 // autonomous platforms remain visible without map-spanning trails.
@@ -2861,7 +3236,7 @@ impl LuminalApp {
                 });
                 *heading=b.heading;
                 if b.kind==BodyKind::Ship {draw_burn_vector(&painter,p,*heading,b.thrust.length()/G0,1.0);}
-                draw_ship(&painter, p, b.vel, *heading, c, selected);
+                draw_ship(&painter, p, b.vel, *heading, c, selected, (b.kind==BodyKind::Ship).then_some(b.ship_class).flatten());
                 if matches!(b.jump,Some(JumpState::Spooling {..})) && ui.input(|i|i.time).rem_euclid(1.0)<0.6 {
                     let triangle=vec![p+EVec2::new(0.0,-24.0),p+EVec2::new(22.0,17.0),p+EVec2::new(-22.0,17.0)];
                     painter.add(Shape::closed_line(triangle,Stroke::new(2.0,ACCENT)));
@@ -2875,14 +3250,22 @@ impl LuminalApp {
             }
             if b.kind != BodyKind::Missile && !(b.controllable && self.own_faction()==Some(b.faction)) {
                 labels.add(p + EVec2::new(10.0, -10.0), b.name.clone(), c);
+                if let Some(&(_,at))=view.order_eta.iter().find(|(id,_)|*id==b.id) && at>view.time {
+                    labels.add(p+EVec2::new(10.0,6.0),format!("order · {}",fmt_age(at-view.time)),c.gamma_multiply(0.8));
+                }
             }
         }
 
         // Spectator overlay: the chosen faction's belief, linked to truth.
         if let Some((ov, truth)) = overlay {
+            let inspected_contact=match self.inspected {Some(Selection::Contact(id))=>Some(id),_=>None};
+            let grouped=paint_fleet_fans(&painter,&cam,rect,ov,BELIEF,inspected_contact,self.quiet_detections,&mut labels);
+            let empty_seen:BTreeMap<ContactId,f64>=BTreeMap::new();
+            let overlay_fade=PingFade {wall_now,seen:&empty_seen,pings:&ov.hostile_pings};
             for c in &ov.contacts {
                 let real = truth.get(&c.id).and_then(|id| view.bodies.iter().find(|b| b.id == *id));
-                draw_contact(&painter, &cam, rect, ov, c, BELIEF, false, &mut labels);
+                let selected=inspected_contact==Some(c.id);
+                draw_contact(&painter, &cam, rect, ov, c, BELIEF, false, !grouped.contains(&c.id) && (!self.quiet_detections || selected), &mut labels, &overlay_fade);
                 if let (Some(t), Some(r)) = (&c.track, real) {
                     let pb = to_screen(&cam, rect, t.pos);
                     let pt = to_screen(&cam, rect, r.pos);
@@ -2925,10 +3308,21 @@ impl LuminalApp {
                 egui::FontId::proportional(14.0),
                 Color32::LIGHT_GRAY,
             );
+            if let Role::Faction(_) = self.role {
+                let mut lines:Vec<String>=view.contacts.iter().take(5).map(|c| {
+                    let kind=match c.last_source {Source::Ping=>"ping",Source::Echo=>"echo",Source::Emission=>"emission"};
+                    format!("{} · {} · light T+ {} · received T+ {} · {kind}",contact_label(c),c.detection.label(),fmt_time(c.last_emitted_at),fmt_time(c.last_received_at))
+                }).collect();
+                if lines.is_empty() {lines.push("No contacts on your plot".into());}
+                if view.pending_orders>0 {lines.push(format!("{} orders still in transit",view.pending_orders));}
+                for (i,line) in lines.iter().enumerate() {
+                    painter.text(at+EVec2::new(0.0,64.0+i as f32*16.0),egui::Align2::CENTER_TOP,line,egui::FontId::monospace(11.0),TEXT_MUTED);
+                }
+            }
         }
 
         if let Some(body)=self.jump_select {
-            if !view.bodies.iter().any(|b|b.id==body && b.jump.is_none()) {self.jump_select=None;}
+            if !view.jumps_enabled || !view.bodies.iter().any(|b|b.id==body && b.jump.is_none()) {self.jump_select=None;}
             else {
                 painter.circle_stroke(to_screen(&cam,rect,Vec2::ZERO),(MAX_SOL_RADIUS_AU*AU/cam.km_per_px) as f32,Stroke::new(1.0,ACCENT));
                 if let Some(pointer)=resp.hover_pos() {
@@ -2986,7 +3380,7 @@ impl LuminalApp {
 
     fn update_tactical_log(&mut self,view:&View,now:f64) {
         let own=match self.selected {Some(Selection::Body(id))=>Some(id),_=>None};
-        self.tactical_log.observe(view,own,now);
+        self.tactical_log.observe(view,own,now,self.quiet_detections);
         let actions:Vec<_>=self.session.bot_debug(RAIDER).filter(|(at,_,_)|*at>self.tactical_log.raider_at).cloned().collect();
         for (at,_,note) in actions {
             self.tactical_log.raider_at=self.tactical_log.raider_at.max(at);
@@ -3012,6 +3406,48 @@ impl LuminalApp {
         }
         if lines.is_empty() {p.text(rect.right_top()+EVec2::new(-9.0,25.0),egui::Align2::RIGHT_TOP,"NO RECENT ACTIVITY",mono(8.0),TEXT_MUTED);}
     }
+    /// Keep human-facing sensor marks after the simulation drops them.
+    /// A live bearing refreshes its hold, so the clock starts when the contact leaves.
+    /// A ping starts at the first sight; the same pulse does not refresh it.
+    fn remember_indicators(&mut self, view: &View, wall_now: f64) {
+        let mut live_bearings = BTreeSet::new();
+        for c in view.contacts.iter().filter(|c| c.track.is_none()) {
+            let Some(b) = best_command_bearing(view, c) else { continue; };
+            live_bearings.insert(c.id);
+            let origin = view.bodies.iter().find(|ship| ship.id == b.sensor).map_or(b.origin, |ship| ship.pos);
+            let held = HeldBearing { id: c.id, bearing: b.bearing, sigma: b.sigma, reach: b.max_range, origin, label: contact_label(c), seen_at: wall_now };
+            if let Some(slot) = self.held_bearings.iter_mut().find(|h| h.id == c.id) { *slot = held; }
+            else { self.held_bearings.push(held); }
+        }
+        self.held_bearings.retain(|h| {
+            if view.contacts.iter().any(|c| c.id == h.id && c.track.is_some()) { return false; }
+            live_bearings.contains(&h.id) || indicator_opacity(wall_now - h.seen_at) > 0.0
+        });
+        for front in &view.pings {
+            if let Some(held) = self.held_pings.iter_mut().find(|h| h.t_emit.to_bits() == front.t_emit.to_bits()) {
+                held.origin = front.origin;
+                held.useful_range = front.useful_range;
+            } else {
+                self.held_pings.push(HeldOwnPing { origin: front.origin, t_emit: front.t_emit, useful_range: front.useful_range, seen_at: wall_now });
+            }
+        }
+        self.held_pings.retain(|h| view.pings.iter().any(|p| p.t_emit.to_bits() == h.t_emit.to_bits()) || indicator_opacity(wall_now - h.seen_at) > 0.0);
+        for ping in &view.hostile_pings {
+            if let Some(held) = self.held_hostile.iter_mut().find(|h| h.sighting.contact == ping.contact) {
+                if held.sighting.emitted_at != ping.emitted_at || held.sighting.received_at != ping.received_at { held.seen_at = wall_now; }
+                held.sighting = *ping;
+            } else {
+                self.held_hostile.push(HeldHostile { sighting: *ping, seen_at: wall_now });
+            }
+        }
+        self.held_hostile.retain(|h| view.hostile_pings.iter().any(|p| p.contact == h.sighting.contact) || indicator_opacity(wall_now - h.seen_at) > 0.0);
+    }
+
+    fn hostile_ping_visible(&self, view: &View, id: ContactId, wall_now: f64) -> bool {
+        view.hostile_pings.iter().any(|p| p.contact == id)
+            || self.held_hostile.iter().any(|h| h.sighting.contact == id && indicator_opacity(wall_now - h.seen_at) > 0.0)
+    }
+
     /// Ease the displayed angle every frame, rather than stepping once per report.
     fn smooth_bearings(&mut self, view: &mut View, dt:f64) {
         let alpha=if view.paused {0.0} else {1.0-(-dt.min(0.1)/0.35).exp()};
@@ -3025,23 +3461,22 @@ impl LuminalApp {
         }
     }
 
-    /// Frame own ships and contacts (or everything, for the spectator).
+    /// Frame own ships and contacts. The opening view frames the star system instead.
     fn fit(&mut self, view: &View, rect: Rect) {
+        if self.opening_fit {
+            self.track_player=false;
+            let star=view.celestials.first().map(|c|c.pos).unwrap_or(Vec2::ZERO);
+            let reach=view.system.bodies.iter().filter_map(|body|match body.orbit {
+                Orbit::Circular {parent,radius,..} | Orbit::Frozen {parent,radius,..} if parent==0 => Some(radius),
+                _ => None,
+            }).fold(0.0_f64,f64::max);
+            let span=(2.0*reach).max(1.0);
+            let km_per_px=(span/rect.width() as f64).max(span/rect.height() as f64)*1.2;
+            self.camera=Camera {center:star,km_per_px:km_per_px.max(2.0*LIGHT_SECOND/rect.width() as f64)};
+            return;
+        }
         let mut pts: Vec<Vec2> = view.bodies.iter().map(|b| b.pos).collect();
         pts.extend(view.contacts.iter().filter_map(|c| c.track.as_ref().map(|t| t.pos)));
-        if self.opening_fit {
-            let own=view.bodies.iter().find(|b|self.selected==Some(Selection::Body(b.id)));
-            let target=match self.inspected {
-                Some(Selection::Body(id))=>view.bodies.iter().find(|b|b.id==id).map(|b|b.pos),
-                Some(Selection::Contact(id))=>view.contacts.iter().find(|c|c.id==id).and_then(|c|c.track.as_ref()).map(|t|t.pos),
-                None=>None,
-            };
-            if let (Some(own),Some(target))=(own,target) {pts=vec![own.pos,target];}
-            else if let Some(own)=own
-                && let Some(b)=view.contacts.iter().find(|c|self.inspected==Some(Selection::Contact(c.id))).and_then(|c|c.bearings.first()) {
-                    pts=vec![own.pos,own.pos+Vec2::new(b.bearing.cos(),b.bearing.sin())*AU];
-            }
-        }
         if pts.is_empty() {
             pts.push(Vec2::ZERO);
         }
@@ -3146,6 +3581,162 @@ fn draw_weapon_ranges(painter:&egui::Painter,cam:&Camera,rect:Rect,ship:&BodyVie
     }
 }
 
+/// About twenty degrees. Bearings inside this cone share one fan.
+const FLEET_BEARING_CONE: f64 = 0.35;
+
+#[derive(Clone)]
+struct HeldBearing {
+    id: ContactId,
+    bearing: f64,
+    sigma: f64,
+    reach: f64,
+    origin: Vec2,
+    label: String,
+    seen_at: f64,
+}
+
+#[derive(Clone)]
+struct HeldOwnPing {
+    origin: Vec2,
+    t_emit: f64,
+    useful_range: f64,
+    seen_at: f64,
+}
+
+#[derive(Clone)]
+struct HeldHostile {
+    sighting: PingSighting,
+    seen_at: f64,
+}
+
+struct PingFade<'a> {
+    wall_now: f64,
+    seen: &'a BTreeMap<ContactId, f64>,
+    pings: &'a [PingSighting],
+}
+
+struct SpikeDraw {
+    id: ContactId,
+    bearing: f64,
+    sigma: f64,
+    fade: f32,
+    reach: f64,
+    origin: Vec2,
+}
+
+/// Split at the widest gap, then keep each run's diameter inside the cone.
+fn fleet_bearing_groups(bearings: &[f64]) -> Vec<Vec<usize>> {
+    let n = bearings.len();
+    if n == 0 { return Vec::new(); }
+    if n == 1 { return vec![vec![0]]; }
+    let mut order: Vec<usize> = (0..n).collect();
+    order.sort_by(|&a, &b| wrap_angle(bearings[a]).total_cmp(&wrap_angle(bearings[b])));
+    let angles: Vec<f64> = order.iter().map(|&i| wrap_angle(bearings[i])).collect();
+    let tau = std::f64::consts::TAU;
+    let mut best = angles[0] + tau - angles[n - 1];
+    let mut start = 0usize;
+    for i in 0..n - 1 {
+        let gap = angles[i + 1] - angles[i];
+        if gap > best { best = gap; start = i + 1; }
+    }
+    let seq: Vec<usize> = order[start..].iter().chain(order[..start].iter()).copied().collect();
+    let mut unwrapped = Vec::with_capacity(n);
+    unwrapped.push(wrap_angle(bearings[seq[0]]));
+    for &idx in seq.iter().skip(1) {
+        let mut angle = wrap_angle(bearings[idx]);
+        let prev = *unwrapped.last().unwrap();
+        while angle + 1e-12 < prev { angle += tau; }
+        unwrapped.push(angle);
+    }
+    let mut groups = Vec::new();
+    let mut i = 0;
+    while i < n {
+        let anchor = unwrapped[i];
+        let mut j = i + 1;
+        while j < n && unwrapped[j] - anchor <= FLEET_BEARING_CONE + 1e-9 { j += 1; }
+        groups.push(seq[i..j].to_vec());
+        i = j;
+    }
+    groups
+}
+
+fn best_command_bearing<'a>(view: &'a View, c: &'a ContactView) -> Option<&'a BearingView> {
+    let score = |b: &BearingView| b.sigma / f64::from(bearing_opacity(b, view.time)).max(0.001);
+    c.bearings.iter().filter(|b| view.bodies.iter().any(|ship| ship.controllable && ship.id == b.sensor))
+        .min_by(|a, b| score(a).total_cmp(&score(b)))
+}
+
+fn command_spikes(view: &View) -> Vec<SpikeDraw> {
+    let mut spikes = Vec::new();
+    for c in &view.contacts {
+        if c.track.is_some() { continue; }
+        let Some(b) = best_command_bearing(view, c) else { continue; };
+        let fade = bearing_opacity(b, view.time);
+        if fade <= 0.0 { continue; }
+        let origin = view.bodies.iter().find(|ship| ship.id == b.sensor).map_or(b.origin, |ship| ship.pos);
+        spikes.push(SpikeDraw { id: c.id, bearing: b.bearing, sigma: b.sigma, fade, reach: b.max_range, origin });
+    }
+    spikes
+}
+
+#[allow(clippy::too_many_arguments)]
+fn draw_bearing_fan(
+    painter: &egui::Painter, cam: &Camera, rect: Rect, origin: Vec2, center: f64, half_spread: f64,
+    fade: f32, reach_km: f64, selected: bool, label: String, color: Color32, labels: &mut Labels,
+) {
+    let o = to_screen(cam, rect, origin);
+    let reach = (reach_km / cam.km_per_px) as f32;
+    let ray = |a: f64, f: f32| o + EVec2::new(a.cos() as f32, -a.sin() as f32) * reach * f;
+    for i in 0..64 {
+        let start = i as f32 / 64.0;
+        let end = (i + 1) as f32 / 64.0;
+        let opacity = fade * (1.0 - (start + end) * 0.5).powi(2);
+        painter.add(Shape::convex_polygon(
+            vec![ray(center - half_spread, start), ray(center - half_spread, end),
+                ray(center + half_spread, end), ray(center + half_spread, start)],
+            color.gamma_multiply(0.06 * opacity), Stroke::NONE));
+        painter.line_segment([ray(center, start), ray(center, end)],
+            Stroke::new(if selected { 1.5 } else { 1.0 }, color.gamma_multiply(0.45 * opacity)));
+    }
+    let dir = EVec2::new(center.cos() as f32, -center.sin() as f32);
+    let tip = clip_to_rect(rect, o, dir).filter(|p| p.distance(o) < reach).unwrap_or(ray(center, 1.0));
+    labels.add(tip - dir * 30.0, label, color.gamma_multiply(fade.max(0.3)));
+}
+
+/// Draw one fan for each tight group. Returns the contacts folded into those fans.
+#[allow(clippy::too_many_arguments)]
+fn paint_fleet_fans(
+    painter: &egui::Painter, cam: &Camera, rect: Rect, view: &View, color: Color32,
+    inspected: Option<ContactId>, quiet: bool, labels: &mut Labels,
+) -> BTreeSet<ContactId> {
+    let mut grouped = BTreeSet::new();
+    if quiet { return grouped; }
+    let spikes = command_spikes(view);
+    let eligible: Vec<&SpikeDraw> = spikes.iter().filter(|s| inspected != Some(s.id)).collect();
+    let bearings: Vec<f64> = eligible.iter().map(|s| s.bearing).collect();
+    for group in fleet_bearing_groups(&bearings) {
+        if group.len() < 2 { continue; }
+        let members: Vec<&SpikeDraw> = group.iter().map(|&i| eligible[i]).collect();
+        for member in &members { grouped.insert(member.id); }
+        let (sin_sum, cos_sum) = members.iter().fold((0.0, 0.0), |(s, c), m| (s + m.bearing.sin(), c + m.bearing.cos()));
+        let mean = sin_sum.atan2(cos_sum);
+        let mut left = f64::MAX;
+        let mut right = f64::MIN;
+        for member in &members {
+            let delta = wrap_angle(member.bearing - mean);
+            left = left.min(delta - 2.0 * member.sigma);
+            right = right.max(delta + 2.0 * member.sigma);
+        }
+        let center = wrap_angle(mean + (left + right) / 2.0);
+        let half = ((right - left) / 2.0).clamp(0.0, 0.6);
+        let fade = members.iter().map(|m| m.fade).fold(0.0_f32, f32::max);
+        let reach = members.iter().map(|m| m.reach).fold(0.0_f64, f64::max);
+        let origin = members.iter().max_by(|a, b| a.fade.total_cmp(&b.fade)).map(|m| m.origin).unwrap_or(Vec2::ZERO);
+        draw_bearing_fan(painter, cam, rect, origin, center, half, fade, reach, false, format!("{} TRACKS", members.len()), color, labels);
+    }
+    grouped
+}
+
 #[allow(clippy::too_many_arguments)]
 fn draw_contact(
     painter: &egui::Painter,
@@ -3155,11 +3746,14 @@ fn draw_contact(
     c: &ContactView,
     color: Color32,
     selected: bool,
+    show_spike: bool,
     labels: &mut Labels,
+    fade: &PingFade,
 ) {
-    let ping=view.hostile_pings.iter().find(|p|p.contact==c.id);
+    let ping=fade.pings.iter().find(|p|p.contact==c.id);
+    let ping_opacity=ping.map(|p| displayed_ping_opacity(p,view.time,fade)).unwrap_or(0.0);
     let resolved_course=contact_has_course(c);
-    let color=if resolved_course {color} else {ping.map_or(color,|p|Color32::from_rgb(255,155,45).gamma_multiply(p.opacity(view.time)))};
+    let color=if resolved_course || ping_opacity<=0.0 {color} else {Color32::from_rgb(255,155,45).gamma_multiply(ping_opacity)};
     let color = if c.stale { color.gamma_multiply(0.4) } else { color };
     match &c.track {
         Some(t) => {
@@ -3194,17 +3788,16 @@ fn draw_contact(
             } else if c.resolved_missile {
                 draw_missile(painter,p,color,selected);
             } else if c.resolved_kind==Some(BodyKind::Probe) {
-                painter.add(Shape::convex_polygon(vec![p+EVec2::new(0.0,-5.0),p+EVec2::new(4.0,0.0),
-                    p+EVec2::new(0.0,5.0),p+EVec2::new(-4.0,0.0)],color,Stroke::NONE));
+                draw_probe(painter, p, color, selected);
             } else if c.resolved_kind==Some(BodyKind::Station) {
                 painter.rect_filled(Rect::from_center_size(p,EVec2::splat(7.0)),0.0,color);
             } else if resolved_course {
                 let heading=if t.vel.length()>0.0 {t.vel.normalized()} else {Vec2::new(0.0,1.0)};
                 let burn=(t.accel-view.system.gravity(t.pos,view.time)).length()/G0;
                 draw_burn_vector(painter,p,heading,burn,if c.stale {0.4} else {1.0});
-                draw_contact_marker(painter, p, t.vel, color, selected);
-            } else if let Some(ping)=ping {
-                painter.circle_filled(p,if selected {7.0} else {5.0},Color32::from_rgb(255,155,45).gamma_multiply(ping.opacity(view.time)));
+                draw_contact_marker(painter, p, t.vel, color, selected, c.resolved_class);
+            } else if ping.is_some() && ping_opacity>0.0 {
+                painter.circle_filled(p,if selected {7.0} else {5.0},Color32::from_rgb(255,155,45).gamma_multiply(ping_opacity));
             } else {
                 painter.circle_stroke(p,if selected {6.0} else {4.0},Stroke::new(1.5,color));
             }
@@ -3213,38 +3806,13 @@ fn draw_contact(
             }
         }
         None => {
-            // Show only bearings measured by the player's command ship.
-            // Allied measurements still contribute to contact fusion.
-            let score=|b:&luminal_core::session::BearingView| b.sigma /
-                (1.0-((view.time-b.received_at)/BEARING_FADE_S).clamp(0.0,1.0)).max(0.001);
-            for b in c.bearings.iter().filter(|b|view.time-b.received_at<BEARING_FADE_S
-                && view.bodies.iter().any(|ship|ship.controllable && ship.id==b.sensor))
-                .min_by(|a,b|score(a).total_cmp(&score(b))).into_iter() {
-                let fade = bearing_opacity(b,view.time);
-                if fade <= 0.0 {
-                    continue;
-                }
-                // Display follows the current receiver; historical origins remain in sensor fusion.
-                let origin=view.bodies.iter().find(|ship|ship.id==b.sensor).map_or(b.origin,|ship|ship.pos);
-                let o = to_screen(cam, rect, origin);
-                let reach = (b.max_range / cam.km_per_px) as f32;
-                let ray = |a: f64, f: f32| o + EVec2::new(a.cos() as f32, -a.sin() as f32) * reach * f;
-                let spread = (2.0 * b.sigma).min(0.5);
-                for i in 0..64 {
-                    let start = i as f32 / 64.0;
-                    let end = (i + 1) as f32 / 64.0;
-                    let opacity = fade * (1.0 - (start + end) * 0.5).powi(2);
-                    painter.add(Shape::convex_polygon(
-                        vec![ray(b.bearing-spread,start),ray(b.bearing-spread,end),
-                            ray(b.bearing+spread,end),ray(b.bearing+spread,start)],
-                        color.gamma_multiply(0.06 * opacity), Stroke::NONE));
-                    painter.line_segment([ray(b.bearing,start),ray(b.bearing,end)],
-                        Stroke::new(if selected {1.5} else {1.0},color.gamma_multiply(0.45 * opacity)));
-                }
-                let dir = EVec2::new(b.bearing.cos() as f32, -b.bearing.sin() as f32);
-                let tip = clip_to_rect(rect, o, dir).filter(|p|p.distance(o)<reach).unwrap_or(ray(b.bearing,1.0));
-                labels.add(tip-dir*30.0,contact_label(c),color.gamma_multiply(fade.max(0.3)));
-            }
+            // A grouped or quiet bearing draws nothing here. The fan is painted once for the group.
+            if !show_spike { return; }
+            let Some(b) = best_command_bearing(view, c) else { return; };
+            let fade = bearing_opacity(b, view.time);
+            if fade <= 0.0 { return; }
+            let origin = view.bodies.iter().find(|ship| ship.id == b.sensor).map_or(b.origin, |ship| ship.pos);
+            draw_bearing_fan(painter, cam, rect, origin, b.bearing, (2.0 * b.sigma).min(0.5), fade, b.max_range, selected, contact_label(c), color, labels);
         }
     }
 }
@@ -3405,24 +3973,32 @@ fn celestial_distance_label(view:&View,index:usize)->String {
     }
 }
 
-/// Glyphs along an arc, tops facing the center. Reading runs toward decreasing
-/// screen angle, so a label on the far side is upside down, matching weapon rings.
-fn paint_inward_arc(painter:&egui::Painter,center:Pos2,text_radius:f32,anchor:f32,glyphs:&[std::sync::Arc<egui::Galley>],color:Color32) {
+/// Glyphs along an arc. Inward labels keep their tops toward the center and read
+/// toward decreasing screen angle. Outward labels keep their bottoms toward the
+/// center, so the marked body sits under the middle of the text.
+fn paint_arc(painter:&egui::Painter,center:Pos2,text_radius:f32,anchor:f32,glyphs:&[std::sync::Arc<egui::Galley>],color:Color32,outward:bool) {
     if text_radius<1.0 {return;}
     let clip=painter.clip_rect().expand(1.0);
     let mut offset=-glyphs.iter().map(|g|g.size().x).sum::<f32>()*0.5;
+    let sign=if outward {1.0} else {-1.0};
+    let turn=if outward {std::f32::consts::FRAC_PI_2} else {-std::f32::consts::FRAC_PI_2};
     for glyph in glyphs {
-        let angle=anchor-(offset+glyph.size().x*0.5)/text_radius;
+        let angle=anchor+sign*(offset+glyph.size().x*0.5)/text_radius;
         let at=center+EVec2::new(angle.cos(),angle.sin())*text_radius;
         if clip.expand(glyph.size().length()).contains(at) {
             painter.add(egui::epaint::TextShape::new(at-glyph.size()*0.5,glyph.clone(),color)
-                .with_angle_and_anchor(angle-std::f32::consts::FRAC_PI_2,egui::Align2::CENTER_CENTER));
+                .with_angle_and_anchor(angle+turn,egui::Align2::CENTER_CENTER));
         }
         offset+=glyph.size().x;
     }
 }
 
-/// One label inside this body's own orbit, beside the disk. The star keeps a plain name.
+fn paint_inward_arc(painter:&egui::Painter,center:Pos2,text_radius:f32,anchor:f32,glyphs:&[std::sync::Arc<egui::Galley>],color:Color32) {
+    paint_arc(painter,center,text_radius,anchor,glyphs,color,false);
+}
+
+/// One label outside this body's orbit, centered on the disk. A ring too small to
+/// carry the curved name draws nothing. The star keeps a plain name of its own.
 fn draw_orbit_label(painter:&egui::Painter,cam:&Camera,rect:Rect,view:&View,index:usize,body:Pos2,color:Color32)->bool {
     let Some(body_def)=view.system.bodies.get(index) else {return false};
     let (parent,radius)=match body_def.orbit {
@@ -3430,7 +4006,7 @@ fn draw_orbit_label(painter:&egui::Painter,cam:&Camera,rect:Rect,view:&View,inde
         Orbit::Fixed(_) => return false,
     };
     let orbit_px=(radius/cam.km_per_px) as f32;
-    if !orbit_px.is_finite() || orbit_px<8.0 {return false;}
+    if !orbit_px.is_finite() || orbit_px<32.0 {return false;}
     let center=to_screen(cam,rect,view.system.state(parent,view.time).pos);
     let rel=body-center;
     if rel.length()<1.0 {return false;}
@@ -3439,20 +4015,10 @@ fn draw_orbit_label(painter:&egui::Painter,cam:&Camera,rect:Rect,view:&View,inde
     let body_px=((view.celestials[index].radius/cam.km_per_px) as f32).max(3.0);
     let glyphs:Vec<_>=text.chars().map(|c|painter.layout_no_wrap(c.to_string(),mono(9.0),label_color)).collect();
     let width:f32=glyphs.iter().map(|g|g.size().x).sum();
-    let text_radius=orbit_px-14.0;
-    if orbit_px>=32.0 && text_radius>=18.0 && width<=text_radius*std::f32::consts::PI {
-        // First glyph sits just clear of the disk; the rest read away from it.
-        let body_angle=rel.y.atan2(rel.x);
-        let anchor=body_angle-(body_px+6.0)/text_radius-width*0.5/text_radius;
-        paint_inward_arc(painter,center,text_radius,anchor,&glyphs,label_color);
-        return true;
-    }
-    let outward=rel.normalized();
-    let tangent=EVec2::new(outward.y,-outward.x);
-    let inward=14.0_f32.min(orbit_px*0.35).max(4.0);
-    let at=body-outward*inward+tangent*(body_px+6.0);
-    let align=if tangent.x>=0.0 {egui::Align2::LEFT_CENTER} else {egui::Align2::RIGHT_CENTER};
-    painter.text(at,align,text,mono(9.0),label_color);
+    let height=glyphs.iter().map(|g|g.size().y).fold(0.0_f32,f32::max);
+    let text_radius=orbit_px+body_px+4.0+height*0.5;
+    if !text_radius.is_finite() || width>text_radius*std::f32::consts::PI {return false;}
+    paint_arc(painter,center,text_radius,rel.y.atan2(rel.x),&glyphs,label_color,true);
     true
 }
 
@@ -3659,11 +4225,11 @@ fn coasting_keeps_the_last_heading_despite_zero_or_tiny_thrust() {
     assert_eq!(coast_heading(heading,Vec2::new(0.0,1.0)),Vec2::new(0.0,1.0));
 }
 
-/// Ship icons are 15 px nose to stern; full 120g burn extends four icon lengths.
+/// Ship icons run from the nose to the stern corners. A full 120 g burn is 60 px.
 fn draw_burn_vector(painter:&egui::Painter,p:Pos2,heading:Vec2,burn_g:f64,opacity:f32) {
     if !burn_g.is_finite() || burn_g<=0.0 {return;}
     let rear= -screen_dir(heading);
-    let start=p+rear*5.0;
+    let start=p+rear*SHIP_STERN;
     let length=(60.0*burn_g/120.0) as f32;
     let yellow=Color32::from_rgb(255,220,60);
     for i in 0..24 {
@@ -3674,28 +4240,191 @@ fn draw_burn_vector(painter:&egui::Painter,p:Pos2,heading:Vec2,burn_g:f64,opacit
     }
 }
 
-fn draw_ship(painter: &egui::Painter, p: Pos2, vel: Vec2, facing: Vec2, color: Color32, selected: bool) {
-    let f = if facing.length() > 0.0 { screen_dir(facing) } else { EVec2::new(0.0, -1.0) };
-    let side = EVec2::new(-f.y, f.x);
+/// Nose, stern corners and notch of the map ship, in pixels. Forward is the nose.
+/// Same proportions as the larger wedge, at half the size. Carets scale with it.
+const SHIP_NOSE: f32 = 12.0;
+const SHIP_STERN: f32 = 6.0;
+const SHIP_NOTCH: f32 = 2.4;
+const SHIP_HALF_W: f32 = 6.6;
+
+fn ship_forward(facing: Vec2) -> EVec2 {
+    if facing.length() > 0.0 { screen_dir(facing) } else { EVec2::new(0.0, -1.0) }
+}
+
+fn ship_wedge(p: Pos2, forward: EVec2) -> Vec<Pos2> {
+    let side = EVec2::new(-forward.y, forward.x);
+    vec![
+        p + forward * SHIP_NOSE,
+        p - forward * SHIP_STERN + side * SHIP_HALF_W,
+        p - forward * SHIP_NOTCH,
+        p - forward * SHIP_STERN - side * SHIP_HALF_W,
+    ]
+}
+
+/// Picket through battleship. A transport matches a frigate.
+fn class_chevron_count(class: ShipClass) -> usize {
+    match class {
+        ShipClass::Picket => 1,
+        ShipClass::Frigate | ShipClass::Transport => 2,
+        ShipClass::Destroyer => 3,
+        ShipClass::Cruiser => 4,
+        ShipClass::Battleship => 5,
+    }
+}
+
+/// Half-width of the wedge's side edge at a station along the centerline.
+fn wedge_half_width(forward: f32) -> f32 {
+    SHIP_HALF_W * (SHIP_NOSE - forward) / (SHIP_NOSE + SHIP_STERN)
+}
+
+/// Chevron tips and wing tips in the ship frame `(forward, side)`, nose positive.
+/// Each mark is a small caret. The stack is centered where a full caret still clears the sides.
+fn class_chevron_marks(count: usize) -> Vec<[(f32, f32); 3]> {
+    if count == 0 { return Vec::new(); }
+    const DEPTH: f32 = 1.0;
+    const ARM_CAP: f32 = 1.0;
+    const INSET: f32 = 1.0;
+    const PITCH: f32 = 2.0;
+    let rear = -1.5_f32;
+    let front = SHIP_NOSE - (ARM_CAP + INSET) * (SHIP_NOSE + SHIP_STERN) / SHIP_HALF_W;
+    let pitch = if count == 1 { 0.0 } else { PITCH.min((front - rear) / (count as f32 - 1.0)) };
+    let start = (rear + front) * 0.5 - pitch * (count as f32 - 1.0) * 0.5;
+    (0..count).map(|i| {
+        let arm_f = start + i as f32 * pitch;
+        let arm = (wedge_half_width(arm_f) - INSET).clamp(0.35, ARM_CAP);
+        [(arm_f + DEPTH, 0.0), (arm_f, arm), (arm_f, -arm)]
+    }).collect()
+}
+
+fn draw_class_chevrons(painter: &egui::Painter, p: Pos2, forward: EVec2, count: usize, color: Color32) {
+    let side = EVec2::new(-forward.y, forward.x);
+    let stroke = Stroke::new(1.0, color);
+    let at = |local: (f32, f32)| p + forward * local.0 + side * local.1;
+    for mark in class_chevron_marks(count) {
+        painter.line(vec![at(mark[1]), at(mark[0]), at(mark[2])], stroke);
+    }
+}
+
+/// Aim point on the received picture. A track is flown to its position; a bearing
+/// runs out to the direction-finding reach, which is the only range the picture has.
+fn probe_launch(ship_pos: Vec2, contact: &ContactView) -> Option<(Vec2, Vec2)> {
+    if let Some(track) = &contact.track {
+        let rel = track.pos - ship_pos;
+        if rel.length() < 1.0 { return None; }
+        return Some((rel.normalized(), track.pos));
+    }
+    let bearing = contact.bearings.iter().max_by(|a, b| a.emitted_at.total_cmp(&b.emitted_at))?;
+    let direction = Vec2::new(bearing.bearing.cos(), bearing.bearing.sin());
+    let reach = bearing.max_range.max(1_000.0);
+    Some((direction, ship_pos + direction * reach))
+}
+
+/// Reconnaissance probe: a small ball with six spikes at sixty degrees.
+fn draw_probe(painter: &egui::Painter, p: Pos2, color: Color32, selected: bool) {
+    const BALL: f32 = 3.2;
+    const TIP: f32 = 7.6;
+    const HALF: f32 = 1.15;
+    for i in 0..6 {
+        let angle = i as f32 * std::f32::consts::FRAC_PI_3;
+        let dir = EVec2::new(angle.cos(), angle.sin());
+        let side = EVec2::new(-dir.y, dir.x);
+        let root = p + dir * (BALL * 0.55);
+        painter.add(Shape::convex_polygon(
+            vec![p + dir * TIP, root + side * HALF, root - side * HALF],
+            color,
+            Stroke::NONE,
+        ));
+    }
+    painter.circle_filled(p, BALL, color);
+    if selected {
+        painter.circle_stroke(p, TIP + 1.6, Stroke::new(1.0, color));
+    }
+}
+
+fn draw_ship(painter: &egui::Painter, p: Pos2, vel: Vec2, facing: Vec2, color: Color32, selected: bool, class: Option<ShipClass>) {
+    let forward = ship_forward(facing);
     draw_velocity_tail(painter, p, vel, color);
-    let (len, half_w) = (10.0, 5.5);
-    let nose = p + f * len;
-    let pts = vec![nose, p - f * (len * 0.5) + side * half_w, p - f * (len * 0.2), p - f * (len * 0.5) - side * half_w];
+    let pts = ship_wedge(p, forward);
     let border = if selected { Stroke::new(1.5, color) } else { Stroke::NONE };
     painter.add(Shape::convex_polygon(pts, color, border));
+    // Cut the rank out of the fill so it reads on green, blue and red hulls.
+    if let Some(class) = class { draw_class_chevrons(painter, p, forward, class_chevron_count(class), BACKGROUND); }
 }
 
 /// A resolved contact: a hollow ship arrow along its estimated velocity, not an
 /// assertion about the unobserved hull facing. Nearby tracks need no outer ring.
-fn draw_contact_marker(painter: &egui::Painter, p: Pos2, vel: Vec2, color: Color32, selected: bool) {
+fn draw_contact_marker(painter: &egui::Painter, p: Pos2, vel: Vec2, color: Color32, selected: bool, class: Option<ShipClass>) {
     let stroke = Stroke::new(if selected {1.5} else {1.2}, color);
-    let heading = if vel.length() > 0.0 { vel.normalized() } else { Vec2::new(0.0, 1.0) };
-    let forward = EVec2::new(heading.x as f32, -heading.y as f32);
-    let side = EVec2::new(-forward.y, forward.x);
-    let points=vec![p + forward * 10.0, p - forward * 5.0 + side * 5.5,
-        p - forward * 2.0, p - forward * 5.0 - side * 5.5];
-    if selected {painter.add(Shape::convex_polygon(points,CONTACT,Stroke::new(1.5,CONTACT)));}
-    else {painter.add(Shape::closed_line(points,stroke));}
+    let forward = ship_forward(if vel.length() > 0.0 { vel } else { Vec2::new(0.0, 1.0) });
+    let points = ship_wedge(p, forward);
+    if selected {painter.add(Shape::convex_polygon(points, CONTACT, Stroke::new(1.5, CONTACT)));}
+    else {painter.add(Shape::closed_line(points, stroke));}
+    if let Some(class) = class {
+        let ink = if selected { BACKGROUND } else { color };
+        draw_class_chevrons(painter, p, forward, class_chevron_count(class), ink);
+    }
+}
+
+#[cfg(test)]
+fn wedge_clearance(forward: f32, side: f32) -> f32 {
+    let poly = [(SHIP_NOSE, 0.0), (-SHIP_STERN, SHIP_HALF_W), (-SHIP_NOTCH, 0.0), (-SHIP_STERN, -SHIP_HALF_W)];
+    assert!(point_in_wedge(forward, side, &poly), "outside the wedge at ({forward}, {side})");
+    let mut best = f32::MAX;
+    for i in 0..poly.len() {
+        best = best.min(dist_to_segment(forward, side, poly[i], poly[(i + 1) % poly.len()]));
+    }
+    best
+}
+
+#[cfg(test)]
+fn point_in_wedge(forward: f32, side: f32, poly: &[(f32, f32)]) -> bool {
+    let mut inside = false;
+    let mut j = poly.len() - 1;
+    for i in 0..poly.len() {
+        let (yi, xi) = poly[i];
+        let (yj, xj) = poly[j];
+        if ((yi > forward) != (yj > forward)) && (side < (xj - xi) * (forward - yi) / (yj - yi) + xi) {
+            inside = !inside;
+        }
+        j = i;
+    }
+    inside
+}
+
+#[cfg(test)]
+fn dist_to_segment(forward: f32, side: f32, a: (f32, f32), b: (f32, f32)) -> f32 {
+    let (dy, dx) = (b.0 - a.0, b.1 - a.1);
+    let len2 = dx * dx + dy * dy;
+    let t = if len2 == 0.0 { 0.0 } else { ((side - a.1) * dx + (forward - a.0) * dy) / len2 }.clamp(0.0, 1.0);
+    let (py, px) = (a.0 + dy * t, a.1 + dx * t);
+    ((side - px).powi(2) + (forward - py).powi(2)).sqrt()
+}
+
+#[test]
+fn class_chevrons_stack_with_rank_and_stay_inside_the_wedge() {
+    let mut previous = 0;
+    for class in ShipClass::COMBAT {
+        let count = class_chevron_count(class);
+        assert!(count > previous, "{class:?} should outrank the class below it");
+        previous = count;
+        let marks = class_chevron_marks(count);
+        assert_eq!(marks.len(), count);
+        for (i, mark) in marks.iter().enumerate() {
+            if i + 1 < marks.len() { assert!(mark[0].0 < marks[i + 1][0].0, "chevrons stack toward the nose"); }
+            assert!((mark[1].1 + mark[2].1).abs() < 1e-4, "wings stay symmetric");
+            for wing in [1, 2] {
+                for step in 0..5 {
+                    let t = step as f32 / 4.0;
+                    let forward = mark[0].0 + (mark[wing].0 - mark[0].0) * t;
+                    let side = mark[0].1 + (mark[wing].1 - mark[0].1) * t;
+                    let clearance = wedge_clearance(forward, side);
+                    assert!(clearance >= 0.55, "{class:?} chevron {i} clearance {clearance:.2}px");
+                }
+            }
+        }
+    }
+    assert_eq!(class_chevron_count(ShipClass::Transport), class_chevron_count(ShipClass::Frigate));
+    assert!(class_chevron_marks(0).is_empty());
 }
 
 /// A missile: a small diagonal cross, kept legible at every zoom level.
@@ -4219,12 +4948,13 @@ fn compact_damage(ui:&mut egui::Ui,report:Option<&Report>) {
 
 fn compact_status(ui:&mut egui::Ui,report:Option<&Report>,thrust_g:Option<f64>,max_g:Option<f64>,estimated:bool) {
     let (rect,_)=ui.allocate_exact_size(EVec2::new(ui.available_width(),66.0),Sense::hover());
-    let bars=Rect::from_min_max(rect.min,rect.max-EVec2::new(23.0,0.0));
+    let (_,span)=section_chip_span(rect.width());
+    let bars=Rect::from_min_max(rect.min,Pos2::new(rect.left()+span,rect.bottom()));
     ui.scope_builder(egui::UiBuilder::new().max_rect(bars),|ui| {
         compact_damage(ui,report);
         compact_meter(ui,"SCREENS",report.filter(|r|r.installed[System::Screens as usize]).map(|r|r.screen_available),ARMOUR);
     });
-    let gauge=Rect::from_min_max(Pos2::new(rect.right()-14.0,rect.top()+9.0),Pos2::new(rect.right()-6.0,rect.bottom()-13.0));
+    let gauge=Rect::from_min_max(Pos2::new(bars.right()+THRUST_GAP,rect.top()+9.0),Pos2::new(bars.right()+THRUST_GAP+THRUST_GAUGE_W,rect.bottom()-13.0));
     let p=ui.painter();
     p.rect_filled(gauge,0.0,WELL_BG);
     p.rect_stroke(gauge,0.0,Stroke::new(1.0,EDGE),StrokeKind::Inside);
@@ -4234,7 +4964,7 @@ fn compact_status(ui:&mut egui::Ui,report:Option<&Report>,thrust_g:Option<f64>,m
     }
     p.text(Pos2::new(gauge.center().x,rect.top()),egui::Align2::CENTER_TOP,"THR",mono(7.0),TEXT_MUTED);
     p.text(Pos2::new(gauge.center().x,rect.bottom()),egui::Align2::CENTER_BOTTOM,thrust_g.map_or("—".into(),|g|format!("{g:.0}")),mono(8.0),ACCENT);
-    ui.interact(Rect::from_min_max(Pos2::new(rect.right()-22.0,rect.top()),rect.max),ui.id().with("thrust"),Sense::hover())
+    ui.interact(Rect::from_min_max(Pos2::new(gauge.left()-2.0,rect.top()),Pos2::new(gauge.right()+THRUST_TAIL,rect.bottom())),ui.id().with("thrust"),Sense::hover())
         .on_hover_text(thrust_g.map_or("Thrust unknown".into(),|g|format!("{}{g:.1}g thrust · {}",if estimated {"Estimated "} else {""},max_g.map_or("maximum unknown".into(),|max|format!("{:.0}% of {max:.0}g maximum",100.0*g/max)))));
 }
 
@@ -4251,9 +4981,9 @@ fn compact_systems(ui:&mut egui::Ui,salt:&str,report:Option<Report>,theme:theme:
     for (row,(name,systems)) in groups.iter().enumerate() {
         let top=rect.top()+row as f32*22.0;
         ui.painter().text(Pos2::new(rect.left(),top),egui::Align2::LEFT_TOP,*name,mono(8.0),TEXT_MUTED);
-        let w=((width-12.0)/5.0).min(48.0);
+        let (w,_)=section_chip_span(width);
         for (i,system) in systems.iter().enumerate() {
-            let cell=Rect::from_min_size(Pos2::new(rect.left()+i as f32*(w+3.0),top+8.0),EVec2::new(w,13.0));
+            let cell=Rect::from_min_size(Pos2::new(rect.left()+i as f32*(w+SECTION_CHIP_GAP),top+8.0),EVec2::new(w,13.0));
             let chip=Chip::of(report,*system);
             paint_chip(ui.painter(),cell,theme.system_code(*system),chip);
             let repair=paint_repair_progress(ui.painter(),cell,report,*system);
@@ -4325,6 +5055,29 @@ fn system_legend(ui: &mut egui::Ui) {
     for (chip, label) in [(Chip::Intact, "INTACT"), (Chip::Damaged, "DAMAGED"), (Chip::Destroyed, "DESTROYED"), (Chip::Unknown, "UNKNOWN"), (Chip::Absent, "NOT FITTED")] {
         paint_chip(&p, Rect::from_min_size(Pos2::new(x, y - 3.5), EVec2::new(9.0, 7.0)), "", chip);
         x = p.text(Pos2::new(x + 12.0, y), egui::Align2::LEFT_CENTER, label, mono(8.0), TEXT_MUTED).right() + 7.0;
+    }
+}
+
+#[cfg(test)]
+mod deck_layout_tests {
+    use super::*;
+    #[test]
+    fn status_bars_match_five_section_columns_and_thrust_is_doubled() {
+        assert_eq!(THRUST_GAUGE_W, 16.0);
+        let inner = status_column_outer() - DECK_INSET * 2.0;
+        let (chip, span) = section_chip_span(inner);
+        assert!((chip - SECTION_CHIP_MAX).abs() < 1e-3);
+        let row = SECTION_CHIP_MAX * SECTION_GROUPS + 4.0 * SECTION_CHIP_GAP;
+        assert!((span - row).abs() < 1e-3, "bars and the five chips share one span");
+        assert!((span + THRUST_GAP + THRUST_GAUGE_W + THRUST_TAIL - inner).abs() < 1e-3);
+        let wide = deck_column_widths(3200.0);
+        assert!((wide.iter().sum::<f32>() - 3200.0).abs() < 0.05);
+        assert!((wide[1] - wide[3]).abs() < 1e-3);
+        assert!(wide[1] < 3200.0 * 0.20, "own ship and target give their spare width away");
+        assert!(wide[0] > 3200.0 * 0.175 && wide[2] > 3200.0 * 0.25 && wide[4] > 3200.0 * 0.175);
+        let narrow = deck_column_widths(640.0);
+        assert!((narrow.iter().sum::<f32>() - 640.0).abs() < 0.05);
+        assert!(narrow.iter().all(|w| *w > 40.0));
     }
 }
 

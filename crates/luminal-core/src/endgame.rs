@@ -67,7 +67,8 @@ mod tests {
         let mut w=World::new(System {bodies:vec![]},specs,0.0,42);
         for b in &mut w.bodies {b.ship_class=Some(ShipClass::Destroyer);b.controllable=true;}
         w.objective=Some(Objective {sensor_site:None,name:"Defeat raider".into(),center:Vec2::ZERO,radius:1.0,
-            protect:BodyId(0),player:Some(BodyId(0)),defeat:Some(BodyId(1)),prize:None,wipe:false,defender:FactionId(0),attacker:FactionId(1),stance:Stance::Intercept});
+            protect:BodyId(0),player:Some(BodyId(0)),defeat:Some(BodyId(1)),prize:None,wipe:false,defender:FactionId(0),attacker:FactionId(1),stance:Stance::Intercept,
+            withdrawal_continues:false,extract:false,escape_at_center:false,disengage_wins:false,prize_taken:false,escape_by:None});
         w
     }
     #[test]

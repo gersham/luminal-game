@@ -41,7 +41,8 @@ pub enum Command {
     Orbit { body: BodyId, celestial: usize },
     /// Close on a target, match velocity and hold station.
     Intercept { body: BodyId, target: InterceptTarget },
-    Follow { body: BodyId, target: BodyId },
+    /// `offset` is a formation station on the flagship. `None` is the one-light-second escort.
+    Follow { body: BodyId, target: BodyId, offset: Option<Vec2> },
     Alongside { body: BodyId, target: InterceptTarget },
     /// Close at maximum thrust and fly through, retaining velocity.
     Flyby { body: BodyId, target: InterceptTarget },
@@ -53,12 +54,16 @@ pub enum Command {
     AppendWaypoint {body:BodyId,point:Vec2},
     /// Come to rest in the local frame as fast as the drive allows.
     AllStop { body: BodyId },
+    /// Hold the current vector. Zero thrust, no braking.
+    Coast { body: BodyId },
+    /// One order for every other armed ship of this flagship's faction. It travels at light speed.
+    Fleet { body: BodyId, order: FleetOrder },
     /// Cap autopilot thrust, in g. Lower thrust means a fainter drive signature.
     SetDriveLimit { body: BodyId, g: f64 },
     /// Launch a missile at a tracked contact.
     Launch { body: BodyId, target: ContactId, payload: Payload },
     CancelLaunches { body: BodyId },
-    DeployProbe { body: BodyId, direction: Vec2 },
+    DeployProbe { body: BodyId, direction: Vec2, destination: Vec2 },
     FireBeam { body: BodyId, target: ContactId },
     /// Emit one pulse. Pings are visible far beyond their echo range.
     Ping { body: BodyId },
@@ -70,6 +75,17 @@ pub enum Command {
     SetSystemMode {body:BodyId,system:crate::world::controls::ControlledSystem,mode:crate::world::controls::Mode},
     SetWarp(f64),
     SetPaused(bool),
+}
+
+/// Flagship order broadcast to the rest of the faction.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FleetOrder {
+    /// Form on the flagship, largest ships nearest the rear.
+    Screen,
+    /// Close on the objective.
+    Close,
+    /// Arm beams.
+    WeaponsFree,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -100,7 +116,8 @@ impl Command {
             | Self::AppendWaypoint {body,..} | Self::Flyby { body, .. } | Self::CombatRange {body,..} | Self::KeepRange {body,..} | Self::Evade {body,..} | Self::MoveTo { body, .. } | Self::AllStop { body }
             | Self::SetDriveLimit { body, .. } | Self::Launch { body, .. } | Self::FireBeam { body, .. }
             | Self::SetHeatDump {body,..} | Self::Ping { body } | Self::EngageBeam { body, .. } | Self::SetScreen { body, .. } | Self::SetSystemMode {body,..}
-            | Self::CancelLaunches { body } | Self::DeployProbe {body,..} | Self::ArmBeams { body } => Some(body),
+            | Self::CancelLaunches { body } | Self::DeployProbe {body,..} | Self::ArmBeams { body }
+            | Self::Coast { body } | Self::Fleet { body, .. } => Some(body),
             Self::SetWarp(_) | Self::SetPaused(_) => None,
         }
     }
@@ -303,6 +320,8 @@ pub struct View {
     pub hostile_pings: Vec<PingSighting>,
     pub combat: Vec<crate::world::CombatEvent>,
     pub pending_orders: usize,
+    /// Earliest in-flight order arrival for each ship, seconds of game time.
+    pub order_eta: Vec<(BodyId, f64)>,
     pub time: f64,
     pub role: Role,
     pub warp: f64,
@@ -318,6 +337,8 @@ pub struct View {
     pub system: System,
     /// The scenario goal, known to every side.
     pub objective: Option<Objective>,
+    /// False in Hide and Seek. The helm hides jump, and the drive will not spool.
+    pub jumps_enabled: bool,
     /// Referee's verdict once the game is decided.
     pub outcome: Option<Outcome>,
 }
@@ -459,7 +480,8 @@ impl LocalSession {
     fn execute_command(&mut self, role: Role, cmd: Command) -> Result<(), Rejection> {
         if let Some(body) = cmd.body() {
             let kind = self.owned(role, body)?;
-            if matches!(cmd,Command::Withdraw {..}) && matches!(role,Role::Faction(_)) && (self.world.objective.as_ref().is_some_and(|o|o.player==Some(body)) || self.world.body(body).is_some_and(|b|b.controllable && !self.bots.contains_key(&b.faction))) {return Err(Rejection::InvalidTarget);}
+            let scored_exit=self.world.objective.as_ref().is_some_and(|o|o.player==Some(body) && (o.disengage_wins || (o.extract && o.prize_taken)));
+            if matches!(cmd,Command::Withdraw {..}) && matches!(role,Role::Faction(_)) && !scored_exit && (self.world.objective.as_ref().is_some_and(|o|o.player==Some(body)) || self.world.body(body).is_some_and(|b|b.controllable && !self.bots.contains_key(&b.faction))) {return Err(Rejection::InvalidTarget);}
             if let Command::SetThrust { thrust, .. } = &cmd {
                 let max_g = if kind == BodyKind::Ship { self.world.body(body).and_then(|b|b.ship_class).map_or(120.0,|c|c.max_g()) } else { params::PROBE_MAX_ACCEL_G.value };
                 if thrust.length() / G0 > max_g * (1.0 + 1e-9) { return Err(Rejection::ExceedsMaxAccel { requested_g: thrust.length()/G0, max_g }); }
@@ -472,9 +494,21 @@ impl LocalSession {
             Command::Withdraw {body}=>self.world.withdraw(body)?,
             Command::Surrender {body}=>self.world.surrender(body)?,
             Command::SetRepairGoal {body,goal}=>self.world.set_repair_goal(body,goal)?,
-            Command::Jump {body,destination}=>self.world.start_jump(body,destination)?,
-            Command::CancelJump {body}=>self.world.cancel_jump(body)?,
-            Command::DeployProbe {body,direction} => { self.owned(role,body)?; self.world.deploy_probe(body,direction)?; }
+            Command::Jump {body,destination}=>{
+                self.world.start_jump(body,destination)?;
+                // A jump by the player ship also orders every friendly ship that can jump.
+                if self.world.objective.as_ref().is_some_and(|o| o.player==Some(body)) {
+                    self.world.order_fleet_jump(body, destination);
+                }
+            }
+            Command::CancelJump {body}=>{
+                self.world.cancel_jump(body)?;
+                // Cancelling the player's spool also cancels friendly jumps that have not departed.
+                if self.world.objective.as_ref().is_some_and(|o| o.player==Some(body)) {
+                    self.world.order_fleet_cancel_jump(body);
+                }
+            }
+            Command::DeployProbe {body,direction,destination} => { self.owned(role,body)?; self.world.deploy_probe(body,direction,destination)?; }
             Command::CancelLaunches { body } => { self.owned(role, body)?; self.world.cancel_launches(body)?; }
             Command::SetWarp(w) => {self.cancel_event_wait();self.warp = w.clamp(0.0, 1e6);},
             Command::SetPaused(p) => {self.cancel_event_wait();self.paused = p;},
@@ -498,7 +532,10 @@ impl LocalSession {
                 self.world.set_orbit(body, celestial)?;
             }
             Command::Alongside {body,target}=>{self.owned(role,body)?;self.world.set_alongside(body,target)?;}
-            Command::Follow {body,target}=>{self.owned(role,body)?;self.world.set_follow(body,target)?;}
+            Command::Follow {body,target,offset}=>{
+                self.owned(role,body)?;
+                match offset {Some(offset)=>self.world.set_station(body,target,offset)?,None=>self.world.set_follow(body,target)?}
+            }
             Command::Intercept { body, target } => {
                 self.owned(role, body)?;
                 self.world.set_intercept(body, target)?;
@@ -518,6 +555,14 @@ impl LocalSession {
             Command::AllStop { body } => {
                 self.owned(role, body)?;
                 self.world.set_all_stop(body)?;
+            }
+            Command::Coast { body } => {
+                self.owned(role, body)?;
+                self.world.set_thrust(body, Vec2::ZERO)?;
+            }
+            Command::Fleet { body, order } => {
+                self.owned(role, body)?;
+                self.world.order_fleet(body, order)?;
             }
             Command::SetDriveLimit { body, g } => {
                 self.owned(role, body)?;
@@ -774,14 +819,22 @@ impl LocalSession {
             hostile_pings: w.hostile_pings(match role { Role::Faction(f) => Some(f), Role::Spectator => None }),
             combat: w.combat_events(match role { Role::Spectator => None, Role::Faction(f) => Some(f) }),
             pending_orders: match role { Role::Spectator => 0, Role::Faction(f) => w.pending_orders(f) },
+            order_eta: w.order_etas(match role { Role::Spectator => None, Role::Faction(f) => Some(f) }),
             time: t,
             role,
             warp: self.warp,
             paused: self.paused,
             bodies,
-            pings: w.ping_emissions.iter().filter(|(id, front)| visible(w.bodies[id.0 as usize].faction)
+            pings: w.ping_emissions.iter().filter(|(id, front)| {
+                let emitter=&w.bodies[id.0 as usize];
+                let own=w.objective.as_ref().and_then(|o|o.player);
+                // Allied ships ping for themselves. The plot draws only this ship's ring.
+                // Probe pulses stay in the sensor picture and are not drawn.
+                visible(emitter.faction)
                 && !w.hidden_ping_circles.contains(&(*id,front.t_emit.to_bits()))
-                && !matches!(w.bodies[id.0 as usize].kind, BodyKind::Station | BodyKind::Missile)).map(|(id, front)| OwnPing {
+                && !matches!(emitter.kind, BodyKind::Station | BodyKind::Missile | BodyKind::Probe)
+                && match role {Role::Spectator=>true,Role::Faction(_)=>own==Some(*id)}
+            }).map(|(id, front)| OwnPing {
                 origin:front.origin,t_emit:front.t_emit,useful_range:crate::sensors::ping_range(crate::sensors::REFERENCE_EF) * w.bodies[id.0 as usize].sensor_rating()/100.0 * w.bodies[id.0 as usize].operating_effectiveness(crate::damage::System::Active) * if matches!(w.bodies[id.0 as usize].kind,BodyKind::Probe|BodyKind::Missile) { params::PROBE_SENSOR_FACTOR.value.sqrt() } else {1.0}
             }).collect(),
             contacts,
@@ -789,6 +842,7 @@ impl LocalSession {
             losses,
             system: w.system.clone(),
             objective: w.objective.clone(),
+            jumps_enabled: w.jumps_enabled,
             outcome: match role {Role::Spectator=>w.outcome.clone(),Role::Faction(f)=>w.received_outcome(f)},
         }
     }
@@ -899,6 +953,19 @@ mod tests {
         assert_eq!(s.view(Role::Faction(ESCORT)).pings.len(), 2);
         s.world.advance_to(300.0+2.0*first.useful_range/crate::units::C+30.0);
         assert!(s.view(Role::Faction(ESCORT)).pings.is_empty());
+    }
+
+    #[test]
+    fn allied_ship_pings_are_not_drawn_on_the_player_plot() {
+        let mut s=LocalSession::new(crate::scenario::Scenario::Convoy.build(1,crate::scenario::home_system()));
+        assert!(s.world.ping(BodyId(3)),"the frigate can ping");
+        assert_eq!(s.view(Role::Spectator).pings.len(),1,"the ally did ping");
+        assert!(s.view(Role::Faction(ESCORT)).pings.is_empty(),"an ally's ring is not the player's");
+        assert!(s.world.ping(BodyId(0)),"the player's destroyer can ping");
+        let pings=s.view(Role::Faction(ESCORT)).pings;
+        assert_eq!(pings.len(),1);
+        let player=s.world.bodies[0].trajectory.state_at(0.0).unwrap().pos;
+        assert!((pings[0].origin-player).length()<1.0);
     }
 
     #[test]
@@ -1016,6 +1083,24 @@ mod tests {
         assert!(log.contains("COMBAT\ttest event"));
         drop(s);
         std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn probe_pings_remain_physical_but_have_no_map_ring() {
+        let mut s=LocalSession::new(crate::scenario::Scenario::Raid.build(1,crate::scenario::home_system()));
+        let origin=s.world.bodies[0].trajectory.state_at(0.0).unwrap().pos;
+        let direction=Vec2::new(1.0,0.0);
+        let destination=origin+direction*10.0*crate::units::AU;
+        s.command(Role::Faction(ESCORT),Command::DeployProbe {body:BodyId(0),direction,destination}).unwrap();
+        let probe=BodyId(s.world.bodies.iter().position(|b|b.kind==BodyKind::Probe).expect("probe launched") as u32);
+        assert!(s.world.ping_emissions.iter().all(|(id,_)|*id!=probe),"a probe does not pulse at launch");
+        assert!(s.world.ping(probe));
+        let pulses:Vec<_>=s.world.ping_emissions.iter().filter(|(id,_)|*id==probe).map(|(_,front)|(front.origin,front.t_emit)).collect();
+        assert!(!pulses.is_empty(),"an explicit pulse still exists in the sensor model");
+        let shows=|role| s.view(role).pings.iter().any(|ping| pulses.iter().any(|(origin,t)| *t==ping.t_emit && (*origin-ping.origin).length()<1.0));
+        assert!(!shows(Role::Faction(ESCORT)) && !shows(Role::Spectator));
+        assert!(s.world.ping(BodyId(0)));
+        assert_eq!(s.view(Role::Faction(ESCORT)).pings.len(),1,"the cruiser's own ring remains");
     }
 
     #[test]
@@ -1167,5 +1252,19 @@ mod tests {
             Err(Rejection::ExceedsMaxAccel { .. })
         ));
         let _ = RAIDER;
+    }
+
+    #[test]
+    fn withdrawal_is_allowed_only_when_the_scenario_scores_getting_out() {
+        let mut escort=LocalSession::new(scenario::Scenario::Escort.build(42,scenario::home_system()));
+        let player=escort.world.objective.as_ref().unwrap().player.unwrap();
+        assert!(escort.command(Role::Faction(ESCORT),Command::Withdraw {body:player}).is_err());
+        let mut raid=LocalSession::new(scenario::Scenario::Raid.build(42,scenario::home_system()));
+        assert!(raid.command(Role::Faction(ESCORT),Command::Withdraw {body:BodyId(0)}).is_err());
+        raid.world.objective.as_mut().unwrap().prize=None;
+        raid.world.objective.as_mut().unwrap().prize_taken=true;
+        assert!(raid.command(Role::Faction(ESCORT),Command::Withdraw {body:BodyId(0)}).is_ok());
+        let mut last=LocalSession::new(scenario::Scenario::LastShip.build(42,scenario::home_system()));
+        assert!(last.command(Role::Faction(ESCORT),Command::Withdraw {body:BodyId(0)}).is_ok());
     }
 }

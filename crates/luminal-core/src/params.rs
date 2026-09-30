@@ -70,10 +70,10 @@ pub const SHIP_MAX_ACCEL_G: Param = Param {
 
 pub const PROBE_MAX_ACCEL_G: Param = Param {
     key: "probe.max_accel",
-    value: 500.0,
+    value: 20.0,
     unit: "g",
     commitment: Established,
-    note: "Probe maximum acceleration.",
+    note: "Reconnaissance probes accelerate at 20 g. They are slow search craft.",
 };
 
 pub const PROBE_MASS_T: Param = Param {
@@ -508,9 +508,9 @@ pub const SEEKER_RESOLVE_LS: Param = Param { key: "missile.resolve_range", value
 pub const SEEKER_FIX_INTERVAL_S: Param = Param { key: "missile.fix_interval", value: 0.1, unit: "s", commitment: Placeholder, note: "Independent local ranging integration, not every guidance iteration." };
 pub const SEEKER_RANGE_SIGMA_KM: Param = Param { key: "missile.range_sigma", value: 0.1, unit: "km", commitment: Placeholder, note: "Local optical/TL7 ranging error at SNR 1; never an exact truth handoff." };
 pub const PROBE_INVENTORY: Param = Param {key:"probe.inventory",value:3.0,unit:"per military ship",commitment:Established,note:"Three reconnaissance probes per military ship; transports, stations and other platforms carry none."};
-pub const PROBE_BURN_S: Param = Param {key:"probe.burn",value:600.0,unit:"s",commitment:Placeholder,note:"Fixed-heading 500g burn, then ballistic coast. Not the old one-hour allowance."};
+pub const PROBE_BURN_S: Param = Param {key:"probe.burn",value:6.0*3_600.0,unit:"s",commitment:Placeholder,note:"Fixed-heading 20 g burn. The probe is expended at the aim point, or when this burn ends, whichever comes first."};
 pub const PROBE_SENSOR_FACTOR: Param = Param {key:"probe.sensor_factor",value:0.01,unit:"power/SNR fraction",commitment:Placeholder,note:"Weaker passive arrays and active transmitter than a warship; local observations relay home at c."};
-pub const PROBE_PING_INTERVAL_S: Param = Param {key:"probe.ping_interval",value:300.0,unit:"s",commitment:Placeholder,note:"Autonomous reconnaissance pulse interval; exposes probe, not carrier."};
+pub const PROBE_PING_INTERVAL_S: Param = Param {key:"probe.ping_interval",value:300.0,unit:"s",commitment:Placeholder,note:"After a probe detects a ship or station it has not resolved, it pulses on this interval to seek a range fix. A search with nothing unresolved stays silent."};
 pub const SCREEN_GLARE_W: Param = Param { key: "screen.glare_reference", value: 1e12, unit: "W", commitment: Placeholder, note: "Local thermal emission at which effective sensor noise doubles." };
 pub const TRACK_LOST_S: Param = Param { key: "track.lost", value: 600.0, unit: "s since receipt", commitment: Placeholder, note: "Track is retained for identification but no longer a firing solution." };
 pub const TRACK_VELOCITY_SIGMA: Param = Param { key: "track.velocity_sigma", value: 100.0, unit: "km/s", commitment: Placeholder, note: "Velocity solution confidence threshold, in addition to multiple observations." };

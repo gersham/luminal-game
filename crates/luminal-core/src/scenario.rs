@@ -173,6 +173,7 @@ pub fn transport_intercept_in_system(seed:u64,system:System)->World {
         defender: ESCORT,
         attacker: RAIDER,
         stance: Stance::Intercept,
+        withdrawal_continues:true,extract:false,escape_at_center:false,disengage_wins:false,prize_taken:false,escape_by:None,
     });
     let destination = world.objective.as_ref().unwrap().center;
     world.bodies[0].ship_class=Some(crate::world::ShipClass::Transport);
@@ -238,26 +239,44 @@ fn escort_world(seed:u64,system:System,class:ShipClass)->World {transport_interc
 fn raid_world(seed:u64,system:System,_:ShipClass)->World {raid(seed,system)}
 fn hide_world(seed:u64,system:System,_:ShipClass)->World {hide_and_seek(seed,system)}
 fn armada_world(seed:u64,system:System,_:ShipClass)->World {armada(seed,system)}
+fn convoy_world(seed:u64,system:System,_:ShipClass)->World {convoy(seed,system)}
+fn relief_world(seed:u64,system:System,_:ShipClass)->World {relief(seed,system)}
+fn last_world(seed:u64,system:System,_:ShipClass)->World {last_ship(seed,system)}
 
 static ESCORT_PLAY:Play=Play {
     name:"Escort",token:"escort",brief:"Escort the transport past a destroyer.",forces:"Destroyer versus destroyer",
-    detail:"Both sides field a destroyer. The transport runs for the departure region. Defeat the raider.",
+    detail:"Both sides field a destroyer. The transport must reach the departure region. Destroying the raider wins at once. The raider escaping does not.",
     flagship:ShipClass::Destroyer,bots:RAIDER_SIDE,player_class:true,inspect_protect:true,opposed_ship:Some(BodyId(2)),opposed_bots:ESCORT_SIDE,build:escort_world,
 };
 static RAID_PLAY:Play=Play {
     name:"Raid",token:"raid",brief:"A cruiser raid on a screened station.",forces:"Cruiser versus a station and its escorts",
-    detail:"Your cruiser starts away from the base. A destroyer and two frigates screen the station. Destroy the station.",
+    detail:"Use a moon's sensor shadow, send a probe, or jump in blind. Destroy the station, then withdraw. The screen holds until you close.",
     flagship:ShipClass::Cruiser,bots:RAIDER_SIDE,player_class:false,inspect_protect:false,opposed_ship:None,opposed_bots:NO_SIDE,build:raid_world,
 };
 static HIDE_PLAY:Play=Play {
     name:"Hide and Seek",token:"hide",brief:"Two frigates. Find the other one.",forces:"Frigate versus frigate",
-    detail:"You and the quarry are frigates, placed at random and out of contact. Destroy the quarry.",
+    detail:"Two frigates, placed at random and out of contact. Neither ship can jump. The hunting ground is closer to you than to the quarry, which has thirty-six hours to reach it. A slow coast will not get there. Destroy it, or it wins on arrival.",
     flagship:ShipClass::Frigate,bots:RAIDER_SIDE,player_class:false,inspect_protect:false,opposed_ship:None,opposed_bots:NO_SIDE,build:hide_world,
 };
 static ARMADA_PLAY:Play=Play {
     name:"Armada",token:"armada",brief:"Ten ships each, from opposite ends.",forces:"Battleship and a mixed fleet of nine",
-    detail:"Your battleship leads a cruiser, two destroyers, three frigates and three pickets. The enemy fleet matches you.",
-    flagship:ShipClass::Battleship,bots:BOTH_SIDES,player_class:false,inspect_protect:false,opposed_ship:None,opposed_bots:NO_SIDE,build:armada_world,
+    detail:"Your battleship is at the rear of nine ships, and they hold formation on you. Fleet orders travel at light speed: screen, close, or weapons free.",
+    flagship:ShipClass::Battleship,bots:RAIDER_SIDE,player_class:false,inspect_protect:false,opposed_ship:None,opposed_bots:NO_SIDE,build:armada_world,
+};
+static CONVOY_PLAY:Play=Play {
+    name:"Convoy",token:"convoy",brief:"Several transports, one screen.",forces:"Destroyer and a frigate escorting two transports",
+    detail:"Two transports run for the departure region. Your destroyer is at the back, and a frigate holds formation on you. One raider destroyer is on the route.",
+    flagship:ShipClass::Destroyer,bots:RAIDER_SIDE,player_class:false,inspect_protect:false,opposed_ship:None,opposed_bots:NO_SIDE,build:convoy_world,
+};
+static RELIEF_PLAY:Play=Play {
+    name:"Relief",token:"relief",brief:"Jump into a fight already under way.",forces:"A hot cruiser, an ally destroyer, two frigates",
+    detail:"A destroyer is already engaged. You arrive several AU out, hot from the jump, with only the light that has reached you.",
+    flagship:ShipClass::Cruiser,bots:BOTH_SIDES,player_class:false,inspect_protect:false,opposed_ship:None,opposed_bots:NO_SIDE,build:relief_world,
+};
+static LAST_PLAY:Play=Play {
+    name:"Last Ship",token:"last",brief:"A damaged cruiser. Repair the drive or run.",forces:"Damaged cruiser versus a frigate",
+    detail:"Propulsion is damaged. Repair it and kill the frigate, or withdraw. Being destroyed loses.",
+    flagship:ShipClass::Cruiser,bots:RAIDER_SIDE,player_class:false,inspect_protect:false,opposed_ship:None,opposed_bots:NO_SIDE,build:last_world,
 };
 
 /// Player-facing situations. Identity is the catalog row, so a new scenario does not grow a match.
@@ -278,8 +297,11 @@ impl Scenario {
     pub const Raid:Self=Self(&RAID_PLAY);
     pub const HideAndSeek:Self=Self(&HIDE_PLAY);
     pub const Armada:Self=Self(&ARMADA_PLAY);
+    pub const Convoy:Self=Self(&CONVOY_PLAY);
+    pub const Relief:Self=Self(&RELIEF_PLAY);
+    pub const LastShip:Self=Self(&LAST_PLAY);
     /// Card order on the startup screen.
-    pub const ALL:[Self;4]=[Self::Escort,Self::Raid,Self::HideAndSeek,Self::Armada];
+    pub const ALL:[Self;7]=[Self::Escort,Self::Raid,Self::HideAndSeek,Self::Armada,Self::Convoy,Self::Relief,Self::LastShip];
     fn play(self)->&'static Play {self.0}
     pub fn name(self)->&'static str {self.play().name}
     pub fn token(self)->&'static str {self.play().token}
@@ -366,13 +388,11 @@ fn silence_probes(world:&mut World) {
     world.probes_enabled=crate::params::PROBES_ENABLED;
     if !world.probes_enabled {for b in &mut world.bodies {b.probes=0;}}
 }
+/// `anchor` is the capital at the rear. Lighter ships step forward along `facing`.
 fn fleet_slots(anchor:Vec2,facing:Vec2)->Vec<Vec2> {
-    let facing=facing.normalized();
-    let back=facing*-1.0;
-    let side=Vec2::new(-facing.y,facing.x);
-    let spacing=0.045*AU;
+    let scales:Vec<f64>=ARMADA_MIX[1..].iter().map(|c|c.scale()).collect();
     let mut slots=vec![anchor];
-    for row in 1..=3 {for col in [-1.0_f64,0.0,1.0] {slots.push(anchor+back*(row as f64*spacing)+side*(col*spacing));}}
+    slots.extend(crate::world::formation_offsets(facing,&scales).into_iter().map(|off|anchor+off));
     slots
 }
 fn screen_offsets()->[Vec2;3] {[Vec2::new(3.0,0.0)*LIGHT_SECOND,Vec2::new(-2.0,2.2)*LIGHT_SECOND,Vec2::new(-2.0,-2.2)*LIGHT_SECOND]}
@@ -402,10 +422,23 @@ fn raid(seed:u64,system:System)->World {
         world.bodies[id.0 as usize].drive_limit=limit;
     }
     world.objective=Some(Objective {sensor_site:None,name:"enemy station".into(),center:station_pos,radius:0.08*AU,
-        protect:BodyId(0),player:Some(BodyId(0)),defeat:None,prize:Some(BodyId(1)),wipe:false,defender:RAIDER,attacker:ESCORT,stance:Stance::Screen});
+        protect:BodyId(0),player:Some(BodyId(0)),defeat:None,prize:Some(BodyId(1)),wipe:false,defender:RAIDER,attacker:ESCORT,stance:Stance::Screen,
+        withdrawal_continues:false,extract:true,escape_at_center:false,disengage_wins:false,prize_taken:false,escape_by:None});
     silence_probes(&mut world);
+    // The cruiser carries the only probes. The global gate stays off for every other scenario.
+    world.probes_enabled=true;
+    world.bodies[0].probes=3;
     world
 }
+
+/// Thirty-six hours. The quarry's longer leg still fits a burn of under an hour, then a coast. A few km/s does not.
+const HIDE_ESCAPE_S: f64 = 36.0 * 3600.0;
+const HIDE_SEP_MIN_AU: f64 = 4.0;
+const HIDE_SEP_MAX_AU: f64 = 5.4;
+/// Past the midpoint, toward the hunter, so the pursuer is strictly closer.
+const HIDE_HUNTER_BIAS_AU: f64 = 0.15;
+/// A fifty-minute burn and a coast still cover this inside the escape clock.
+const HIDE_QUARRY_LEG_AU: f64 = 3.0;
 
 fn placed(rng:&mut Rng,system:&System,home:Vec2,avoid:&[Vec2])->Vec2 {
     for attempt in 0..4000 {
@@ -418,19 +451,56 @@ fn placed(rng:&mut Rng,system:&System,home:Vec2,avoid:&[Vec2])->Vec2 {
     }
     home+Vec2::new(8.0*AU,4.0*AU)
 }
+fn place_quarry(rng:&mut Rng,system:&System,hunter:Vec2)->Vec2 {
+    for _ in 0..4000 {
+        let sep=(HIDE_SEP_MIN_AU+(HIDE_SEP_MAX_AU-HIDE_SEP_MIN_AU)*rng.uniform())*AU;
+        let angle=std::f64::consts::TAU*rng.uniform();
+        let pos=hunter+Vec2::new(angle.cos(),angle.sin())*sep;
+        if clear_of_celestials(system,pos) {return pos;}
+    }
+    for step in 0..64 {
+        let angle=step as f64*std::f64::consts::TAU/64.0;
+        let pos=hunter+Vec2::new(angle.cos(),angle.sin())*(4.5*AU);
+        if clear_of_celestials(system,pos) {return pos;}
+    }
+    hunter+Vec2::new(4.5*AU,0.0)
+}
+fn hunting_ground(system:&System,quarry:Vec2,hunter:Vec2)->Vec2 {
+    let axis=hunter-quarry;
+    let axis=if axis.length()>1.0 {axis.normalized()} else {Vec2::new(1.0,0.0)};
+    let side=Vec2::new(-axis.y,axis.x);
+    let along=(hunter+quarry)*0.5+axis*(HIDE_HUNTER_BIAS_AU*AU);
+    let cap=HIDE_QUARRY_LEG_AU*AU;
+    let clear=|pos:Vec2| {
+        let leg=(pos-quarry).length();
+        let near=(pos-hunter).length();
+        leg<=cap && near<leg && system.bodies.iter().enumerate().all(|(i,b)|(pos-system.state(i,0.0).pos).length()>b.radius+0.55*AU)
+    };
+    if clear(along) {return along;}
+    for step in 1..40 {
+        let lat=step as f64*0.05*AU;
+        for sign in [1.0_f64,-1.0] {
+            let pos=along+side*(lat*sign);
+            if clear(pos) {return pos;}
+        }
+    }
+    along
+}
 fn hide_and_seek(seed:u64,system:System)->World {
     let home=system.state(1,0.0).pos;
     let mut rng=Rng::stream(seed,0x48494445);
     let player=placed(&mut rng,&system,home,&[]);
-    let quarry=placed(&mut rng,&system,home,&[player]);
-    let hunt=placed(&mut rng,&system,home,&[player,quarry]);
+    let quarry=place_quarry(&mut rng,&system,player);
+    let hunt=hunting_ground(&system,quarry,player);
     let mut world=World::new(system,vec![spec("Hunter",BodyKind::Ship,ESCORT,player,1),spec("Quarry",BodyKind::Ship,RAIDER,quarry,1)],0.0,seed);
     fit_combatant(&mut world,BodyId(0),ShipClass::Frigate,false);
     fit_combatant(&mut world,BodyId(1),ShipClass::Frigate,false);
     world.set_move(BodyId(1),hunt).expect("the quarry can cross open space");
     world.objective=Some(Objective {sensor_site:None,name:"hunting ground".into(),center:hunt,radius:0.5*AU,
-        protect:BodyId(0),player:Some(BodyId(0)),defeat:Some(BodyId(1)),prize:None,wipe:false,defender:ESCORT,attacker:RAIDER,stance:Stance::Evade});
+        protect:BodyId(0),player:Some(BodyId(0)),defeat:Some(BodyId(1)),prize:None,wipe:false,defender:ESCORT,attacker:RAIDER,stance:Stance::Evade,
+        withdrawal_continues:false,extract:false,escape_at_center:true,disengage_wins:false,prize_taken:false,escape_by:Some(HIDE_ESCAPE_S)});
     silence_probes(&mut world);
+    world.jumps_enabled=false;
     world
 }
 
@@ -455,10 +525,149 @@ fn armada(seed:u64,system:System)->World {
     for (i,class) in ARMADA_MIX.into_iter().enumerate() {
         fit_combatant(&mut world,BodyId(i as u32),class,true);
         fit_combatant(&mut world,BodyId(10+i as u32),class,true);
-        world.set_move(BodyId(10+i as u32),player_slots[i]).expect("the enemy fleet can close");
     }
+    // Wings hold station on their flagship. Only the enemy capital closes; its wing stays in formation until it has a track.
+    for i in 1..ARMADA_MIX.len() {
+        world.set_station(BodyId(i as u32),BodyId(0),player_slots[i]-player_slots[0]).expect("the wing holds station");
+        world.set_station(BodyId(10+i as u32),BodyId(10),enemy_slots[i]-enemy_slots[0]).expect("the enemy wing holds station");
+    }
+    world.set_move(BodyId(10),player_slots[0]).expect("the enemy flagship can close");
     world.objective=Some(Objective {sensor_site:None,name:"opposing fleet".into(),center:enemy_slots[0],radius:0.25*AU,
-        protect:BodyId(0),player:Some(BodyId(0)),defeat:None,prize:None,wipe:true,defender:RAIDER,attacker:ESCORT,stance:Stance::Battle});
+        protect:BodyId(0),player:Some(BodyId(0)),defeat:None,prize:None,wipe:true,defender:RAIDER,attacker:ESCORT,stance:Stance::Battle,
+        withdrawal_continues:false,extract:false,escape_at_center:false,disengage_wins:false,prize_taken:false,escape_by:None});
+    silence_probes(&mut world);
+    world
+}
+
+fn open_axis(system:&System,seed:u64,salt:u64)->Vec2 {
+    let mut rng=Rng::stream(seed,salt);
+    let home=system.state(1,0.0).pos;
+    let base=std::f64::consts::TAU*rng.uniform();
+    (0..72).find_map(|step| {
+        let angle=base+step as f64*std::f64::consts::TAU/72.0;
+        let axis=Vec2::new(angle.cos(),angle.sin());
+        let clear=[0.4,1.2,2.2,3.2,4.5,6.5].iter().all(|au|clear_of_celestials(system,home+axis*(*au*AU)));
+        clear.then_some(axis)
+    }).unwrap_or(Vec2::new(1.0,0.0))
+}
+fn fit_transport(world:&mut World,id:BodyId) {
+    {
+        let b=&mut world.bodies[id.0 as usize];
+        b.ship_class=Some(ShipClass::Transport);
+        b.drive_limit=25.0*crate::units::G0;
+        b.armed=false;b.controllable=false;b.has_screen=false;b.screen_up=false;
+        b.baseline_emission_factor=crate::params::TRANSPORT_EMISSION_FACTOR.value;
+        b.visibility_multiplier=2.0;b.magazine=[0,0];
+    }
+    world.reset_platform_history(id);
+}
+fn convoy(seed:u64,system:System)->World {
+    let home=system.state(1,0.0).pos;
+    let axis=open_axis(&system,seed,0x434F4E56);
+    let lead=home+axis*(0.45*AU);
+    let second=lead-axis*(0.03*AU);
+    let screen=second-axis*(0.04*AU);
+    let player=screen-axis*(0.04*AU);
+    let departure=home+axis*(2.2*AU);
+    let raider=home+axis*(3.1*AU);
+    let specs=vec![
+        spec("Destroyer",BodyKind::Ship,ESCORT,player,1),
+        spec("Transport",BodyKind::Ship,ESCORT,lead,0),
+        spec("Transport 2",BodyKind::Ship,ESCORT,second,0),
+        spec("Frigate",BodyKind::Ship,ESCORT,screen,1),
+        spec("Raider",BodyKind::Ship,RAIDER,raider,1),
+    ];
+    let mut world=World::new(system,specs,0.0,seed);
+    fit_combatant(&mut world,BodyId(0),ShipClass::Destroyer,true);
+    fit_transport(&mut world,BodyId(1));
+    fit_transport(&mut world,BodyId(2));
+    fit_combatant(&mut world,BodyId(3),ShipClass::Frigate,true);
+    fit_combatant(&mut world,BodyId(4),ShipClass::Destroyer,true);
+    world.set_move(BodyId(1),departure).expect("the lead transport can run");
+    let limit=25.0*crate::units::G0;
+    world.set_follow(BodyId(2),BodyId(1)).expect("the second transport follows");
+    world.bodies[2].drive_limit=limit;
+    world.set_station(BodyId(3),BodyId(0),screen-player).expect("the frigate holds station on the destroyer");
+    world.objective=Some(Objective {sensor_site:None,name:"departure region".into(),center:departure,radius:0.05*AU,
+        protect:BodyId(1),player:Some(BodyId(0)),defeat:None,prize:None,wipe:false,defender:ESCORT,attacker:RAIDER,stance:Stance::Intercept,
+        withdrawal_continues:false,extract:false,escape_at_center:false,disengage_wins:false,prize_taken:false,escape_by:None});
+    silence_probes(&mut world);
+    world
+}
+fn sight_clear(system:&System,from:Vec2,to:Vec2)->bool {
+    (0..=8).all(|i| {
+        let p=from+(to-from)*(i as f64/8.0);
+        system.bodies.iter().enumerate().all(|(k,b)|(p-system.state(k,0.0).pos).length()>b.radius+0.05*AU)
+    })
+}
+fn relief(seed:u64,system:System)->World {
+    let home=system.state(1,0.0).pos;
+    let mut rng=Rng::stream(seed,0x52454C49);
+    let base=std::f64::consts::TAU*rng.uniform();
+    // The cruiser arrives off the planet, or the world sits in the planet's sensor shadow and the fight is invisible.
+    let (axis,_side,_fight,player,ally,raider_a,raider_b)=(0..72).find_map(|step| {
+        let angle=base+step as f64*std::f64::consts::TAU/72.0;
+        let axis=Vec2::new(angle.cos(),angle.sin());
+        let side=Vec2::new(-axis.y,axis.x);
+        let fight=home+axis*(2.2*AU);
+        let player=fight+side*(4.0*AU);
+        let ally=fight-axis*(0.16*AU);
+        let raider_a=fight+axis*(0.16*AU)+side*(0.04*AU);
+        let raider_b=fight+axis*(0.2*AU)-side*(0.04*AU);
+        let spots=[fight,player,ally,raider_a,raider_b];
+        (spots.iter().all(|p|clear_of_celestials(&system,*p)) && sight_clear(&system,player,raider_a) && sight_clear(&system,player,raider_b))
+            .then_some((axis,side,fight,player,ally,raider_a,raider_b))
+    }).unwrap_or_else(|| {
+        let axis=Vec2::new(1.0,0.0);
+        let side=Vec2::new(0.0,1.0);
+        let fight=home+axis*(2.2*AU);
+        (axis,side,fight,fight+side*(4.0*AU),fight-axis*(0.16*AU),fight+axis*(0.16*AU)+side*(0.04*AU),fight+axis*(0.2*AU)-side*(0.04*AU))
+    });
+    let burn=40.0*crate::units::G0;
+    let mut specs=vec![
+        spec("Cruiser",BodyKind::Ship,ESCORT,player,1),
+        spec("Ally",BodyKind::Ship,ESCORT,ally,1),
+        spec("Raider",BodyKind::Ship,RAIDER,raider_a,1),
+        spec("Raider 2",BodyKind::Ship,RAIDER,raider_b,1),
+    ];
+    specs[1].thrust=axis*burn;
+    specs[2].thrust=-axis*burn;
+    specs[3].thrust=-axis*burn;
+    let mut world=World::new(system,specs,6000.0,seed);
+    fit_combatant(&mut world,BodyId(0),ShipClass::Cruiser,false);
+    let scale=world.bodies[0].thermal.capacity_scale;
+    world.bodies[0].thermal.add_waste_heat(crate::params::SHIP_HEAT_LIMIT_J*scale*crate::world::jump::ARRIVAL_HEAT_FRACTION);
+    fit_combatant(&mut world,BodyId(1),ShipClass::Destroyer,true);
+    fit_combatant(&mut world,BodyId(2),ShipClass::Frigate,true);
+    fit_combatant(&mut world,BodyId(3),ShipClass::Frigate,true);
+    let ally_now=world.bodies[1].trajectory.state_at(0.0).unwrap().pos;
+    let foe=world.bodies[2].trajectory.state_at(0.0).unwrap().pos;
+    world.set_move(BodyId(1),foe).expect("the ally can close");
+    world.set_move(BodyId(2),ally_now).expect("the raider can close");
+    world.set_move(BodyId(3),ally_now).expect("the second raider can close");
+    world.objective=Some(Objective {sensor_site:None,name:"the engagement".into(),center:ally_now,radius:0.25*AU,
+        protect:BodyId(0),player:Some(BodyId(0)),defeat:None,prize:None,wipe:true,defender:RAIDER,attacker:ESCORT,stance:Stance::Battle,
+        withdrawal_continues:false,extract:false,escape_at_center:false,disengage_wins:false,prize_taken:false,escape_by:None});
+    silence_probes(&mut world);
+    world.sample_arriving_light();
+    world
+}
+fn last_ship(seed:u64,system:System)->World {
+    let home=system.state(1,0.0).pos;
+    let axis=open_axis(&system,seed,0x4C415354);
+    let player=home+axis*(2.4*AU);
+    let hunter=player+axis*(1.8*AU);
+    let mut world=World::new(system,vec![
+        spec("Cruiser",BodyKind::Ship,ESCORT,player,1),
+        spec("Pursuer",BodyKind::Ship,RAIDER,hunter,1),
+    ],0.0,seed);
+    fit_combatant(&mut world,BodyId(0),ShipClass::Cruiser,false);
+    fit_combatant(&mut world,BodyId(1),ShipClass::Frigate,true);
+    world.bodies[0].damage.systems[crate::damage::System::Propulsion as usize]=crate::damage::Condition::Damaged;
+    world.set_move(BodyId(1),player).expect("the pursuer can close");
+    world.objective=Some(Objective {sensor_site:None,name:"the pursuit".into(),center:player,radius:0.2*AU,
+        protect:BodyId(0),player:Some(BodyId(0)),defeat:Some(BodyId(1)),prize:None,wipe:false,defender:ESCORT,attacker:RAIDER,stance:Stance::Intercept,
+        withdrawal_continues:false,extract:false,escape_at_center:false,disengage_wins:true,prize_taken:false,escape_by:None});
     silence_probes(&mut world);
     world
 }
@@ -574,7 +783,7 @@ mod tests {
         assert!(world.bodies.iter().all(|b|b.probes==0));
         for id in [BodyId(0),BodyId(1),BodyId(2),BodyId(3)] {
             world.bodies[id.0 as usize].probes=3; // Stock alone cannot bypass the gate.
-            assert!(world.deploy_probe(id,Vec2::new(1.0,0.0)).is_err());
+            assert!(world.deploy_probe(id,Vec2::new(1.0,0.0),Vec2::new(1.0e6,0.0)).is_err());
         }
         assert!(world.bodies.iter().all(|b|b.kind!=BodyKind::Probe));
     }
@@ -671,15 +880,51 @@ mod tests {
         assert!(!w.bodies[0].screen_up&&!w.bodies[1].screen_up);
         let hunter=w.bodies[0].trajectory.state_at(0.0).unwrap().pos;
         let quarry=w.bodies[1].trajectory.state_at(0.0).unwrap().pos;
-        assert!((hunter-quarry).length()>=4.0*AU-1.0);
+        let sep=(hunter-quarry).length();
+        assert!((HIDE_SEP_MIN_AU*AU-1.0..=HIDE_SEP_MAX_AU*AU+1.0).contains(&sep),"ships stay out of contact and inside the clock: {sep}");
         let o=w.objective.as_ref().unwrap();
         assert_eq!((o.player,o.defeat,o.stance),(Some(BodyId(0)),Some(BodyId(1)),Stance::Evade));
-        assert!((o.center-hunter).length()>AU&&(o.center-quarry).length()>AU);
+        assert_eq!(o.escape_by,Some(HIDE_ESCAPE_S));
+        assert!(!w.jumps_enabled);
+        let to_hunter=(o.center-hunter).length();
+        let to_quarry=(o.center-quarry).length();
+        assert!(to_hunter<to_quarry,"the pursuer is closer to the hunting ground");
+        assert!(to_hunter>o.radius && to_quarry>o.radius,"neither ship starts inside the ground");
+        assert!(9.0*HIDE_ESCAPE_S<to_quarry,"a 9 km/s coast cannot reach the hunting ground");
+        let burn=50.0*60.0;
+        let reach=ShipClass::Frigate.max_g()*G0*burn*(HIDE_ESCAPE_S-burn/2.0);
+        assert!(burn<3600.0 && reach>to_quarry,"a burn under the heat wall can still arrive");
+        for seed in [1_u64,7,99,256,1024] {
+            let placed=Scenario::HideAndSeek.build(seed,home_system());
+            let hunter=placed.bodies[0].trajectory.state_at(0.0).unwrap().pos;
+            let quarry=placed.bodies[1].trajectory.state_at(0.0).unwrap().pos;
+            let center=placed.objective.as_ref().unwrap().center;
+            let sep=(hunter-quarry).length();
+            assert!((HIDE_SEP_MIN_AU*AU-1.0..=HIDE_SEP_MAX_AU*AU+1.0).contains(&sep),"{seed}: {sep}");
+            assert!((center-hunter).length()<(center-quarry).length(),"{seed}");
+            assert!(9.0*HIDE_ESCAPE_S<(center-quarry).length(),"{seed}");
+            assert!(!placed.jumps_enabled);
+        }
         let session=crate::session::LocalSession::new(w);
         assert!(session.view(crate::session::Role::Faction(ESCORT)).contacts.is_empty());
         assert!(session.view(crate::session::Role::Faction(RAIDER)).contacts.is_empty());
         assert_eq!(hunter,Scenario::HideAndSeek.build(42,home_system()).bodies[0].trajectory.state_at(0.0).unwrap().pos);
         assert_ne!(hunter,Scenario::HideAndSeek.build(7,home_system()).bodies[0].trajectory.state_at(0.0).unwrap().pos);
+    }
+
+    #[test]
+    fn hide_and_seek_rejects_jump_even_for_a_destroyer() {
+        let mut hide=Scenario::HideAndSeek.build(42,home_system());
+        for body in &mut hide.bodies {body.ship_class=Some(ShipClass::Destroyer);}
+        let dest=Vec2::new(3.0*AU,0.0);
+        assert_eq!(hide.start_jump(BodyId(0),dest),Err(crate::world::OrderError::JumpUnavailable));
+        assert_eq!(hide.start_jump(BodyId(1),dest),Err(crate::world::OrderError::JumpUnavailable));
+        hide.order_fleet_jump(BodyId(0),dest);
+        assert!(hide.bodies.iter().all(|b|b.jump.is_none()));
+        assert_eq!(hide.pending_orders(ESCORT),0);
+        let mut escort=Scenario::Escort.build(42,home_system());
+        assert!(escort.jumps_enabled);
+        assert!(escort.start_jump(BodyId(1),dest).is_ok());
     }
 
     #[test]
@@ -693,17 +938,24 @@ mod tests {
         assert!(w.bodies[..10].iter().all(|b|b.faction==ESCORT));
         assert!(w.bodies[10..].iter().all(|b|b.faction==RAIDER));
         assert!(w.bodies[0].autopilot.is_none());
-        assert!(w.bodies[10..].iter().all(|b|matches!(b.autopilot.map(|a|a.order),Some(crate::world::Order::MoveTo {..}))));
+        assert!(w.bodies[1..10].iter().all(|b|b.drive_limit.is_finite() && matches!(b.autopilot.map(|a|a.order),Some(crate::world::Order::Follow {target:BodyId(0),..}))));
+        assert!(matches!(w.bodies[10].autopilot.map(|a|a.order),Some(crate::world::Order::MoveTo {..})));
+        assert!(w.bodies[11..].iter().all(|b|matches!(b.autopilot.map(|a|a.order),Some(crate::world::Order::Follow {target:BodyId(10),..}))));
         let player=w.bodies[0].trajectory.state_at(0.0).unwrap().pos;
         let enemy=w.bodies[10].trajectory.state_at(0.0).unwrap().pos;
         assert!((player-enemy).length()>10.0*AU);
+        let axis=(enemy-player).normalized();
+        let ahead=|id:usize|(w.bodies[id].trajectory.state_at(0.0).unwrap().pos-player).dot(axis);
+        assert!(w.bodies[1..10].iter().enumerate().all(|(i,_)|ahead(i+1)>0.02*AU),"lighter ships should be ahead of the battleship");
+        assert!(ahead(9)>ahead(1),"pickets should be ahead of the cruiser");
+        assert!(w.bodies[11..].iter().all(|b|(b.trajectory.state_at(0.0).unwrap().pos-player).length()<(enemy-player).length()-0.02*AU));
         let o=w.objective.unwrap();
         assert!(o.wipe&&o.prize.is_none()&&o.player==Some(BodyId(0))&&o.stance==Stance::Battle);
         assert!((o.center-enemy).length()<1.0);
         let mut session=crate::session::LocalSession::new(Scenario::Armada.build(42,home_system()));
         session.enable_bot(ESCORT,true);session.enable_bot(RAIDER,true);
         session.command(crate::session::Role::Spectator,crate::session::Command::SetPaused(false)).unwrap();
-        // Wing orders travel at light speed across the formation, about 70s to the back rank.
+        // Wing orders travel at light speed across four rows, about 90s to the van.
         session.tick(120.0);
         let view=session.view(crate::session::Role::Spectator);
         assert!(view.bodies.iter().find(|b|b.id==BodyId(0)).unwrap().autopilot.is_none(),"the player's battleship stays on manual helm");
@@ -739,6 +991,7 @@ mod tests {
         let mut session=crate::session::LocalSession::new(Scenario::HideAndSeek.build(42,home_system()));
         session.enable_bot(RAIDER,true);
         session.command(crate::session::Role::Spectator,crate::session::Command::SetPaused(false)).unwrap();
+        let start=session.view(crate::session::Role::Spectator).bodies.iter().find(|b|b.id==BodyId(1)).unwrap().pos;
         session.tick(90.0);
         let view=session.view(crate::session::Role::Spectator);
         assert!(view.pings.is_empty(),"the quarry pinged");
@@ -747,6 +1000,120 @@ mod tests {
         assert_eq!(quarry.controls.screens,crate::world::controls::Mode::Off);
         assert_eq!(quarry.controls.ecm,crate::world::controls::Mode::Off);
         assert_eq!(quarry.controls.active,crate::world::controls::Mode::Off);
-        assert!(matches!(quarry.autopilot.map(|a|a.order),Some(crate::world::Order::MoveTo {..})|Some(crate::world::Order::Evade(_))),"{:?}",quarry.autopilot);
+        assert!(quarry.autopilot.is_none() && quarry.thrust.length()>G0,"the quarry keeps burning until the ground is in reach: {:?}",quarry.autopilot);
+        assert!(quarry.vel.length()>40.0,"ninety seconds at full thrust is already far past a 9 km/s drift");
+        assert!((quarry.pos-start).length()>3_000.0);
+    }
+
+    #[test]
+    fn coast_holds_the_vector_and_fleet_orders_arrive_late() {
+        let mut session=crate::session::LocalSession::new(Scenario::HideAndSeek.build(42,home_system()));
+        session.command(crate::session::Role::Faction(ESCORT),crate::session::Command::SetThrust {body:BodyId(0),thrust:Vec2::new(20.0*G0,0.0)}).unwrap();
+        session.command(crate::session::Role::Spectator,crate::session::Command::SetPaused(false)).unwrap();
+        session.tick(8.0);
+        let moving=session.view(crate::session::Role::Spectator).bodies.iter().find(|b|b.id==BodyId(0)).unwrap().vel;
+        session.command(crate::session::Role::Faction(ESCORT),crate::session::Command::Coast {body:BodyId(0)}).unwrap();
+        let coasted=session.view(crate::session::Role::Spectator);
+        let coasting=coasted.bodies.iter().find(|b|b.id==BodyId(0)).unwrap();
+        assert!(coasting.autopilot.is_none() && coasting.thrust.length()<1e-6);
+        session.tick(6.0);
+        let later=session.view(crate::session::Role::Spectator).bodies.iter().find(|b|b.id==BodyId(0)).unwrap().vel;
+        assert!((later-moving).length()<1.0,"coast changed the vector by {}",(later-moving).length());
+
+        let mut fleet=crate::session::LocalSession::new(Scenario::Armada.build(42,home_system()));
+        fleet.command(crate::session::Role::Faction(ESCORT),crate::session::Command::Fleet {body:BodyId(0),order:crate::session::FleetOrder::Screen}).unwrap();
+        let view=fleet.view(crate::session::Role::Faction(ESCORT));
+        assert_eq!(view.pending_orders,9);
+        assert!(view.order_eta.iter().any(|(_,t)|*t>60.0),"{:?}",view.order_eta);
+        // The wing is already in formation. The order in transit has not replaced those stations yet.
+        let formed=|bodies:&[crate::session::BodyView]| bodies.iter().filter(|b|b.faction==ESCORT && b.id!=BodyId(0)).all(|b|matches!(b.autopilot.map(|a|a.order),Some(crate::world::Order::Follow {target:BodyId(0),..})));
+        assert!(formed(&fleet.view(crate::session::Role::Spectator).bodies));
+        fleet.command(crate::session::Role::Spectator,crate::session::Command::SetPaused(false)).unwrap();
+        fleet.tick(5.0);
+        assert!(fleet.view(crate::session::Role::Faction(ESCORT)).pending_orders>0,"a front-rank order has not had time to arrive");
+        fleet.tick(130.0);
+        let arrived=fleet.view(crate::session::Role::Spectator);
+        assert!(arrived.bodies.iter().any(|b|b.faction==ESCORT && b.id!=BodyId(0) && matches!(b.autopilot.map(|a|a.order),Some(crate::world::Order::Follow {target:BodyId(0),..}))));
+        assert_eq!(Scenario::Armada.bots(),&[RAIDER]);
+        for order in [crate::session::FleetOrder::Close,crate::session::FleetOrder::WeaponsFree] {
+            let mut session=crate::session::LocalSession::new(Scenario::Armada.build(42,home_system()));
+            session.command(crate::session::Role::Faction(ESCORT),crate::session::Command::Fleet {body:BodyId(0),order}).unwrap();
+            let view=session.view(crate::session::Role::Faction(ESCORT));
+            assert_eq!(view.pending_orders,9,"{order:?} did not leave the flagship");
+            assert!(formed(&session.view(crate::session::Role::Spectator).bodies),"{order:?} changed the formation before its light arrived");
+        }
+    }
+
+    #[test]
+    fn raid_cruiser_is_the_only_ship_that_can_launch_a_probe() {
+        let mut world=Scenario::Raid.build(42,home_system());
+        assert!(world.probes_enabled);
+        assert_eq!(world.bodies[0].probes,3);
+        assert!(world.bodies[1..].iter().all(|b|b.probes==0));
+        let pos=world.bodies[0].trajectory.state_at(0.0).unwrap().pos;
+        assert!(world.deploy_probe(BodyId(0),Vec2::new(1.0,0.0),pos+Vec2::new(1.0e6,0.0)).is_ok());
+        assert!(world.bodies.iter().any(|b|b.kind==BodyKind::Probe));
+        assert!(world.deploy_probe(BodyId(2),Vec2::new(1.0,0.0),Vec2::ZERO).is_err());
+        assert!(!transport_intercept().probes_enabled);
+    }
+
+    #[test]
+    fn convoy_relief_and_last_ship_build_their_own_fights() {
+        let convoy=Scenario::Convoy.build(42,home_system());
+        assert_eq!(convoy.bodies[0].ship_class,Some(ShipClass::Destroyer));
+        assert!(convoy.bodies[1].kind==BodyKind::Ship && !convoy.bodies[1].armed && !convoy.bodies[2].armed);
+        assert!(matches!(convoy.bodies[3].autopilot.map(|a|a.order),Some(crate::world::Order::Follow {target:BodyId(0),..})));
+        assert!(convoy.bodies[3].drive_limit.is_finite());
+        let o=convoy.objective.as_ref().unwrap();
+        let player=convoy.bodies[0].trajectory.state_at(0.0).unwrap().pos;
+        let frigate=convoy.bodies[3].trajectory.state_at(0.0).unwrap().pos;
+        assert!((frigate-player).dot((o.center-player).normalized())>0.02*AU,"the frigate should be ahead of the destroyer");
+        assert_eq!((o.protect,o.player,o.defeat,o.prize,o.wipe),(BodyId(1),Some(BodyId(0)),None,None,false));
+        assert_eq!(convoy.bodies[4].faction,RAIDER);
+
+        let relief=Scenario::Relief.build(42,home_system());
+        let player=relief.bodies[0].trajectory.state_at(0.0).unwrap().pos;
+        let ally=relief.bodies[1].trajectory.state_at(0.0).unwrap().pos;
+        assert!((player-ally).length()>3.0*AU);
+        assert!(!relief.bodies[0].screen_up);
+        assert!(relief.bodies[0].thermal.heat_fraction()>=0.9);
+        let o=relief.objective.as_ref().unwrap();
+        assert!(o.wipe && o.stance==Stance::Battle && o.player==Some(BodyId(0)));
+        assert_eq!(relief.bodies[1].ship_class,Some(ShipClass::Destroyer));
+        assert!(relief.bodies[2..].iter().all(|b|b.ship_class==Some(ShipClass::Frigate) && b.faction==RAIDER));
+        let session=crate::session::LocalSession::new(relief);
+        let picture=session.view(crate::session::Role::Faction(ESCORT));
+        assert!(picture.contacts.iter().any(|c|c.last_emitted_at<0.0),"stale light from the fight should already have arrived");
+
+        let last=Scenario::LastShip.build(42,home_system());
+        assert_eq!(last.bodies[0].damage.state(crate::damage::System::Propulsion),crate::damage::Condition::Damaged);
+        assert_eq!(last.bodies[0].damage.state(crate::damage::System::Repair),crate::damage::Condition::Intact);
+        assert!(last.bodies[0].installed_systems()[crate::damage::System::Jump as usize]);
+        let o=last.objective.as_ref().unwrap();
+        assert!(o.disengage_wins && o.defeat==Some(BodyId(1)) && o.player==Some(BodyId(0)));
+    }
+
+    #[test]
+    fn hide_quarry_wins_by_reaching_the_hunting_ground() {
+        let mut world=Scenario::HideAndSeek.build(42,home_system());
+        let center=world.objective.as_ref().unwrap().center;
+        world.bodies[1].trajectory=crate::kinematics::Trajectory::new(0.0,State {pos:center,vel:Vec2::ZERO});
+        // Arrival is scored on the next integration step, and open space steps are a minute apart.
+        world.advance_to(120.0);
+        let outcome=world.outcome.as_ref().unwrap();
+        assert_eq!(outcome.winner,RAIDER);
+        assert!(outcome.reason.contains("reached"),"{}",outcome.reason);
+    }
+
+    #[test]
+    fn hide_quarry_misses_the_clock_and_the_hunter_wins() {
+        let mut world=Scenario::HideAndSeek.build(42,home_system());
+        world.objective.as_mut().unwrap().escape_by=Some(60.0);
+        world.advance_to(90.0);
+        let outcome=world.outcome.as_ref().unwrap();
+        assert_eq!(outcome.winner,ESCORT);
+        assert!(outcome.reason.contains("missed"),"{}",outcome.reason);
+        assert!((outcome.t-60.0).abs()<1e-6);
+        assert!(world.time()>=90.0);
     }
 }

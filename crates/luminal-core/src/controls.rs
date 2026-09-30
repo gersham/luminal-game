@@ -145,13 +145,15 @@ pub struct Controls {
     pub transport_alerted:bool,
     pub evade:Mode,pub evading:bool,
     pub evasion:Option<(ContactId,autopilot::EvasionBurn)>,
+    /// Locked lateral sign for an Evade with no missile inbound. The key is the contact or own-ship id.
+    pub drift_side:Option<(u64,f64)>,
     pub last_auto_ping:Option<f64>,
     pub ecm:Mode,pub screens:Mode,
     pub ecm_active:bool,pub screens_latched:bool,
     pub ecm_rating:f64,pub eccm_rating:f64,
 }
 impl Default for Controls {
-    fn default()->Self {Self {active:Mode::Off,next_ping_at:0.0,transport_alerted:false,evade:Mode::Auto,evading:false,evasion:None,last_auto_ping:None,ecm:Mode::Auto,screens:Mode::Auto,
+    fn default()->Self {Self {active:Mode::Off,next_ping_at:0.0,transport_alerted:false,evade:Mode::Auto,evading:false,evasion:None,drift_side:None,last_auto_ping:None,ecm:Mode::Auto,screens:Mode::Auto,
         ecm_active:false,screens_latched:false,ecm_rating:100.0,eccm_rating:50.0}}
 }
 impl Body {

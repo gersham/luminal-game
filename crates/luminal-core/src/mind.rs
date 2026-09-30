@@ -417,10 +417,13 @@ impl Perception {
         let mut obs=obs;
         if matches!(obs.measurement,Measurement::Bearing {..}) {obs.detection=obs.detection.min(crate::sensors::DetectionLevel::Bearing);}
         let key=(obs.sensor,obs.source as u8);
-        if c.evidence.get(&key).is_none_or(|old|obs.emitted_at>=old.emitted_at &&
-            (old.detection==obs.detection || obs.source==Source::Echo || obs.sensor_received_at-old.sensor_received_at>=crate::sensors::CONTACT_TRANSITION_S)) {
-            c.evidence.insert(key,obs);
-        }
+        let replace=c.evidence.get(&key).is_none_or(|old| {
+            // A dark sample is not a retraction. The stale window drops the last fix.
+            if obs.detection==crate::sensors::DetectionLevel::None && old.detection!=crate::sensors::DetectionLevel::None {return false;}
+            obs.emitted_at>=old.emitted_at &&
+                (old.detection==obs.detection || obs.source==Source::Echo || obs.sensor_received_at-old.sensor_received_at>=crate::sensors::CONTACT_TRANSITION_S)
+        });
+        if replace {c.evidence.insert(key,obs);}
         if obs.detection==crate::sensors::DetectionLevel::None {return;}
         if obs.emitted_at >= c.last.emitted_at {
             c.last = obs;
@@ -555,6 +558,22 @@ mod tests {
             assert_eq!(c.detection(1002.0),D::Resolved);
             assert_eq!(c.estimate(1002.0,&sys).unwrap().pos(),c.track.as_ref().unwrap().pos());
         }
+    }
+
+    #[test]
+    fn a_quiet_sample_does_not_erase_a_bearing_inside_the_stale_window() {
+        use crate::sensors::DetectionLevel as D;
+        let mut p=Perception::new(FactionId(0));
+        let sys=System::default();
+        let bearing=Observation {detection:D::Bearing,contact:ContactId(1),sensor:BodyId(0),origin:Vec2::ZERO,
+            emitted_at:0.0,sensor_received_at:10.0,decider_received_at:10.0,source:Source::Emission,snr:100.0,
+            measurement:Measurement::Bearing {bearing:0.4,sigma:0.01}};
+        p.ingest(bearing,&sys);
+        p.ingest(Observation {detection:D::None,emitted_at:20.0,sensor_received_at:30.0,decider_received_at:30.0,..bearing},&sys);
+        let c=&p.contacts[&ContactId(1)];
+        assert_eq!(c.detection(30.0),D::Bearing);
+        assert_eq!(c.detection(10.0+crate::params::TRACK_STALE_S.value),D::Bearing);
+        assert_eq!(c.detection(10.0+crate::params::TRACK_STALE_S.value+1.0),D::None);
     }
 
     #[test] fn ping_identity_expires_from_sensor_receipt_not_relay_receipt() {

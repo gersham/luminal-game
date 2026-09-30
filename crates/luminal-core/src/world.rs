@@ -94,7 +94,8 @@ pub enum InterceptTarget {
 pub enum Order {
     /// Best-effort continuous curve through the body's flight-route points.
     Route,
-    /// Escort a friendly: screen detected enemies, otherwise hold the original offset.
+    /// Hold station on a friendly. The flagship's wing stays ahead of the admiral and
+    /// screens the nearest threat. Anyone else steps between the charge and a detected enemy.
     Follow { target: BodyId, offset: Vec2 },
     /// Match a sensor contact at a fixed one-light-second formation offset.
     Alongside { target: ContactId, offset: Vec2 },
@@ -157,7 +158,10 @@ pub struct Body {
     pub visibility_multiplier: f64,
     pub sensors: sensors::SensorSuite,
     pub probes: u32,
+    /// End of the fixed burn. The probe is expended at this time if it has not already arrived.
     pub probe_burn_until: Option<f64>,
+    /// Aim point on the launch ray. The probe is expended once it reaches this.
+    probe_destination: Option<Vec2>,
     probe_ping_at: f64,
     pub thermal: crate::thermal::Thermal,
     launch_generation: u64,
@@ -426,7 +430,7 @@ pub struct Objective {
     pub center: Vec2,
     pub radius: f64,
     pub protect: BodyId,
-    /// Losing the player ship immediately loses the scenario.
+    /// The flagship. Its loss loses the scenario unless a different `protect` ship is still alive, or a scored withdrawal applies.
     pub player:Option<BodyId>,
     /// When set, defeating this body (destruction, surrender or withdrawal) wins; transport arrival/loss is not terminal.
     pub defeat: Option<BodyId>,
@@ -439,6 +443,18 @@ pub struct Objective {
     /// The side trying to stop it.
     pub attacker: FactionId,
     pub stance: Stance,
+    /// A withdrawal or surrender of `defeat` does not decide. Destruction still does.
+    pub withdrawal_continues: bool,
+    /// Destroying `prize` is not terminal. The player wins by withdrawing afterward.
+    pub extract: bool,
+    /// `defeat` reaching `center` wins for the attacker.
+    pub escape_at_center: bool,
+    /// Absolute simulation time by which `defeat` must reach `center`. The defender wins if it passes.
+    pub escape_by: Option<f64>,
+    /// The player's own withdrawal wins for the player's faction.
+    pub disengage_wins: bool,
+    /// An extract prize has already been destroyed.
+    pub prize_taken: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -563,6 +579,8 @@ struct Relay {
 pub struct World {
     profile:Option<SimulationProfile>,
     pub probes_enabled:bool,
+    /// Hide and Seek has no jump. Every other scenario leaves this on.
+    pub jumps_enabled:bool,
     interceptor_solutions:BTreeMap<(BodyId,BodyId),sensors::SeekerFix>,
     probability_flights:BTreeMap<BodyId,weapon_probability::Flight>,
     refinement: refinements::Refinements,
@@ -596,6 +614,48 @@ pub struct World {
 /// Pings older than this radius are discarded.
 const MAX_FRONT_RADIUS_KM: f64 = 100.0 * AU;
 
+/// Formation heading walks onto a new bearing at this rate. A right angle takes three minutes.
+const SCREEN_SLEW_RAD_PER_S: f64 = std::f64::consts::PI / 360.0;
+/// Depth changes ease on this time constant, so a stretch is not a lunge.
+const SCREEN_DEPTH_TAU_S: f64 = 180.0;
+
+/// Walk `current` toward `desired` without jumping the formation onto the new bearing.
+fn ease_screen_offset(current: Vec2, desired: Vec2, dt: f64) -> Vec2 {
+    if dt <= 0.0 || (desired - current).length() < 1.0 { return current; }
+    let cur_len = current.length();
+    let des_len = desired.length();
+    if cur_len < 1.0 || des_len < 1.0 { return if dt > 0.0 { desired } else { current }; }
+    let turn = sensors::wrap_angle(desired.y.atan2(desired.x) - current.y.atan2(current.x));
+    let applied = turn.clamp(-SCREEN_SLEW_RAD_PER_S * dt, SCREEN_SLEW_RAD_PER_S * dt);
+    let alpha = 1.0 - (-dt / SCREEN_DEPTH_TAU_S).exp();
+    let len = cur_len * (des_len / cur_len).powf(alpha);
+    let ang = current.y.atan2(current.x) + applied;
+    Vec2::new(ang.cos(), ang.sin()) * len
+}
+
+/// Stations ahead of a flagship. `wing_scales` is largest-first and grouped by class.
+/// The flagship is the origin, so the largest hull stays at the rear.
+pub(crate) fn formation_offsets(facing: Vec2, wing_scales: &[f64]) -> Vec<Vec2> {
+    let facing = if facing.length() > 1e-9 { facing.normalized() } else { Vec2::new(1.0, 0.0) };
+    let side = Vec2::new(-facing.y, facing.x);
+    let spacing = 0.045 * AU;
+    let mut offsets = Vec::with_capacity(wing_scales.len());
+    let mut row = 1.0;
+    let mut i = 0;
+    while i < wing_scales.len() {
+        let scale = wing_scales[i];
+        let mut j = i + 1;
+        while j < wing_scales.len() && (wing_scales[j] - scale).abs() < 1e-9 { j += 1; }
+        let width = (j - i) as f64 - 1.0;
+        for k in 0..(j - i) {
+            offsets.push(facing * (row * spacing) + side * ((k as f64 - width / 2.0) * spacing));
+        }
+        row += 1.0;
+        i = j;
+    }
+    offsets
+}
+
 impl World {
     /// Build a world at `t = 0` whose bodies have `history_s` of prior ballistic motion,
     /// so light they emitted before the scenario starts is already in flight.
@@ -621,6 +681,7 @@ impl World {
                     },
                     probes: if spec.kind==BodyKind::Ship && spec.magazine>0 { PROBE_INVENTORY.value as u32 } else { 0 },
                     probe_burn_until: None,
+                    probe_destination: None,
                     probe_ping_at: 0.0,
                     damage:crate::damage::Damage::default(),
                     thermal: crate::thermal::Thermal { capacitor_j: if spec.kind==BodyKind::Station {0.0} else {BEAM_CAPACITOR_J.value}, ..Default::default() },
@@ -663,6 +724,7 @@ impl World {
         let mut world = Self {
             profile:std::env::var_os("LUMINAL_PROFILE").map(|_|SimulationProfile::default()),
             probes_enabled:true,
+            jumps_enabled:true,
             interceptor_solutions:BTreeMap::new(),
             probability_flights:BTreeMap::new(),
             refinement: refinements::Refinements::with_seed(seed),
@@ -799,21 +861,149 @@ impl World {
         Ok(())
     }
 
-    /// Position between our charge and the nearest localized hostile contact.
-    /// Unranged bearings cannot establish which enemy is closest. Resolved
-    /// missiles, probes and stations do not pull an escort out of formation.
-    fn escort_screen_offset(&self,id:BodyId,charge:Vec2)->Option<Vec2> {
+    /// Hold station on a friendly. On the flagship, `offset` is only the opening slot:
+    /// guidance keeps that wing ahead of the admiral.
+    pub fn set_station(&mut self,id:BodyId,target:BodyId,offset:Vec2)->Result<(),OrderError> {
+        self.ensure_not_jumping(id)?;
+        let faction=self.live_body_mut(id)?.faction;
+        if id==target || !self.body(target).is_some_and(|b|b.faction==faction && b.alive_at(self.time) && b.kind!=BodyKind::Missile) {
+            return Err(OrderError::InvalidTarget);
+        }
+        let _=self.known_body(faction,target).ok_or(OrderError::NoTrack)?;
+        self.live_body_mut(id)?.autopilot=Some(Autopilot {order:Order::Follow {target,offset},status:AutopilotStatus::Manoeuvring});
+        // A fresh station is the start of the walk, not an excuse to jump across the gap since the last slew.
+        self.refinement.screen_slew.insert(id, self.time);
+        self.guide(id);
+        Ok(())
+    }
+
+    /// Nearest localized hostile ship in the platform's delivered picture, as a
+    /// vector from `from`. Unranged bearings cannot establish which enemy is closest.
+    /// Resolved missiles, probes and stations do not count.
+    fn nearest_hostile_delta(&self,id:BodyId,from:Vec2)->Option<Vec2> {
         let faction=self.body(id)?.faction;
         self.received_picture(id)?.contacts.values()
             .filter(|c|self.time-c.last.decider_received_at<=TRACK_STALE_S.value
                 && !self.refinement.retired_contacts.contains(&(faction,c.id)))
             .filter(|c|!c.resolved || self.body_for_contact(faction,c.id)
                 .is_some_and(|other|self.bodies[other.0 as usize].kind==BodyKind::Ship))
-            .filter_map(|c|c.estimate(self.time,&self.system).map(|tr|tr.pos()-charge))
+            .filter_map(|c|c.estimate(self.time,&self.system).map(|tr|tr.pos()-from))
             .filter(|delta|delta.length()>1e-6)
             .min_by(|a,b|a.length().total_cmp(&b.length()))
+    }
+
+    /// Direction of the freshest bearing-only hostile. A fix with range is handled
+    /// by [`Self::nearest_hostile_delta`]; this is the line to dress on until range exists.
+    fn freshest_hostile_bearing(&self,id:BodyId)->Option<Vec2> {
+        let faction=self.body(id)?.faction;
+        let mut best:Option<(f64,f64,f64)>=None;
+        for contact in self.received_picture(id)?.contacts.values() {
+            if self.time-contact.last.decider_received_at>TRACK_STALE_S.value
+                || self.refinement.retired_contacts.contains(&(faction,contact.id)) {continue;}
+            if contact.resolved && !self.body_for_contact(faction,contact.id)
+                .is_some_and(|other|self.bodies[other.0 as usize].kind==BodyKind::Ship) {continue;}
+            if contact.estimate(self.time,&self.system).is_some() {continue;}
+            let (bearing,sigma)=match contact.last.measurement {
+                Measurement::Bearing {bearing,sigma}=>(bearing,sigma),
+                Measurement::BearingRange {bearing,sigma_bearing,..}=>(bearing,sigma_bearing),
+            };
+            let rank=(contact.last.decider_received_at,-sigma);
+            if best.is_none_or(|(at,neg_sigma,_)| rank>(at,neg_sigma)) {
+                best=Some((contact.last.decider_received_at,-sigma,bearing));
+            }
+        }
+        best.map(|(_,_,bearing)| Vec2::new(bearing.cos(),bearing.sin()))
+    }
+
+    /// Position between our charge and the nearest localized hostile contact.
+    /// Unranged bearings cannot establish which enemy is closest. Resolved
+    /// missiles, probes and stations do not pull an escort out of formation.
+    fn escort_screen_offset(&self,id:BodyId,charge:Vec2)->Option<Vec2> {
+        self.nearest_hostile_delta(id,charge)
             // Keep between the ships even if the enemy is already inside 10 LS.
             .map(|delta|delta.normalized()*(10.0*crate::units::LIGHT_SECOND).min(delta.length()*0.5))
+    }
+
+    /// Station the admiral's wing would hold if it were already dressed on the threat.
+    /// A ranged hostile sets the axis and the depth. A bearing with no range only
+    /// sets the axis, keeping the wing's present depth. Guidance walks the live
+    /// order toward this station instead of jumping to it. An alongside order
+    /// (about one light-second) only flips if it would sit astern.
+    fn screen_station(&self,id:BodyId,flagship:BodyId,stored:Vec2,flagship_state:State)->Vec2 {
+        let threat=self.nearest_hostile_delta(id,flagship_state.pos);
+        let forward=threat.as_ref().map(|delta|delta.normalized())
+            .or_else(||self.freshest_hostile_bearing(id))
+            .or_else(||(flagship_state.vel.length()>1.0).then(||flagship_state.vel.normalized()));
+        let Some(forward)=forward else {return stored;};
+        let ls=crate::units::LIGHT_SECOND;
+        if stored.length()<=5.0*ls {
+            let ahead=stored.dot(forward);
+            return if ahead<0.0 {stored-forward*(2.0*ahead)} else {stored};
+        }
+        let t=self.time;
+        let faction=self.bodies[id.0 as usize].faction;
+        let mut ranked:Vec<(BodyId,f64)>=self.bodies.iter().enumerate().filter_map(|(i,b)| {
+            let wing=BodyId(i as u32);
+            let on_wing=matches!(b.autopilot.map(|ap|ap.order),Some(Order::Follow {target,offset})
+                if target==flagship && offset.length()>5.0*ls);
+            (wing!=flagship && b.faction==faction && b.kind==BodyKind::Ship && b.armed && b.alive_at(t) && on_wing)
+                .then_some((wing,b.ship_class.map(|c|c.scale()).unwrap_or(1.0)))
+        }).collect();
+        ranked.sort_by(|a,b| b.1.total_cmp(&a.1).then(a.0.0.cmp(&b.0.0)));
+        let Some(index)=ranked.iter().position(|(wing,_)|*wing==id) else {
+            return self.keep_ahead(stored,forward,threat);
+        };
+        let scales:Vec<f64>=ranked.iter().map(|(_,scale)|*scale).collect();
+        let slots=formation_offsets(forward,&scales);
+        let mut offset=slots[index];
+        if let Some(delta)=threat {
+            let dist=delta.length();
+            let current_van=slots.iter().map(|slot|slot.dot(forward)).fold(0.0_f64,f64::max).max(1e-9);
+            let cap=(1.5*AU).min(dist*0.85);
+            if cap>current_van {
+                let van=(dist*0.35).clamp(current_van,cap);
+                let ahead=offset.dot(forward)*van/current_van;
+                let lateral=offset-forward*offset.dot(forward);
+                offset=forward*ahead+lateral;
+            }
+            let ahead=offset.dot(forward);
+            if dist<ahead+0.25*AU {
+                let min_ahead=(2.0*ls).min(dist*0.5).max(0.5*ls).min(dist*0.85);
+                let max_ahead=(dist-2.0*ls).max(min_ahead).min(dist*0.9);
+                let block=(0.55*dist).clamp(min_ahead,max_ahead);
+                let share=(slots[index].dot(forward)/current_van).clamp(0.0,1.0);
+                let compressed=min_ahead.min(block)+(block-min_ahead.min(block))*share;
+                let mut lateral=offset-forward*ahead;
+                let lat=lateral.length();
+                if lat>0.03*AU {lateral=lateral*(0.03*AU/lat);}
+                offset=forward*compressed+lateral;
+            }
+        } else {
+            // No range yet: wheel onto the bearing at the depth the wing already holds.
+            let shape_van=slots.iter().map(|slot|slot.length()).fold(0.0_f64,f64::max).max(1e-9);
+            let held=ranked.iter().filter_map(|(wing,_)| match self.bodies[wing.0 as usize].autopilot.map(|ap|ap.order) {
+                Some(Order::Follow {offset,..})=>Some(offset.length()),
+                _=>None,
+            }).fold(0.0_f64,f64::max);
+            if held>shape_van {offset=slots[index]*(held/shape_van);}
+        }
+        self.keep_ahead(offset,forward,threat)
+    }
+
+    /// The ordered station stays in front of the admiral and short of a known enemy.
+    fn keep_ahead(&self,offset:Vec2,forward:Vec2,threat:Option<Vec2>)->Vec2 {
+        let ls=crate::units::LIGHT_SECOND;
+        let ahead=offset.dot(forward);
+        let mut floor=0.02*AU;
+        let mut ceiling=f64::INFINITY;
+        if let Some(delta)=threat {
+            let dist=delta.length();
+            ceiling=(dist-2.0*ls).max(0.5*ls).min(dist*0.9);
+            floor=floor.min(ceiling);
+        }
+        if ahead<floor {offset+forward*(floor-ahead)}
+        else if ahead>ceiling {forward*ceiling+(offset-forward*ahead)}
+        else {offset}
     }
 
     pub fn set_alongside(&mut self,id:BodyId,target:InterceptTarget)->Result<(),OrderError> {
@@ -1044,6 +1234,7 @@ impl World {
             sensors: sensors::SensorSuite::MISSILE,
             probes: 0,
             probe_burn_until: None,
+            probe_destination: None,
             probe_ping_at: 0.0,
             thermal: crate::thermal::Thermal { last_t: t, ..Default::default() },
             launch_generation: 0,
@@ -1326,13 +1517,28 @@ impl World {
         }
     }
 
+    /// One lateral burn off the received line of sight, then a coast once that
+    /// component outruns the closing speed. `locked` keeps the side from flipping.
+    fn lateral_evade(pos:Vec2,vel:Vec2,threat:Vec2,limit:f64,locked:Option<f64>)->(Vec2,f64) {
+        let los=threat-pos;
+        let bearing=if los.length()>1.0 {los.normalized()} else {Vec2::new(1.0,0.0)};
+        let lateral=Vec2::new(-bearing.y,bearing.x);
+        let closing=vel.dot(bearing);
+        let sideways=vel.dot(lateral);
+        let sign=locked.unwrap_or(if sideways.abs()>1.0 {sideways.signum()} else {1.0});
+        let thrust=if sideways*sign>closing {Vec2::ZERO} else {lateral*(sign*limit)};
+        (thrust,sign)
+    }
+
     /// Recompute a body's thrust from its orders and the collision check, using only
     /// what its faction knows, and commit it if it changed.
     fn guide(&mut self, id: BodyId) {
         let t = self.time;
+        let slew_at=self.refinement.screen_slew.get(&id).copied();
         let i = id.0 as usize;
         if self.bodies[i].alive_at(t) {self.bodies[i].advance_thermal(t);}
         let b = &self.bodies[i];
+        let faction=b.faction;
         if b.missile.is_some() || b.interceptor.is_some() || matches!(b.kind,BodyKind::Probe|BodyKind::Station) {
             return;
         }
@@ -1383,17 +1589,46 @@ impl World {
             (contact,plan)
         });
         let mut route_progress=None;
+        let mut eased_station=None;
+        let mut drift_lock=None;
         let (mut desired, status) = if automatic_evasion {
             (evasion.unwrap().1.direction*max_accel,None)
         } else {match b.autopilot.map(|a| a.order) {
-            Some(Order::Evade(_))=>evasion.map_or((Vec2::ZERO,Some(AutopilotStatus::Holding)),|(_,plan)|
-                (plan.direction*limit,Some(AutopilotStatus::Manoeuvring))),
-            Some(Order::Follow {target,offset})=>{
-                match self.known_body(b.faction,target).and_then(|known|known.trajectory.state_at(t)
+            Some(Order::Evade(target))=>if let Some((_,plan))=evasion {(plan.direction*limit,Some(AutopilotStatus::Manoeuvring))} else {
+                let threat=match target {
+                    InterceptTarget::Contact(c)=>self.received_picture(id).and_then(|p|p.contacts.get(&c))
+                        .filter(|c|t-c.last.decider_received_at<=TRACK_STALE_S.value)
+                        .and_then(|c|c.estimate(t,&self.system)).map(|tr|tr.pos()),
+                    InterceptTarget::Own(other)=>self.known_body(b.faction,other).and_then(|known|known.trajectory.state_at(t)).map(|st|st.pos),
+                };
+                match threat {
+                    Some(at)=>{
+                        let key=match target {InterceptTarget::Contact(c)=>c.0 as u64,InterceptTarget::Own(other)=>0x1_0000_0000|other.0 as u64};
+                        let locked=b.controls.drift_side.filter(|(saved,_)|*saved==key).map(|(_,sign)|sign);
+                        let (thrust,sign)=Self::lateral_evade(s.pos,s.vel,at,limit,locked);
+                        drift_lock=Some((key,sign));
+                        (thrust,Some(AutopilotStatus::Manoeuvring))
+                    }
+                    None=>(Vec2::ZERO,Some(AutopilotStatus::NoTrack)),
+                }
+            },
+            Some(Order::Follow {target:flagship,offset})=>{
+                let on_flagship=self.decider(faction,t)==Some(flagship);
+                match self.known_body(b.faction,flagship).and_then(|known|known.trajectory.state_at(t)
                     .map(|state|(state,known.trajectory.thrust_at(t).unwrap_or(Vec2::ZERO)))) {
                     Some((target,burn))=>{
                         let ff=burn+self.system.gravity(target.pos,t)-self.system.gravity(s.pos,t);
-                        let offset=self.escort_screen_offset(id,target.pos).unwrap_or(offset);
+                        // The admiral's wing dresses on the bearing and walks there.
+                        // Other follows still step between the charge and a threat.
+                        let offset=if on_flagship {
+                            let desired=self.screen_station(id,flagship,offset,target);
+                            if offset.length()>5.0*crate::units::LIGHT_SECOND {
+                                let dt=slew_at.map(|at|(t-at).max(0.0)).unwrap_or(0.0);
+                                let eased=ease_screen_offset(offset,desired,dt);
+                                eased_station=Some(eased);
+                                eased
+                            } else {desired}
+                        } else {self.escort_screen_offset(id,target.pos).unwrap_or(offset)};
                         let approach=autopilot::move_to(s,State {pos:target.pos+offset,vel:target.vel},ff,limit);
                         let holding=approach.gap.abs()<0.01*crate::units::LIGHT_SECOND && approach.rel_speed<1.0;
                         (approach.thrust,Some(if holding {AutopilotStatus::Holding} else {AutopilotStatus::Closing {eta:approach.eta,range:approach.gap}}))
@@ -1502,6 +1737,7 @@ impl World {
             autopilot::avoid(&self.system, s, t, desired, max_accel)
         };
         let b = &mut self.bodies[i];
+        if let Some(lock)=drift_lock {b.controls.drift_side=Some(lock);}
         b.controls.evading=automatic_evasion;
         b.controls.evasion=evasion.map(|(id,mut plan)| {
             if avoidance.active && avoidance.thrust.length()>0.0 {
@@ -1518,6 +1754,7 @@ impl World {
                 raised.push(AlertKind::OrderComplete(id));
             }
             a.status = st;
+            if let Some(eased)=eased_station && let Order::Follow {offset,..}=&mut a.order {*offset=eased;}
         }
         if avoidance.active && !b.avoidance.active {
             raised.push(if avoidance.impossible { AlertKind::CollisionUnavoidable(id) } else { AlertKind::CollisionWarning(id) });
@@ -1530,6 +1767,7 @@ impl World {
         if b.trajectory.last().thrust != avoidance.thrust {
             b.trajectory.set_thrust(t, avoidance.thrust).expect("orders apply at current time");
         }
+        if eased_station.is_some() {self.refinement.screen_slew.insert(id,t);}
         for kind in raised {
             self.alert(Some(faction), kind);
         }
@@ -1570,6 +1808,12 @@ impl World {
         let mut count=0usize;
         loop {
             if count.is_multiple_of(32) && deadline.is_some_and(|d|std::time::Instant::now()>=d) {return None;}
+            // Decide a hunt on its clock before integrating any later step, so a late arrival cannot win.
+            if self.escape_is_due(t) {
+                self.time=self.objective.as_ref().and_then(|o|o.escape_by).unwrap();
+                self.resolve_escape_deadline();
+                if let Some(alert)=self.watched_game_over(watch) {return Some(alert);}
+            }
             let Some((te,ev))=self.scheduler.pop_due(t) else {break};
             count+=1;
             let timer=self.profile.as_ref().map(|_|std::time::Instant::now());
@@ -1627,7 +1871,40 @@ impl World {
         if t > self.time {
             self.time = t;
         }
+        let pending=self.outcome.is_none();
+        self.resolve_escape_deadline();
+        if pending && let Some(alert)=self.watched_game_over(watch) {return Some(alert);}
         None
+    }
+
+    /// The next event is past an unreached escape clock that this advance will cross.
+    fn escape_is_due(&self, until: f64) -> bool {
+        let Some(deadline)=self.objective.as_ref().and_then(|o|o.escape_by) else {return false;};
+        // `<=` so an event that lands on the clock is applied, and the next later step is not.
+        self.outcome.is_none() && self.time<=deadline && deadline<=until
+            && self.scheduler.next_time().is_none_or(|te| deadline<te)
+    }
+
+    fn watched_game_over(&self, watch: Option<FactionId>) -> Option<Alert> {
+        let watch=watch?;
+        self.alerts.iter().rev().find(|a| matches!(a.kind, AlertKind::GameOver) && a.faction.is_none_or(|f| f==watch)).cloned()
+    }
+
+    /// `defeat` is inside the region at `escape_by`, or the defender wins at that instant.
+    fn resolve_escape_deadline(&mut self) {
+        let Some(o)=self.objective.clone() else {return;};
+        let Some(deadline)=o.escape_by else {return;};
+        if self.outcome.is_some() || self.time<deadline {return;}
+        let resumed=self.time;
+        self.time=deadline;
+        let inside=o.defeat.and_then(|id| self.bodies.get(id.0 as usize))
+            .and_then(|b| b.trajectory.state_at(deadline))
+            .is_some_and(|s| (s.pos-o.center).length()<o.radius);
+        let name=o.defeat.and_then(|id| self.bodies.get(id.0 as usize).map(|b| b.name.clone()))
+            .unwrap_or_else(|| "The quarry".into());
+        if inside {self.decide(o.attacker, format!("{name} reached the {}", o.name));}
+        else {self.decide(o.defender, format!("{name} missed the {}", o.name));}
+        self.time=resumed;
     }
 
     fn alert(&mut self, faction: Option<FactionId>, kind: AlertKind) {
@@ -1753,13 +2030,28 @@ impl World {
         if let Some(o) = self.objective.clone() {
             let side=self.bodies[id.0 as usize].faction;
             let armed=|faction:FactionId| self.bodies.iter().any(|b| b.faction==faction && b.kind==BodyKind::Ship && b.armed && b.alive_at(t));
-            let winner=if o.player==Some(id) {Some(if side==o.attacker {o.defender} else {o.attacker})}
-                else if o.prize==Some(id) {Some(o.attacker)}
-                else if o.defeat==Some(id) {Some(o.defender)}
-                else if o.defeat.is_none() && o.prize.is_none() && o.protect==id {Some(o.attacker)}
+            let other=if side==o.attacker {o.defender} else {o.attacker};
+            let mut clear_defeat=false;
+            let mut take_prize=false;
+            let protect_lives=o.protect!=id && self.bodies.get(o.protect.0 as usize).is_some_and(|b|b.alive_at(t));
+            let winner=if o.player==Some(id) {
+                    if departure && o.extract && o.prize_taken {Some(o.attacker)}
+                    else if departure && o.disengage_wins {Some(side)}
+                    // Escort and Convoy keep going while a different protect ship is still alive.
+                    else if protect_lives {None}
+                    else {Some(other)}
+                } else if o.prize==Some(id) {
+                    if o.extract && !departure {take_prize=true;None} else {Some(o.attacker)}
+                } else if o.defeat==Some(id) {
+                    if departure && o.withdrawal_continues {clear_defeat=true;None}
+                    else if departure && o.escape_at_center {Some(o.attacker)}
+                    else {Some(o.defender)}
+                } else if o.defeat.is_none() && o.prize.is_none() && !o.prize_taken && o.protect==id {Some(o.attacker)}
                 else if o.wipe && side==o.attacker && !armed(o.attacker) {Some(o.defender)}
                 else if o.wipe && side==o.defender && !armed(o.defender) {Some(o.attacker)}
                 else {None};
+            if take_prize && let Some(goal)=self.objective.as_mut() {goal.prize=None;goal.prize_taken=true;}
+            if clear_defeat && let Some(goal)=self.objective.as_mut() {goal.defeat=None;}
             if let Some(winner)=winner {
                 let reason=match cause {LossCause::Withdrawn=>"withdrew from combat",LossCause::Surrendered=>"surrendered",_=>"was destroyed"};
                 if departure {
@@ -1771,14 +2063,19 @@ impl World {
 
     /// Has the protected body reached the objective?
     fn check_objective(&mut self, id: BodyId) {
-        let Some(o) = &self.objective else { return };
-        if o.defeat.is_some() || o.prize.is_some() || o.wipe || o.protect != id || self.outcome.is_some() {
+        let Some(o) = self.objective.clone() else { return };
+        if self.outcome.is_some() { return; }
+        let Some(s) = self.bodies[id.0 as usize].trajectory.state_at(self.time) else { return };
+        if o.escape_at_center && o.defeat==Some(id) && (s.pos-o.center).length()<o.radius {
+            let name=self.bodies[id.0 as usize].name.clone();
+            self.decide(o.attacker, format!("{name} reached the {}", o.name));
             return;
         }
-        let Some(s) = self.bodies[id.0 as usize].trajectory.state_at(self.time) else { return };
+        // Extract keeps the player from winning by flying into the prize's radius after it is gone.
+        if o.extract || o.defeat.is_some() || o.prize.is_some() || o.wipe || o.protect != id { return; }
         if (s.pos - o.center).length() < o.radius {
-            let (winner, reason) = (o.defender, format!("{} reached the {}", self.bodies[id.0 as usize].name, o.name));
-            self.decide(winner, reason);
+            let name=self.bodies[id.0 as usize].name.clone();
+            self.decide(o.defender, format!("{name} reached the {}", o.name));
         }
     }
 
@@ -1835,6 +2132,11 @@ impl World {
 
     fn state(&self, id: BodyId, t: f64) -> Option<State> {
         self.bodies[id.0 as usize].trajectory.state_at(t)
+    }
+
+    /// Look again at light that has already arrived. Construction samples once, before later platform history exists.
+    pub(crate) fn sample_arriving_light(&mut self) {
+        self.sensor_frame();
     }
 
     fn sensor_frame(&mut self) {
@@ -1980,6 +2282,7 @@ impl World {
 
         // Passive: each live ship looks for the light now arriving from foreign bodies.
         self.profile_sensor_part(&mut timer,1);
+        let mut probe_ping=Vec::new();
         for si in 0..self.bodies.len() {
             let sensor = BodyId(si as u32);
             let s = &self.bodies[si];
@@ -1990,6 +2293,7 @@ impl World {
             let faction = s.faction;
             let suite=s.sensors;
             let glare = 1.0 + s.thermal.emission() / SCREEN_GLARE_W.value;
+            let sensor_is_probe=s.kind==BodyKind::Probe;
             let sensitivity = if matches!(s.kind,BodyKind::Probe|BodyKind::Missile) { PROBE_SENSOR_FACTOR.value } else { 1.0 };
             let effectiveness=s.sensor_effectiveness();
             let eccm=s.operating_effectiveness(crate::damage::System::Eccm);
@@ -2017,6 +2321,11 @@ impl World {
                 ).map(|(m,snr)|(m,snr,if matches!(m,Measurement::BearingRange {..}) {sensors::DetectionLevel::Resolved} else {sensors::DetectionLevel::Bearing}))};
                 let Some((measurement,snr,detection))=measured else {continue;};
                 if b.kind==BodyKind::Missile && matches!(measurement,Measurement::Bearing {..}) {continue;}
+                if sensor_is_probe
+                    && matches!(detection,sensors::DetectionLevel::Bearing|sensors::DetectionLevel::Approximate)
+                    && matches!(b.kind,BodyKind::Ship|BodyKind::Station) {
+                    probe_ping.push(sensor);
+                }
                 reports.push(Observation {detection,
                     contact: self.contact_id(faction, BodyId(ti as u32)),
                     sensor,
@@ -2031,6 +2340,13 @@ impl World {
             }
         }
 
+        probe_ping.sort();
+        probe_ping.dedup();
+        for id in probe_ping {
+            if self.bodies[id.0 as usize].probe_ping_at<=t && self.ping(id) {
+                self.bodies[id.0 as usize].probe_ping_at=t+PROBE_PING_INTERVAL_S.value;
+            }
+        }
         self.ping_emissions.retain(|(id, front)| (t - front.t_emit) * crate::units::C / 2.0 < sensors::ping_range(sensors::REFERENCE_EF)*self.bodies[id.0 as usize].sensor_rating()/100.0);
         self.hidden_ping_circles.retain(|(id,bits)| (t-f64::from_bits(*bits))*crate::units::C/2.0<sensors::ping_range(sensors::REFERENCE_EF)*self.bodies[id.0 as usize].sensor_rating()/100.0);
         self.profile_sensor_part(&mut timer,2);
@@ -2276,6 +2592,125 @@ mod tests {
         assert!(w.escort_screen_offset(escort,Vec2::ZERO).is_none());
     }
 
+    fn ingest_ahead(w:&mut World,target:BodyId,range:f64) {
+        let f=FactionId(0);
+        let contact=w.contact_id(f,target);
+        w.perceptions.get_mut(&f).unwrap().ingest(Observation {
+            detection:sensors::DetectionLevel::Identity,contact,sensor:BodyId(0),origin:Vec2::ZERO,
+            emitted_at:0.0,sensor_received_at:0.0,decider_received_at:0.0,
+            measurement:Measurement::BearingRange {bearing:0.0,range,sigma_bearing:1e-10,sigma_range:1e-3},
+            snr:1e9,source:Source::Echo,
+        },&w.system);
+    }
+
+    #[test]
+    fn the_admirals_wing_stays_in_front_of_the_threat() {
+        let mut w=World::new(System {bodies:vec![]},vec![
+            ship("Admiral",0,Vec2::ZERO,Vec2::ZERO,Vec2::ZERO),
+            ship("Cruiser",0,Vec2::new(-0.02*AU,0.0),Vec2::ZERO,Vec2::ZERO),
+            ship("Frigate",0,Vec2::new(-0.03*AU,0.0),Vec2::ZERO,Vec2::ZERO),
+            ship("Raider",1,Vec2::new(2.0*AU,0.0),Vec2::ZERO,Vec2::ZERO),
+        ],0.0,7);
+        w.bodies[0].ship_class=Some(ShipClass::Battleship);
+        w.bodies[1].ship_class=Some(ShipClass::Cruiser);
+        w.bodies[2].ship_class=Some(ShipClass::Frigate);
+        w.set_station(BodyId(1),BodyId(0),Vec2::new(-0.05*AU,0.02*AU)).unwrap();
+        w.set_station(BodyId(2),BodyId(0),Vec2::new(-0.09*AU,-0.02*AU)).unwrap();
+        ingest_ahead(&mut w,BodyId(3),2.0*AU);
+        // The picture is snapshotted every sensor frame and still has to cross to the wing.
+        w.advance_to(40.0);
+        let admiral=w.state(BodyId(0),w.time()).unwrap();
+        let cruiser=w.screen_station(BodyId(1),BodyId(0),Vec2::new(-0.05*AU,0.0),admiral);
+        let frigate=w.screen_station(BodyId(2),BodyId(0),Vec2::new(-0.09*AU,0.0),admiral);
+        assert!(cruiser.x>0.15*AU && cruiser.x<0.5*AU,"cruiser station {}",cruiser.x/AU);
+        assert!(frigate.x>0.4*AU && frigate.x<1.0*AU,"frigate station {}",frigate.x/AU);
+        assert!(cruiser.x<frigate.x,"the heavier hull stays nearer the admiral");
+        assert!(cruiser.x<2.0*AU && frigate.x<2.0*AU,"the screen stops short of the enemy");
+        let Order::Follow {offset:live,..}=w.bodies[1].autopilot.unwrap().order else {panic!("station")};
+        let angle=live.y.atan2(live.x).to_degrees();
+        assert!(angle>100.0 && angle<156.0,"the wing walks off the aft station instead of jumping: {angle}");
+        assert!(live.length()<0.2*AU,"depth eases, it does not lunge: {}",live.length()/AU);
+
+        let mut close=World::new(System {bodies:vec![]},vec![
+            ship("Admiral",0,Vec2::ZERO,Vec2::ZERO,Vec2::ZERO),
+            ship("Cruiser",0,Vec2::new(-0.02*AU,0.0),Vec2::ZERO,Vec2::ZERO),
+            ship("Frigate",0,Vec2::new(-0.03*AU,0.0),Vec2::ZERO,Vec2::ZERO),
+            ship("Raider",1,Vec2::new(0.1*AU,0.0),Vec2::ZERO,Vec2::ZERO),
+        ],0.0,7);
+        close.bodies[1].ship_class=Some(ShipClass::Cruiser);
+        close.bodies[2].ship_class=Some(ShipClass::Frigate);
+        close.set_station(BodyId(1),BodyId(0),Vec2::new(-0.05*AU,0.0)).unwrap();
+        close.set_station(BodyId(2),BodyId(0),Vec2::new(-0.09*AU,0.0)).unwrap();
+        ingest_ahead(&mut close,BodyId(3),0.1*AU);
+        close.advance_to(40.0);
+        let admiral=close.state(BodyId(0),close.time()).unwrap();
+        let cruiser=close.screen_station(BodyId(1),BodyId(0),Vec2::new(-0.05*AU,0.0),admiral);
+        let frigate=close.screen_station(BodyId(2),BodyId(0),Vec2::new(-0.09*AU,0.0),admiral);
+        assert!(cruiser.x>0.0 && frigate.x>cruiser.x,"blocking line {} {}",cruiser.x/AU,frigate.x/AU);
+        assert!(frigate.x<0.1*AU,"the wing does not pass the enemy");
+
+        let mut course=World::new(System {bodies:vec![]},vec![
+            ship("Admiral",0,Vec2::ZERO,Vec2::new(0.0,30.0),Vec2::ZERO),
+            ship("Cruiser",0,Vec2::ZERO,Vec2::ZERO,Vec2::ZERO),
+        ],0.0,7);
+        course.bodies[1].ship_class=Some(ShipClass::Cruiser);
+        course.set_station(BodyId(1),BodyId(0),Vec2::new(0.0,-0.05*AU)).unwrap();
+        let admiral=course.state(BodyId(0),course.time()).unwrap();
+        let ahead=course.screen_station(BodyId(1),BodyId(0),Vec2::new(0.0,-0.05*AU),admiral);
+        assert!(ahead.y>0.02*AU,"a station astern of the course is refused: {}",ahead.y/AU);
+        let Order::Follow {offset:opening,..}=course.bodies[1].autopilot.unwrap().order else {panic!("station")};
+        assert!(opening.y<0.0,"the new station is not taken in one step");
+        course.advance_to(8.0*60.0);
+        let Order::Follow {offset:later,..}=course.bodies[1].autopilot.unwrap().order else {panic!("station")};
+        assert!(later.y>0.02*AU,"the wing should have wheeled ahead of the course: {}",later.y/AU);
+        // Alongside the admiral stays close. It flips only when it would sit astern.
+        course.set_station(BodyId(1),BodyId(0),Vec2::new(LIGHT_SECOND,0.0)).unwrap();
+        let beside=course.screen_station(BodyId(1),BodyId(0),Vec2::new(LIGHT_SECOND,0.0),admiral);
+        assert!(beside.y.abs()<1e-6 && (beside.x-LIGHT_SECOND).abs()<1e-6,"alongside was pushed out: {beside:?}");
+        let behind=course.screen_station(BodyId(1),BodyId(0),Vec2::new(0.0,-LIGHT_SECOND),admiral);
+        assert!((behind.y-LIGHT_SECOND).abs()<1e-6 && behind.x.abs()<1e-6,"astern alongside was not flipped: {behind:?}");
+    }
+
+    #[test]
+    fn the_wing_eases_onto_a_new_bearing() {
+        let ahead=Vec2::new(0.08*AU,0.0);
+        let bearing=Vec2::new(0.0,0.08*AU);
+        assert!((ease_screen_offset(ahead,bearing,0.0)-ahead).length()<1.0);
+        let minute=ease_screen_offset(ahead,bearing,60.0);
+        let turned=minute.y.atan2(minute.x).to_degrees();
+        assert!((turned-30.0).abs()<1.0,"one minute should wheel thirty degrees, got {turned}");
+        assert!((minute.length()-ahead.length()).abs()<1.0,"depth holds while only the bearing is known");
+        let settled=ease_screen_offset(ahead,bearing,180.0);
+        assert!(settled.y>settled.x.abs(),"three minutes finishes a right-angle wheel");
+
+        let mut w=World::new(System {bodies:vec![]},vec![
+            ship("Admiral",0,Vec2::ZERO,Vec2::ZERO,Vec2::ZERO),
+            ship("Cruiser",0,Vec2::ZERO,Vec2::ZERO,Vec2::ZERO),
+        ],0.0,11);
+        w.bodies[1].ship_class=Some(ShipClass::Cruiser);
+        w.set_station(BodyId(1),BodyId(0),ahead).unwrap();
+        let f=FactionId(0);
+        // A bearing with no range and no body behind it.
+        let contact=w.contact_id(f,BodyId(0));
+        w.perceptions.get_mut(&f).unwrap().ingest(Observation {
+            detection:sensors::DetectionLevel::Bearing,contact,sensor:BodyId(0),origin:Vec2::ZERO,
+            emitted_at:0.0,sensor_received_at:0.0,decider_received_at:0.0,
+            measurement:Measurement::Bearing {bearing:std::f64::consts::FRAC_PI_2,sigma:0.01},
+            snr:1e9,source:Source::Emission,
+        },&w.system);
+        // Drop the accidental self-association so the bearing stays an unresolved contact.
+        w.association.clear();
+        w.reverse_association.clear();
+        w.advance_to(40.0);
+        let Order::Follow {offset:live,..}=w.bodies[1].autopilot.unwrap().order else {panic!("station")};
+        let angle=live.y.atan2(live.x).to_degrees();
+        assert!(angle>3.0 && angle<45.0,"bearing should start the wheel, not finish it: {angle}");
+        assert!(live.x>live.y,"still mostly on the opening axis");
+        let admiral=w.state(BodyId(0),w.time()).unwrap();
+        let ideal=w.screen_station(BodyId(1),BodyId(0),live,admiral);
+        assert!(ideal.y>ideal.x && ideal.y>0.05*AU,"the dressed station lies along the bearing");
+    }
+
     #[test]
     fn intercept_order_joins_a_friendly_ship() {
         let base = Vec2::new(2.0 * AU, 0.0);
@@ -2374,6 +2809,7 @@ mod tests {
                 defender: FactionId(0),
                 attacker: FactionId(1),
                 stance: Stance::Intercept,
+                withdrawal_continues:false,extract:false,escape_at_center:false,disengage_wins:false,prize_taken:false,escape_by:None,
             });
             w
         };
@@ -2416,7 +2852,8 @@ mod tests {
             ];
             let mut w=World::new(sun(),specs,0.0,1);
             w.objective=Some(Objective {sensor_site:None,name:"fleet".into(),center:Vec2::ZERO,radius:1.0,
-                protect:BodyId(0),player:Some(BodyId(0)),defeat:None,prize,wipe,defender,attacker,stance:Stance::Intercept});
+                protect:BodyId(0),player:Some(BodyId(0)),defeat:None,prize,wipe,defender,attacker,stance:Stance::Intercept,
+                withdrawal_continues:false,extract:false,escape_at_center:false,disengage_wins:false,prize_taken:false,escape_by:None});
             w
         };
         let mut w=make(Some(BodyId(3)),false,FactionId(0),FactionId(1));
@@ -2441,6 +2878,87 @@ mod tests {
         assert!(w.outcome.is_none(),"the flagship still fights");
         w.destroy(BodyId(3),0.0,LossCause::Impact(0));
         assert_eq!(w.outcome.as_ref().unwrap().winner,FactionId(0));
+    }
+
+    #[test]
+    fn scored_exits_follow_the_objective_flags() {
+        use crate::scenario::{self, Scenario};
+        let home=scenario::home_system();
+        let mut escort=Scenario::Escort.build(42,home.clone());
+        escort.destroy(BodyId(2),0.0,LossCause::Withdrawn);
+        assert!(escort.outcome.is_none(),"the raider escaping is not a clean escort win");
+        assert!(escort.objective.as_ref().unwrap().defeat.is_none());
+        let mut escort=Scenario::Escort.build(42,home.clone());
+        escort.destroy(BodyId(2),0.0,LossCause::Impact(0));
+        assert_eq!(escort.outcome.as_ref().unwrap().winner,FactionId(0));
+        assert!(escort.outcome.as_ref().unwrap().reason.contains("destroyed"));
+
+        let mut raid=Scenario::Raid.build(42,home.clone());
+        raid.destroy(BodyId(1),0.0,LossCause::Impact(0));
+        assert!(raid.outcome.is_none() && raid.objective.as_ref().unwrap().prize_taken);
+        raid.destroy(BodyId(0),0.0,LossCause::Impact(0));
+        assert_eq!(raid.outcome.as_ref().unwrap().winner,FactionId(1),"dying before extraction loses the raid");
+
+        let mut raid=Scenario::Raid.build(42,home.clone());
+        raid.destroy(BodyId(1),0.0,LossCause::Impact(0));
+        raid.destroy(BodyId(0),0.0,LossCause::Withdrawn);
+        assert_eq!(raid.outcome.as_ref().unwrap().winner,FactionId(0));
+        assert!(raid.outcome.as_ref().unwrap().reason.contains("withdrew"));
+
+        let mut hide=Scenario::HideAndSeek.build(42,home.clone());
+        hide.destroy(BodyId(1),0.0,LossCause::Impact(0));
+        assert_eq!(hide.outcome.as_ref().unwrap().winner,FactionId(0));
+        assert!(hide.outcome.as_ref().unwrap().reason.contains("destroyed"));
+        let mut hide=Scenario::HideAndSeek.build(42,home.clone());
+        hide.destroy(BodyId(1),0.0,LossCause::Withdrawn);
+        assert_eq!(hide.outcome.as_ref().unwrap().winner,FactionId(1));
+        assert!(hide.outcome.as_ref().unwrap().reason.contains("withdrew"));
+        let mut hide=Scenario::HideAndSeek.build(42,home.clone());
+        hide.destroy(BodyId(0),0.0,LossCause::Withdrawn);
+        assert_eq!(hide.outcome.as_ref().unwrap().winner,FactionId(1),"the hunter disengaging scores for the quarry");
+
+        let mut last=Scenario::LastShip.build(42,home.clone());
+        last.destroy(BodyId(0),0.0,LossCause::Withdrawn);
+        assert_eq!(last.outcome.as_ref().unwrap().winner,FactionId(0));
+        let mut last=Scenario::LastShip.build(42,home.clone());
+        last.destroy(BodyId(1),0.0,LossCause::Impact(0));
+        assert_eq!(last.outcome.as_ref().unwrap().winner,FactionId(0));
+        let mut last=Scenario::LastShip.build(42,home.clone());
+        last.destroy(BodyId(0),0.0,LossCause::Impact(0));
+        assert_eq!(last.outcome.as_ref().unwrap().winner,FactionId(1));
+    }
+
+    #[test]
+    fn escort_and_convoy_continue_while_the_transport_lives() {
+        use crate::scenario::{self,Scenario};
+        let home=scenario::home_system();
+        let mut escort=Scenario::Escort.build(42,home.clone());
+        let objective=escort.objective.clone().unwrap();
+        let player=objective.player.unwrap();
+        assert_ne!(player,objective.protect);
+        assert!(escort.body(objective.protect).unwrap().alive_at(0.0));
+        escort.destroy(player,0.0,LossCause::Impact(0));
+        assert!(escort.outcome.is_none(),"the escort continues while the transport lives");
+        escort.destroy(objective.protect,0.0,LossCause::Impact(0));
+        assert!(escort.outcome.is_none(),"the raider is the defeat condition, so the transport's loss is not the end");
+
+        let mut escort=Scenario::Escort.build(42,home.clone());
+        let player=escort.objective.as_ref().unwrap().player.unwrap();
+        escort.destroy(player,0.0,LossCause::Surrendered);
+        assert!(escort.outcome.is_none(),"surrender of the flagship leaves the transport's escort running");
+
+        let mut convoy=Scenario::Convoy.build(42,home.clone());
+        let objective=convoy.objective.clone().unwrap();
+        convoy.destroy(objective.player.unwrap(),0.0,LossCause::Impact(0));
+        assert!(convoy.outcome.is_none(),"the convoy continues while the transport lives");
+        convoy.destroy(objective.protect,0.0,LossCause::Impact(0));
+        assert_eq!(convoy.outcome.as_ref().unwrap().winner,objective.attacker);
+
+        let mut armada=Scenario::Armada.build(42,home);
+        let objective=armada.objective.clone().unwrap();
+        assert_eq!(objective.player,Some(objective.protect));
+        armada.destroy(objective.player.unwrap(),0.0,LossCause::Impact(0));
+        assert!(armada.outcome.is_some(),"a flagship that is also the protected ship still ends the fight");
     }
 
     #[test]
@@ -3171,7 +3689,11 @@ mod tests {
     fn evade_prioritizes_incoming_missiles_and_coasts_only_when_clear() {
         let (mut w,c)=beam_trial();
         w.set_tactical_range(BodyId(0),InterceptTarget::Contact(c),None).unwrap();
-        assert_eq!(w.bodies[0].trajectory.last().thrust,Vec2::ZERO);
+        let max=w.bodies[0].max_accel();
+        let thrust=w.bodies[0].trajectory.last().thrust;
+        assert!((thrust-Vec2::new(0.0,max)).length()<1e-6,"first evade burns off the bearing: {thrust:?}");
+        assert_eq!(w.bodies[0].autopilot.unwrap().status,AutopilotStatus::Manoeuvring);
+        assert_eq!(w.bodies[0].controls.drift_side,Some((c.0 as u64,1.0)));
         w.bodies[1].kind=BodyKind::Missile;
         w.bodies.push(w.bodies[1].clone());
         let second=w.contact_id(FactionId(0),BodyId(2));
@@ -3197,8 +3719,31 @@ mod tests {
         assert_eq!(w.bodies[0].controls.evasion.unwrap().0,second);
         w.refinement.retired_contacts.insert((FactionId(0),second));
         w.guide(BodyId(0));
+        let thrust=w.bodies[0].trajectory.last().thrust;
+        assert!((thrust-Vec2::new(0.0,max)).length()<1e-6,"clear of missiles, the lateral burn resumes: {thrust:?}");
+        assert_eq!(w.bodies[0].autopilot.unwrap().status,AutopilotStatus::Manoeuvring);
+        assert!(w.bodies[0].controls.evasion.is_none());
+        assert_eq!(w.bodies[0].controls.drift_side,Some((c.0 as u64,1.0)));
+        let park=|w:&mut World,vel:Vec2| {
+            let t=w.time();
+            let pos=w.state(BodyId(0),t).unwrap().pos;
+            w.bodies[0].trajectory=Trajectory::new(t,State {pos,vel});
+        };
+        park(&mut w,Vec2::new(0.0,50.0));
+        w.guide(BodyId(0));
+        assert_eq!(w.bodies[0].trajectory.last().thrust,Vec2::ZERO,"lateral speed past the closing speed coasts");
+        assert_eq!(w.bodies[0].autopilot.unwrap().status,AutopilotStatus::Manoeuvring);
+        assert_eq!(w.bodies[0].controls.drift_side,Some((c.0 as u64,1.0)));
+        park(&mut w,Vec2::new(0.0,-5.0));
+        w.guide(BodyId(0));
+        let thrust=w.bodies[0].trajectory.last().thrust;
+        assert!((thrust-Vec2::new(0.0,max)).length()<1e-6,"the locked side does not flip: {thrust:?}");
+        assert_eq!(w.bodies[0].controls.drift_side,Some((c.0 as u64,1.0)));
+        w.time=TRACK_STALE_S.value+w.time();
+        w.guide(BodyId(0));
         assert_eq!(w.bodies[0].trajectory.last().thrust,Vec2::ZERO);
-        assert_eq!(w.bodies[0].autopilot.unwrap().status,AutopilotStatus::Holding);
+        assert_eq!(w.bodies[0].autopilot.unwrap().status,AutopilotStatus::NoTrack);
+        assert_eq!(w.bodies[0].controls.drift_side,Some((c.0 as u64,1.0)));
     }
 
     #[test]

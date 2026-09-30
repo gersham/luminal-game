@@ -12,12 +12,19 @@ impl LuminalApp {
     pub(super) fn startup(&mut self,ui:&mut egui::Ui)->bool {
         let mut start=false;
         let width=(ui.available_width()-48.0).clamp(280.0,1700.0);
+        let screen_h=ui.available_height()-48.0;
+        let columns=((width-36.0+10.0)/320.0).floor().clamp(1.0,4.0) as usize;
+        let rows=(Scenario::ALL.len()+columns-1)/columns;
+        // Outer size: vocabulary header, one 278px grid row, and the pinned deploy block.
+        // A tall screen holds every card; a short one scrolls inside the area above Deploy.
+        let height=(400.0+rows as f32*278.0+210.0).min(screen_h).max(360.0);
         egui::Window::new("FLEET COMMAND").anchor(egui::Align2::CENTER_CENTER,EVec2::ZERO)
-            .title_bar(false).frame(panel_frame().inner_margin(18.0)).collapsible(false).resizable(false).fixed_size(EVec2::new(width,(ui.available_height()-48.0).min(800.0))).show(ui.ctx(),|ui| {
+            .title_bar(false).frame(panel_frame().inner_margin(18.0)).collapsible(false).resizable(false).fixed_size(EVec2::new(width,height)).show(ui.ctx(),|ui| {
             ui.style_mut().text_styles.insert(egui::TextStyle::Body,egui::FontId::proportional(16.0));
             ui.style_mut().text_styles.insert(egui::TextStyle::Button,egui::FontId::proportional(16.0));
             ui.style_mut().text_styles.insert(egui::TextStyle::Small,egui::FontId::proportional(13.0));
-            egui::ScrollArea::vertical().show(ui,|ui| {
+            let footer=150.0;
+            egui::ScrollArea::vertical().max_height((ui.available_height()-footer).max(160.0)).show(ui,|ui| {
                 ui.add_space(8.0);
                 ui.label(egui::RichText::new("CHOOSE YOUR SCENARIO").monospace().size(28.0).color(TEXT));
                 ui.label(egui::RichText::new(BUILD_VERSION).monospace().size(12.0).color(TEXT_MUTED)).on_hover_text(build_hover());
@@ -55,12 +62,12 @@ impl LuminalApp {
                         if (i+1)%columns==0 {ui.end_row();}
                     }
                 });
-                ui.add_space(14.0);
-                ui.label(self.chosen_scenario.forces());
-                ui.label(self.chosen_scenario.detail());
-                ui.add_space(10.0);
-                start=tac_button(ui,&format!("DEPLOY {}",self.chosen_scenario.name().to_uppercase()),EVec2::new(ui.available_width(),40.0),ACCENT,true,true).clicked();
             });
+            ui.add_space(10.0);
+            ui.label(self.chosen_scenario.forces());
+            ui.label(self.chosen_scenario.detail());
+            ui.add_space(8.0);
+            start=tac_button(ui,&format!("DEPLOY {}",self.chosen_scenario.name().to_uppercase()),EVec2::new(ui.available_width(),40.0),ACCENT,true,true).clicked();
         });
         start
     }
@@ -122,5 +129,21 @@ mod tests {
         let view=app.session.view(Role::Spectator);
         assert_eq!(view.bodies[1].ship_class,Some(ShipClass::Destroyer));
         assert_eq!(view.bodies[2].ship_class,Some(ShipClass::Destroyer));
+    }
+    #[test]
+    fn scenario_cards_fit_a_tall_screen_without_scrolling() {
+        // Focused desktop is 2560×2880 at scale 1.6, so the logical panel is 1600×1800.
+        let mut app=LuminalApp::new_with_class(ShipClass::Frigate);let ctx=egui::Context::default();
+        let screen=EVec2::new(1600.0,1800.0);
+        let mut output=egui::FullOutput::default();
+        for _ in 0..2 {
+            output=ctx.run_ui(egui::RawInput {screen_rect:Some(Rect::from_min_size(Pos2::ZERO,screen)),..Default::default()},|ui| {let _=app.startup(ui);});
+            output.textures_delta.clear();
+        }
+        let last=text(&output,"07  LAST SHIP");
+        let deploy=text(&output,"DEPLOY ESCORT");
+        // Card title sits 18px below the card top; the card is 268px tall. text() adds another 6px.
+        let card_bottom=last.y+250.0;
+        assert!(card_bottom<deploy.y,"last card ends at {card_bottom:.0}, deploy is at {:.0}; the scenario grid is still scrolling",deploy.y);
     }
 }

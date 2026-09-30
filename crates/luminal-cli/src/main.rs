@@ -141,6 +141,15 @@ fn main() {
         }
         return;
     }
+    if first.as_deref()==Some("--scenario-survey") {
+        let seeds=args.next().and_then(|s|s.parse().ok()).unwrap_or(4);
+        let hours=args.next().and_then(|s|s.parse::<f64>().ok()).unwrap_or(36.0);
+        let first_seed=args.next().and_then(|s|s.parse().ok()).unwrap_or(1);
+        let only=args.next().unwrap_or_else(||"all".into());
+        let only_mode=args.next().unwrap_or_else(||"both".into());
+        scenario_survey(seeds,hours,first_seed,&only,&only_mode);
+        return;
+    }
     let raider_only = first.as_deref() == Some("--raider-only");
     let bots = first.as_deref() == Some("--doctrine") || raider_only;
     let hours: f64 = if bots { args.next() } else { first }.and_then(|a| a.parse().ok()).unwrap_or(6.0);
@@ -168,6 +177,75 @@ fn main() {
     let wall = started.elapsed().as_secs_f64();
     let simulated=s.view(Role::Spectator).time;
     println!("\nsimulated {:.2} h in {wall:.2} s wall ({:.0}× real time)", simulated/3600.0,simulated/wall);
+}
+
+/// Idle: the scenario's own bots, and the player's ship stays on manual helm.
+/// Doctrine: both factions, including the flagship. A watch on an unused faction
+/// keeps alert fast-forward from pinning the flagship while still letting doctrine fly it.
+fn scenario_survey(seeds:u64,hours:f64,first_seed:u64,only:&str,only_mode:&str) {
+    use luminal_core::scenario::Scenario;
+    use luminal_core::world::{BodyKind,FactionId};
+    println!("scenario,mode,seed,sim_h,wall_s,winner,reason,prize_taken,player_alive,player_hull,player_drive,start_sep_au,end_sep_au,ships,losses");
+    let cap=hours*3600.0;
+    for scenario in Scenario::ALL {
+        if only!="all" && !scenario.name().eq_ignore_ascii_case(only) && !scenario.token().eq_ignore_ascii_case(only) {continue;}
+        for mode in ["idle","doctrine"] {
+            if only_mode!="both" && mode!=only_mode {continue;}
+            for seed in first_seed..first_seed+seeds {
+                let started=Instant::now();
+                eprintln!("start {scenario:?} {mode} seed {seed}");
+                let mut session=LocalSession::new(scenario.build(seed,scenario::home_system()));
+                let opening=session.view(Role::Spectator);
+                let player=opening.objective.as_ref().and_then(|o|o.player);
+                let player_faction=player.and_then(|id|opening.bodies.iter().find(|b|b.id==id).map(|b|b.faction));
+                let start_sep=separation(&opening,player,player_faction);
+                if mode=="doctrine" {
+                    session.set_watch(Some(FactionId(255)));
+                    session.enable_bot(ESCORT,true);
+                    session.enable_bot(RAIDER,true);
+                } else {
+                    for faction in scenario.bots() {session.enable_bot(*faction,true);}
+                }
+                session.command(Role::Spectator,Command::SetPaused(false)).unwrap();
+                let mut t=0.0;
+                while t<cap {
+                    session.tick(600.0);
+                    t+=600.0;
+                    if session.view(Role::Spectator).outcome.is_some() {break;}
+                }
+                let truth=session.view(Role::Spectator);
+                let (winner,reason)=match &truth.outcome {
+                    Some(o)=>((if o.winner==ESCORT {"escort"} else {"raider"}).to_string(),o.reason.replace(',',";")),
+                    None=>("timeout".into(),"unresolved".into()),
+                };
+                let player_body=player.and_then(|id|truth.bodies.iter().find(|b|b.id==id));
+                let player_alive=player_body.is_some();
+                let player_hull=player_body.map(|b|b.damage.damage.hull/b.damage.damage.hull_max.max(1.0)).unwrap_or(0.0);
+                let player_drive=player_body.map(|b|format!("{:?}",b.damage.damage.state(luminal_core::damage::System::Propulsion))).unwrap_or_else(||"lost".into());
+                let end_sep=separation(&truth,player,player_faction);
+                let roster:Vec<_>=opening.bodies.iter().filter(|b|matches!(b.kind,BodyKind::Ship|BodyKind::Station)).map(|b|b.name.clone()).collect();
+                let center=truth.objective.as_ref().map(|o|o.center);
+                let ships=truth.bodies.iter().filter(|b|matches!(b.kind,BodyKind::Ship|BodyKind::Station)).map(|b| {
+                    let dist=center.map(|c|(b.pos-c).length()/luminal_core::units::AU).unwrap_or(-1.0);
+                    format!("{}:{}:{:.0}%:{:.0}km/s:{:.2}au",b.name,if b.faction==ESCORT {"E"} else {"R"},100.0*b.damage.damage.hull/b.damage.damage.hull_max.max(1.0),b.vel.length(),dist)
+                }).collect::<Vec<_>>().join("|");
+                let losses=truth.losses.iter().filter(|l|roster.iter().any(|n|n==&l.name))
+                    .map(|l|format!("{}@{:.0}m:{}",l.name,l.t/60.0,l.cause.replace(',',";"))).collect::<Vec<_>>().join("|");
+                println!("{scenario:?},{mode},{seed},{:.2},{:.1},{winner},{reason},{},{player_alive},{player_hull:.3},{player_drive},{start_sep:.2},{end_sep:.2},{ships},{losses}",
+                    truth.time/3600.0,started.elapsed().as_secs_f64(),truth.objective.as_ref().is_some_and(|o|o.prize_taken));
+                eprintln!("done {scenario:?} {mode} seed {seed} {winner} {:.2}h in {:.1}s",truth.time/3600.0,started.elapsed().as_secs_f64());
+            }
+        }
+    }
+}
+
+fn separation(view:&luminal_core::session::View,player:Option<luminal_core::world::BodyId>,player_faction:Option<luminal_core::world::FactionId>)->f64 {
+    use luminal_core::world::BodyKind;
+    let Some(id)=player else {return -1.0};
+    let Some(me)=view.bodies.iter().find(|b|b.id==id) else {return -1.0};
+    view.bodies.iter().filter(|b|b.kind==BodyKind::Ship && player_faction.is_some_and(|f|b.faction!=f))
+        .map(|b|(b.pos-me.pos).length()/luminal_core::units::AU)
+        .min_by(f64::total_cmp).unwrap_or(-1.0)
 }
 
 fn report(s: &LocalSession) {

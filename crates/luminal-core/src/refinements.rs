@@ -88,6 +88,8 @@ pub(super) struct Refinements {
     last_t: f64,
     lost_tracks: std::collections::BTreeSet<(FactionId,ContactId)>,
     pub(super) hostile_pings: BTreeMap<(FactionId,ContactId), crate::session::PingSighting>,
+    /// When each flagship wingman last walked its station toward a new bearing.
+    pub(super) screen_slew: BTreeMap<BodyId, f64>,
     biases: BTreeMap<(BodyId,ContactId,u8), (f64,f64)>,
     build_version: Option<String>,
     build_commit: Option<String>,
@@ -248,15 +250,19 @@ impl World {
             .arrival(&self.bodies[receiver.0 as usize].trajectory,end,self.time).is_some()
     }
 
-    pub fn deploy_probe(&mut self, id: BodyId, direction: Vec2) -> Result<BodyId, OrderError> {
+    pub fn deploy_probe(&mut self, id: BodyId, direction: Vec2, destination: Vec2) -> Result<BodyId, OrderError> {
         if !self.probes_enabled {return Err(OrderError::InvalidTarget);}
         let t=self.time;
         if !direction.length().is_finite() || direction.length()<1e-9 { return Err(OrderError::InvalidTarget); }
         let b=self.live_body_mut(id)?;
         if b.kind!=BodyKind::Ship || b.probes==0 { return Err(OrderError::EmptyMagazine); }
+        let state=b.trajectory.state_at(t).unwrap();
+        let axis=direction.normalized();
+        let span=(destination-state.pos).dot(axis);
+        if !span.is_finite() || span<1.0 { return Err(OrderError::InvalidTarget); }
+        let launch=state.pos;
         b.probes-=1;
         let mut probe=b.clone();
-        let state=b.trajectory.state_at(t).unwrap();
         let pid=BodyId(self.bodies.len() as u32);
         probe.name=format!("{} Probe {}",probe.name,pid.0);
         probe.kind=BodyKind::Probe; probe.controllable=false; probe.armed=false;
@@ -269,16 +275,16 @@ impl World {
         probe.autopilot=None; probe.beam_target=None; probe.last_beam=None;
         probe.screen_up=false; probe.hull_j=0.0;
         probe.thermal=crate::thermal::Thermal {capacitor_j:0.0,last_t:t,..Default::default()};
-        probe.commanded=direction.normalized()*(PROBE_MAX_ACCEL_G.value*crate::units::G0);
+        probe.commanded=axis*(PROBE_MAX_ACCEL_G.value*crate::units::G0);
         probe.trajectory=Trajectory::new(t,state);
         probe.trajectory.set_thrust(t,probe.commanded).unwrap();
         probe.probe_burn_until=Some(t+PROBE_BURN_S.value);
-        probe.probe_ping_at=t+PROBE_PING_INTERVAL_S.value;
+        probe.probe_destination=Some(launch+axis*span);
+        probe.probe_ping_at=t;
         self.refinement.telemetry.entry(pid).or_default().push_back((t,probe.clone()));
         self.bodies.push(probe);
         self.last_step.push(t);
         self.scheduler.schedule(t,Event::Step(pid,0));
-        self.ping(pid);
         Ok(pid)
     }
     pub(super) fn bias_observation(&mut self, mut obs: Observation) -> Observation {
@@ -327,8 +333,68 @@ impl World {
         self.refinement.orders.push(OrderPacket { front: Front { origin: s.pos, t_emit: self.time }, body: id, cmd });
         true
     }
+    /// Drop jump orders still in flight to this faction, other than `except`.
+    /// A cancel issued later can otherwise lose the race to an earlier jump packet.
+    pub(super) fn drop_pending_jumps(&mut self, faction: FactionId, except: BodyId) {
+        let factions: Vec<FactionId> = self.bodies.iter().map(|b| b.faction).collect();
+        self.refinement.orders.retain(|packet| {
+            let same = factions.get(packet.body.0 as usize).is_some_and(|f| *f == faction);
+            !(same && packet.body != except && matches!(packet.cmd, Command::Jump { .. }))
+        });
+    }
     pub fn pending_orders(&self, faction: FactionId) -> usize {
         self.refinement.orders.iter().filter(|o| self.bodies[o.body.0 as usize].faction == faction).count()
+    }
+    /// Earliest light-arrival of an order still in flight. `None` is every faction.
+    pub fn order_etas(&self, faction: Option<FactionId>) -> Vec<(BodyId, f64)> {
+        let mut best: Vec<(BodyId, f64)> = Vec::new();
+        for packet in &self.refinement.orders {
+            let body = packet.body;
+            let Some(ship) = self.bodies.get(body.0 as usize) else { continue };
+            if faction.is_some_and(|f| ship.faction != f) { continue; }
+            let Some(state) = ship.trajectory.state_at(self.time) else { continue };
+            let eta = packet.front.t_emit + (state.pos - packet.front.origin).length() / crate::units::C;
+            if let Some(slot) = best.iter_mut().find(|(id, _)| *id == body) {
+                if eta < slot.1 { slot.1 = eta; }
+            } else { best.push((body, eta)); }
+        }
+        best
+    }
+    /// Queue one order to every other armed ship. The flagship's own command is not transmitted.
+    pub fn order_fleet(&mut self, flagship: BodyId, order: crate::session::FleetOrder) -> Result<(), OrderError> {
+        let t = self.time;
+        let faction = self.live_body_mut(flagship)?.faction;
+        let center = self.objective.as_ref().map(|o| o.center);
+        let wings: Vec<BodyId> = self.bodies.iter().enumerate().filter_map(|(i, b)| {
+            let id = BodyId(i as u32);
+            (id != flagship && b.faction == faction && b.kind == BodyKind::Ship && b.armed && b.alive_at(t)).then_some(id)
+        }).collect();
+        if wings.is_empty() { return Err(OrderError::InvalidTarget); }
+        if order==crate::session::FleetOrder::Screen {
+            let state=self.state(flagship,t).ok_or(OrderError::Destroyed)?;
+            let toward=center.filter(|point|(*point-state.pos).length()>1.0).map(|point|point-state.pos);
+            let facing=if state.vel.length()>1.0 {state.vel.normalized()} else {toward.map(|d|d.normalized()).unwrap_or(Vec2::new(1.0,0.0))};
+            let mut ranked:Vec<(BodyId,f64)>=wings.iter().copied().map(|id| {
+                let scale=self.bodies[id.0 as usize].ship_class.map(|c|c.scale()).unwrap_or(1.0);
+                (id,scale)
+            }).collect();
+            ranked.sort_by(|a,b| b.1.total_cmp(&a.1).then(a.0.0.cmp(&b.0.0)));
+            let scales:Vec<f64>=ranked.iter().map(|(_,scale)|*scale).collect();
+            for ((id,_),offset) in ranked.iter().zip(formation_offsets(facing,&scales)) {
+                self.transmit_order(*id,Command::Follow {body:*id,target:flagship,offset:Some(offset)});
+            }
+            return Ok(());
+        }
+        let point = match order { crate::session::FleetOrder::Close => Some(center.ok_or(OrderError::InvalidTarget)?), _ => None };
+        for wing in wings {
+            let cmd = match order {
+                crate::session::FleetOrder::Screen => unreachable!("screen returns above"),
+                crate::session::FleetOrder::Close => Command::MoveTo { body: wing, point: point.unwrap() },
+                crate::session::FleetOrder::WeaponsFree => Command::ArmBeams { body: wing },
+            };
+            self.transmit_order(wing, cmd);
+        }
+        Ok(())
     }
     fn execute_transmitted(&mut self, cmd: Command) -> Result<(), OrderError> {
         match cmd {
@@ -338,16 +404,18 @@ impl World {
             Command::SetRepairGoal {body,goal}=>self.set_repair_goal(body,goal),
             Command::Jump {body,destination}=>self.start_jump(body,destination),
             Command::CancelJump {body}=>self.cancel_jump(body),
-            Command::DeployProbe {body,direction} => self.deploy_probe(body,direction).map(|_|()),
+            Command::DeployProbe {body,direction,destination} => self.deploy_probe(body,direction,destination).map(|_|()),
             Command::SetThrust { body, thrust } => self.set_thrust(body, thrust),
             Command::Orbit { body, celestial } => self.set_orbit(body, celestial),
             Command::Alongside {body,target}=>self.set_alongside(body,target),
-            Command::Follow {body,target}=>self.set_follow(body,target),
+            Command::Follow {body,target,offset}=>match offset {Some(offset)=>self.set_station(body,target,offset),None=>self.set_follow(body,target)},
             Command::Intercept { body, target } => self.set_intercept(body, target),
             Command::Flyby { body, target } => self.set_flyby(body, target),
             Command::AppendWaypoint {body,point}=>self.append_waypoint(body,point),
             Command::MoveTo { body, point } => self.set_move(body, point),
             Command::AllStop { body } => self.set_all_stop(body),
+            Command::Coast { body } => self.set_thrust(body, Vec2::ZERO),
+            Command::Fleet { body, order } => self.order_fleet(body, order),
             Command::SetDriveLimit { body, g } => self.set_drive_limit(body, g * crate::units::G0),
             Command::Launch { body, target, payload } => self.queue_launch(body, target, payload),
             Command::CancelLaunches { body } => self.cancel_launches(body),
@@ -603,6 +671,17 @@ impl World {
         let key=(f,obs.contact);
         if self.refinement.damage_reports.get(&key).is_none_or(|old|old.observed_at<report.observed_at) {self.refinement.damage_reports.insert(key,report);}
     }
+    /// Along-track progress past the aim point. A probe that inherits a sideways
+    /// velocity can open range and then close it; the first opening is not arrival.
+    fn probe_reached(b:&Body,t:f64)->bool {
+        let Some(dest)=b.probe_destination else {return false;};
+        let Some(state)=b.trajectory.state_at(t) else {return false;};
+        let launch=b.trajectory.segments().first().map(|seg|seg.pos).unwrap_or(state.pos);
+        let axis=dest-launch;
+        let span=axis.length();
+        if span<1.0 {return true;}
+        (state.pos-launch).dot(axis)>=span*span
+    }
     pub(super) fn tactical_frame(&mut self) {
         self.refresh_resolved_missiles();
         let t = self.time;
@@ -622,18 +701,19 @@ impl World {
             if self.bodies[i].kind==BodyKind::Ship && self.bodies[i].alive_at(t) && self.bodies[i].thermal.heat_fraction()>0.5 {self.guide(BodyId(i as u32));}
         }
         for (id,system) in repairs {self.debug_note("REPAIR",format!("platform={id:?} system={system:?}"));self.guide(id);}
+        let mut expended=Vec::new();
         for i in 0..self.bodies.len() {
-            let b=&mut self.bodies[i];
-            if !matches!(b.kind,BodyKind::Probe|BodyKind::Station) || !b.alive_at(t) { continue; }
-            if b.probe_burn_until.is_some_and(|until| t>=until) {
-                b.probe_burn_until=None; b.commanded=Vec2::ZERO;
-                b.trajectory.set_thrust(t,Vec2::ZERO).unwrap();
-            }
-            if t>=b.probe_ping_at {
-                b.probe_ping_at=t+if b.kind==BodyKind::Station { STATION_PING_INTERVAL_S.value } else { PROBE_PING_INTERVAL_S.value };
+            let kind=self.bodies[i].kind;
+            if !matches!(kind,BodyKind::Probe|BodyKind::Station) || !self.bodies[i].alive_at(t) { continue; }
+            if kind==BodyKind::Probe {
+                let burned_out=self.bodies[i].probe_burn_until.is_some_and(|until| t>=until);
+                if burned_out || Self::probe_reached(&self.bodies[i],t) { expended.push(BodyId(i as u32)); }
+            } else if t>=self.bodies[i].probe_ping_at {
+                self.bodies[i].probe_ping_at=t+STATION_PING_INTERVAL_S.value;
                 self.ping(BodyId(i as u32));
             }
         }
+        for id in expended { self.destroy(id,t,LossCause::Expended); }
         for packet in std::mem::take(&mut self.refinement.orders) {
             let traj = &self.bodies[packet.body.0 as usize].trajectory;
             if let Some(arrival) = packet.front.arrival(traj, lo.max(packet.front.t_emit), t) {
@@ -838,18 +918,23 @@ mod tests {
     }
 
     #[test]
-    fn reconnaissance_probe_burns_then_coasts_and_cannot_be_commanded() {
+    fn reconnaissance_probe_burns_until_the_six_hour_limit_then_is_expended() {
         let mut w=fleet();
         let before=w.bodies[0].probes;
-        let p=w.deploy_probe(BodyId(0),Vec2::new(0.0,1.0)).unwrap();
+        let direction=Vec2::new(0.0,1.0);
+        let origin=w.state(BodyId(0),0.0).unwrap().pos;
+        let p=w.deploy_probe(BodyId(0),direction,origin+direction*40.0*AU).unwrap();
         assert_eq!(w.bodies[0].probes,before-1);
         assert!(!w.bodies[p.0 as usize].controllable);
         w.advance_to(PROBE_BURN_S.value-1.0);
-        assert!(w.bodies[p.0 as usize].trajectory.last().thrust.length()>400.0*G0);
+        let burn=PROBE_MAX_ACCEL_G.value*G0;
+        assert!((w.bodies[p.0 as usize].trajectory.last().thrust.length()-burn).abs()<0.01*burn);
+        assert!(w.bodies[p.0 as usize].alive_at(w.time()),"a far aim point does not arrive inside the burn");
         w.advance_to(PROBE_BURN_S.value+1.0);
-        assert_eq!(w.bodies[p.0 as usize].trajectory.last().thrust,Vec2::ZERO);
-        assert!(w.state(p,w.time()).unwrap().vel.length()>2000.0);
-        assert!(w.ping_emissions.iter().any(|(id,_)|*id==p));
+        assert!(!w.bodies[p.0 as usize].alive_at(w.time()));
+        assert!(w.bodies[p.0 as usize].trajectory.end().is_some_and(|end| (end-PROBE_BURN_S.value).abs()<1.0));
+        assert!(w.losses.iter().any(|l| l.body==p && l.cause==LossCause::Expended));
+        assert!(w.ping_emissions.iter().all(|(id,_)|*id!=p),"nothing unresolved, so the probe stays silent");
     }
 
     #[test]
@@ -863,11 +948,78 @@ mod tests {
         enemy.trajectory.set_thrust(0.0,Vec2::new(10.0*G0,0.0)).unwrap();
         w.bodies.push(enemy); w.last_step.push(0.0);
         w.perceptions.insert(FactionId(1),Perception::new(FactionId(1)));
-        let p=w.deploy_probe(BodyId(1),Vec2::new(1.0,0.0)).unwrap();
+        let origin=w.state(BodyId(1),0.0).unwrap().pos;
+        let direction=Vec2::new(1.0,0.0);
+        let p=w.deploy_probe(BodyId(1),direction,origin+direction*8.0*AU).unwrap();
         w.advance_to(19.0);
         assert!(w.perception(FactionId(0)).unwrap().log.iter().all(|o|o.sensor!=p));
         w.advance_to(40.0);
         assert!(w.perception(FactionId(0)).unwrap().log.iter().any(|o|o.sensor==p && o.decider_received_at-o.sensor_received_at>9.0));
+        assert!(w.ping_emissions.iter().all(|(id,_)|*id!=p),"a ship already identified on passive sensors does not start the probe pulsing");
+    }
+
+    #[test]
+    fn probe_is_expended_when_it_reaches_its_destination() {
+        let mut w=fleet();
+        let origin=w.state(BodyId(0),0.0).unwrap().pos;
+        let direction=Vec2::new(0.0,1.0);
+        let before=w.bodies[0].probes;
+        assert!(w.deploy_probe(BodyId(0),direction,origin-direction*2_000.0).is_err(),"a point behind the bow is not a destination");
+        assert_eq!(w.bodies[0].probes,before);
+        let p=w.deploy_probe(BodyId(0),direction,origin+direction*2_000.0).unwrap();
+        w.advance_to(100.0);
+        assert!(w.bodies[p.0 as usize].alive_at(100.0));
+        w.advance_to(160.0);
+        assert!(w.bodies[p.0 as usize].trajectory.end().is_some_and(|end|end<=160.0));
+        assert!(w.losses.iter().any(|l|l.body==p && l.cause==LossCause::Expended));
+    }
+
+    #[test]
+    fn probe_stays_quiet_without_an_unresolved_ship() {
+        let mut w=fleet();
+        let origin=w.state(BodyId(0),0.0).unwrap().pos;
+        let direction=Vec2::new(1.0,0.0);
+        let p=w.deploy_probe(BodyId(0),direction,origin+direction*5.0*AU).unwrap();
+        w.advance_to(12.0);
+        assert!(w.ping_emissions.iter().all(|(id,_)|*id!=p),"a probe does not pulse at launch or on a timer");
+        let at=w.time();
+        let mut enemy=w.bodies[0].clone();
+        enemy.faction=FactionId(1);
+        enemy.name="Close".into();
+        enemy.trajectory=Trajectory::new(at,State {pos:w.state(p,at).unwrap().pos+Vec2::new(20_000.0,0.0),vel:Vec2::ZERO});
+        enemy.trajectory.set_thrust(at,Vec2::new(10.0*G0,0.0)).unwrap();
+        w.bodies.push(enemy);
+        w.last_step.push(at);
+        w.perceptions.insert(FactionId(1),Perception::new(FactionId(1)));
+        w.reset_platform_history(BodyId((w.bodies.len()-1) as u32));
+        w.advance_to(40.0);
+        assert!(w.perception(FactionId(0)).unwrap().log.iter().any(|o|o.sensor==p && o.detection==crate::sensors::DetectionLevel::Identity),"the probe does see the nearby ship");
+        assert!(w.ping_emissions.iter().all(|(id,_)|*id!=p),"an identified ship does not make the probe pulse");
+    }
+
+    #[test]
+    fn probe_pings_to_resolve_a_distant_ship() {
+        let mut w=fleet();
+        let origin=w.state(BodyId(0),0.0).unwrap().pos;
+        let direction=Vec2::new(1.0,0.0);
+        let p=w.deploy_probe(BodyId(0),direction,origin+direction*40.0*AU).unwrap();
+        let mut enemy=w.bodies[0].clone();
+        enemy.faction=FactionId(1);
+        enemy.name="Distant".into();
+        enemy.commanded=direction*10.0*G0;
+        enemy.trajectory=Trajectory::new(0.0,State {pos:origin+direction*4.0*AU,vel:Vec2::ZERO});
+        enemy.trajectory.set_thrust(0.0,enemy.commanded).unwrap();
+        w.bodies.push(enemy);
+        w.last_step.push(0.0);
+        w.perceptions.insert(FactionId(1),Perception::new(FactionId(1)));
+        w.advance_to(1_200.0);
+        assert!(w.ping_emissions.iter().all(|(id,_)|*id!=p),"the drive's light has not arrived");
+        w.advance_to(2_200.0);
+        let pings:Vec<_>=w.ping_emissions.iter().filter(|(id,_)|*id==p).map(|(_,front)|front.t_emit).collect();
+        assert_eq!(pings.len(),1,"one pulse once the unresolved ship is detected, not a repeating strobe: {pings:?}");
+        assert!(pings[0]>1_500.0);
+        assert!(w.perception(FactionId(0)).unwrap().log.iter().any(|o|o.sensor==p && matches!(o.detection,crate::sensors::DetectionLevel::Bearing|crate::sensors::DetectionLevel::Approximate)));
+        assert!(w.bodies[p.0 as usize].alive_at(w.time()));
     }
 
     #[test]
