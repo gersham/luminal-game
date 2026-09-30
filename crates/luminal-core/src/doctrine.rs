@@ -10,6 +10,12 @@ use std::collections::BTreeMap;
 const SCREEN_LEASH: f64 = 1.5 * AU;
 /// Matched drives cannot be run down, so the quarry fights inside this range.
 const EVADE_CATCH: f64 = 0.1 * AU;
+/// Rounds kept for the close fight. Outside kinetic range, standoff lasts only while more than this remain.
+const LONG_RANGE_RESERVE: u32 = 4;
+/// A picket a few AU ahead of its flagship is still the same fleet.
+const CAPITAL_GROUP_AU: f64 = 3.0;
+/// A held intercept changes only for a ship this much slower. Track speed chatters by less.
+const CAPITAL_SLOWER_BY: f64 = 1_000.0;
 
 #[derive(Default)]
 pub struct Doctrine {
@@ -48,7 +54,7 @@ fn blocking_encounter(ship:&BodyView,transport:&ContactView,escort:&ContactView)
     None
 }
 
-fn choose_target<'a>(view:&'a View,ship:&BodyView)->(Option<&'a ContactView>,bool) {
+fn choose_target<'a>(view:&'a View,ship:&BodyView,previous:Option<crate::mind::ContactId>)->(Option<&'a ContactView>,bool) {
     let attacker=view.objective.as_ref().is_some_and(|o|o.attacker==ship.faction);
     let hunt_prize=attacker && view.objective.as_ref().is_some_and(|o|o.prize.is_some());
     let mut contacts:Vec<_>=view.contacts.iter().filter(|c|!c.stale && c.track.is_some()
@@ -66,7 +72,16 @@ fn choose_target<'a>(view:&'a View,ship:&BodyView)->(Option<&'a ContactView>,boo
     }
     let nearest=||contacts.iter().copied().min_by(|a,b|
         (a.track.as_ref().unwrap().pos-ship.pos).length().total_cmp(&(b.track.as_ref().unwrap().pos-ship.pos).length()));
-    if !view.objective.as_ref().is_some_and(|o|o.attacker==ship.faction) {return (nearest(),false);}
+    // A battle has no transport to run down. Until identity range every track is
+    // unidentified, and the one nearest the enemy's start is not the ship in front.
+    // Chasing that nearest picket brakes for its pass and then spends the watch
+    // accelerating again, and a capital that goes alone meets the other fleet's screen.
+    // Outside nuclear range the whole fleet holds the slow ship in the forward group.
+    if view.objective.as_ref().is_some_and(|o|o.stance==Stance::Battle) {
+        if let Some(chosen)=capital_intercept(&contacts,ship,previous) {return (Some(chosen),attacker);}
+        return (nearest(),attacker);
+    }
+    if !attacker {return (nearest(),false);}
     let transport=contacts.iter().copied().filter(|c|c.resolved_class==Some(ShipClass::Transport))
         .min_by(|a,b|(a.track.as_ref().unwrap().pos-ship.pos).length().total_cmp(&(b.track.as_ref().unwrap().pos-ship.pos).length()))
         .or_else(||contacts.iter().copied().filter(|c|c.resolved_class.is_none()).min_by(|a,b| {
@@ -78,6 +93,21 @@ fn choose_target<'a>(view:&'a View,ship:&BodyView)->(Option<&'a ContactView>,boo
         .filter_map(|escort|blocking_encounter(ship,transport,escort).map(|at|(escort,at)))
         .min_by(|a,b|a.1.total_cmp(&b.1));
     if let Some((escort,_))=blocker {(Some(escort),true)} else {(Some(transport),false)}
+}
+
+/// Outside nuclear range, the ship the fleet can actually meet. A held target stays
+/// until a much slower one is in the forward group, or any contact reaches nuclear range.
+fn capital_intercept<'a>(contacts:&[&'a ContactView],ship:&BodyView,previous:Option<crate::mind::ContactId>)->Option<&'a ContactView> {
+    let range_of=|c:&ContactView|(c.track.as_ref().unwrap().pos-ship.pos).length();
+    let speed_of=|c:&ContactView|c.track.as_ref().unwrap().vel.length();
+    let nearest=contacts.iter().copied().min_by(|a,b|range_of(a).total_cmp(&range_of(b)))?;
+    if range_of(nearest)<=Payload::Nuclear.engagement_range() {return Some(nearest);}
+    let window=range_of(nearest)+CAPITAL_GROUP_AU*AU;
+    let slowest=contacts.iter().copied().filter(|c|range_of(c)<=window).min_by(|a,b|
+        speed_of(a).total_cmp(&speed_of(b)).then_with(||range_of(a).total_cmp(&range_of(b))));
+    if let Some(prev)=previous && let Some(held)=contacts.iter().copied().find(|c|c.id==prev)
+        && let Some(slow)=slowest && speed_of(slow)+CAPITAL_SLOWER_BY>=speed_of(held) {return Some(held);}
+    slowest
 }
 
 /// Keep outside the station's ranging/ping footprint where practical. Direction
@@ -103,6 +133,27 @@ fn station_detour(ship:&BodyView,site:&crate::world::SensorSite,destination:crat
     let a=site.pos+(direction*tangent+side*lateral)*(radius*1.1);
     let b=site.pos+(direction*tangent-side*lateral)*(radius*1.1);
     Some(if (a-destination).length()<(b-destination).length() {a} else {b})
+}
+
+/// Burn toward a point, and coast only when a timed run is already on a vector that arrives.
+fn press_course(out:&mut Vec<Command>,b:&BodyView,point:crate::kinematics::Vec2,running:bool,time_left:Option<f64>,class:ShipClass) {
+    let toward=point-b.pos;
+    let distance=toward.length();
+    let direction=if distance>1.0 {toward.normalized()} else {crate::kinematics::Vec2::new(1.0,0.0)};
+    let closing=b.vel.dot(direction);
+    let aligned=b.vel.length()>1.0 && distance>1.0 && b.vel.normalized().dot(direction)>0.7;
+    let arrives=match time_left {
+        Some(left)=>left>0.0 && closing>1.0 && distance/closing<=left,
+        None=>aligned,
+    };
+    let coast=running && aligned && arrives;
+    if coast {
+        if b.autopilot.is_some() || b.thrust.length()>1e-6 {out.push(Command::Coast {body:b.id});}
+    } else if running {
+        let thrust=direction*class.max_g()*G0;
+        let burning=b.autopilot.is_none() && (b.thrust-thrust).length()<thrust.length()*0.05;
+        if !burning {out.push(Command::SetThrust {body:b.id,thrust});}
+    } else {out.push(Command::MoveTo {body:b.id,point});}
 }
 
 /// A tracked ship, station, or missile inside nuclear range. Probes are not a reason to keep the radiators shut.
@@ -185,7 +236,7 @@ impl Doctrine {
             }
             let goal=if b.damage.operating_effectiveness(S::Propulsion)==0.0 {RepairGoal::Automatic} else {RepairGoal::Fight};
             if damage.repair_goal!=goal {out.push(Command::SetRepairGoal {body:b.id,goal});}
-            let (target,engage)=choose_target(view,b);
+            let (target,engage)=choose_target(view,b,self.targets.get(&b.id).copied());
             let objective=view.objective.as_ref().filter(|o|o.attacker==b.faction);
             let site=objective.and_then(|o|o.sensor_site.as_ref());
             let search_destination=objective.map(|o|o.center);
@@ -209,8 +260,10 @@ impl Doctrine {
                 continue;
             }
             let stance=view.objective.as_ref().map(|o|o.stance).unwrap_or(Stance::Intercept);
-            let screening=stance==Stance::Screen && view.objective.as_ref().is_some_and(|o|o.defender==b.faction);
+            let defending=view.objective.as_ref().is_some_and(|o|o.defender==b.faction);
+            let screening=stance==Stance::Screen && defending;
             let running=stance==Stance::Evade && objective.is_some();
+            let hunting=stance==Stance::Evade && defending;
             if screening {
                 let obj=view.objective.as_ref().unwrap();
                 let threatened=target.is_some_and(|c|(c.track.as_ref().unwrap().pos-obj.center).length()<=SCREEN_LEASH);
@@ -227,29 +280,17 @@ impl Doctrine {
                 }
             }
             if target.is_none() && let Some(point)=search_destination {
-                let toward=point-b.pos;
-                let distance=toward.length();
-                let direction=if distance>1.0 {toward.normalized()} else {crate::kinematics::Vec2::new(1.0,0.0)};
-                let closing=b.vel.dot(direction);
-                let aligned=b.vel.length()>1.0 && distance>1.0 && b.vel.normalized().dot(direction)>0.7;
                 let time_left=objective.and_then(|o|o.escape_by).map(|deadline|deadline-view.time);
-                // Coast only once this vector reaches the ground before the clock. A few km/s never does.
-                let arrives=match time_left {
-                    Some(left)=>left>0.0 && closing>1.0 && distance/closing<=left,
-                    None=>aligned,
-                };
-                let coast=running && aligned && arrives;
-                if coast {
-                    if b.autopilot.is_some() || b.thrust.length()>1e-6 {out.push(Command::Coast {body:b.id});}
-                } else if running {
-                    let thrust=direction*class.max_g()*G0;
-                    let burning=b.autopilot.is_none() && (b.thrust-thrust).length()<thrust.length()*0.05;
-                    if !burning {out.push(Command::SetThrust {body:b.id,thrust});}
-                } else {out.push(Command::MoveTo {body:b.id,point});}
+                press_course(&mut out,b,point,running,time_left,class);
                 push_heat(&mut out,b,view,false);
                 continue;
             }
             if running && target.is_none() {push_heat(&mut out,b,view,false);continue;}
+            if target.is_none() && hunting {
+                if let Some(point)=view.objective.as_ref().map(|o|o.center) {
+                    press_course(&mut out,b,point,false,None,class);
+                }
+            }
             if target.is_none() && view.time >= *self.ping_at.get(&b.id).unwrap_or(&0.0) {
                 out.push(Command::Ping { body: b.id });
                 self.ping_at.insert(b.id,view.time+BOT_PING_S.value);
@@ -279,21 +320,52 @@ impl Doctrine {
                 self.ping_at.insert(b.id,view.time+BOT_PING_S.value);
             }
             if running && range>EVADE_CATCH {
-                out.push(Command::Evade {body:b.id,target:InterceptTarget::Contact(c.id)});
-            } else if engage || running {
-                let payload=if b.magazine[Payload::Kinetic.index()]>0 && crate::world::endgame::recoverable(damage,S::SrmLauncher) {Payload::Kinetic}
-                    else if b.magazine[Payload::Nuclear.index()]>0 && crate::world::endgame::recoverable(damage,S::Launcher) {Payload::Nuclear} else {Payload::Beam};
+                // On the clock, and dark: a hunter outside catch range is not a fight.
+                if let Some(point)=view.objective.as_ref().map(|o|o.center) {
+                    let time_left=objective.and_then(|o|o.escape_by).map(|deadline|deadline-view.time);
+                    press_course(&mut out,b,point,true,time_left,class);
+                }
+                push_heat(&mut out,b,view,false);
+                continue;
+            } else if hunting && range>EVADE_CATCH {
+                // The region is won at its edge. Wait on the quarry's line, outside that edge.
+                // Shots along the coast die in point defence, and the magazine is empty when the quarry arrives.
+                if let Some(obj)=view.objective.as_ref() {
+                    let from=tr.pos-obj.center;
+                    let dir=if from.length()>1.0 {from.normalized()} else {crate::kinematics::Vec2::new(1.0,0.0)};
+                    press_course(&mut out,b,obj.center+dir*(obj.radius+EVADE_CATCH),false,None,class);
+                }
+                push_heat(&mut out,b,view,false);
+                continue;
+            } else if engage || running || defending {
+                let kinetic=b.magazine[Payload::Kinetic.index()]>0 && crate::world::endgame::recoverable(damage,S::SrmLauncher);
+                let nuclear=b.magazine[Payload::Nuclear.index()]>0 && crate::world::endgame::recoverable(damage,S::Launcher);
+                // The long-range reserve is for the close fight. Holding the envelope with only those rounds left never starts it.
+                let nuclear_standoff=nuclear && range>Payload::Kinetic.engagement_range()
+                    && b.magazine[Payload::Nuclear.index()]>LONG_RANGE_RESERVE;
+                let payload=if nuclear_standoff {Payload::Nuclear}
+                    else if kinetic {Payload::Kinetic} else if nuclear {Payload::Nuclear} else {Payload::Beam};
                 out.push(Command::KeepRange {body:b.id,target:InterceptTarget::Contact(c.id),
                     range:crate::autopilot::weapon_standoff(payload)});
             } else {out.push(Command::Flyby { body: b.id, target: InterceptTarget::Contact(c.id) });}
-            // Inside ten light-seconds a raised field is waited out. The beam fires when that report falls.
+            // Inside ten light-seconds a raised field is waited out while a long-range round can still break it.
+            // SRMs do not count. They are the range the ship is already holding, and waiting on them
+            // leaves the beam dark against a coasting target.
             let screen=c.damage.as_ref().map(|report|report.screen_available);
             let in_beam=range<10.0*crate::units::LIGHT_SECOND;
-            let screen_up=in_beam && screen.is_some_and(|charge|charge>0.5);
-            let screen_down=in_beam && screen.is_some_and(|charge|charge<0.2);
+            let long_range_left=b.magazine[Payload::Nuclear.index()]>0 || b.missile_queued[Payload::Nuclear.index()]>0;
+            let raised=in_beam && screen.is_some_and(|charge|charge>0.5);
+            let screen_up=raised && long_range_left;
+            let screen_down=(in_beam && screen.is_some_and(|charge|charge<0.2)) || (raised && !long_range_left);
+            // A directed order skips the world's worth gate. Do not spend one on a solution below the energy floor.
+            let null_shot=b.beam_solutions.get(&c.id).is_some_and(|solution|
+                solution.expected_j<crate::params::SHIP_BEAM_MIN_EXPECTED_J.value);
             if b.ship_class!=Some(crate::world::ShipClass::Picket) {
                 if screen_up {
                     if b.beam_auto || b.beam_target.is_some() {out.push(Command::EngageBeam {body:b.id,target:None});}
+                } else if screen_down && null_shot {
+                    if b.beam_target.is_some() {out.push(Command::EngageBeam {body:b.id,target:None});}
+                    if !b.beam_auto {out.push(Command::ArmBeams {body:b.id});}
                 } else if screen_down {
                     if b.beam_auto || b.beam_target!=Some(c.id) {out.push(Command::EngageBeam {body:b.id,target:Some(c.id)});}
                 } else if !b.beam_auto {out.push(Command::ArmBeams {body:b.id});}
@@ -303,7 +375,7 @@ impl Doctrine {
                 let close=range<0.1*AU;
                 let conserve=escort_known && view.objective.as_ref().is_some_and(|o|o.attacker==b.faction)
                     && !close;
-                let reserve=if close {0} else {4};
+                let reserve=if close {0} else {LONG_RANGE_RESERVE};
                 for payload in [Payload::Nuclear, Payload::Kinetic] {
                     if range>payload.engagement_range() {continue;}
                     let eta=crate::world::weapon_probability::flight_seconds(payload,range,0.0);
@@ -366,7 +438,8 @@ mod tests {
     fn raider_retargets_blocking_escort_then_returns_to_clear_transport_route() {
         let mut view=encounter_view();
         let mut ai=Doctrine::default();
-        assert!(ai.orders(&view).iter().any(|c|matches!(c,Command::KeepRange {target:InterceptTarget::Contact(ContactId(2)),..})));
+        let nuclear=crate::autopilot::weapon_standoff(Payload::Nuclear);
+        assert!(ai.orders(&view).iter().any(|c|matches!(c,Command::KeepRange {target:InterceptTarget::Contact(ContactId(2)),range,..} if (*range-nuclear).abs()<1.0)));
         view.contacts[1].track.as_mut().unwrap().pos=Vec2::new(0.0,4.0*AU);
         assert!(ai.orders(&view).iter().any(|c|matches!(c,Command::Flyby {target:InterceptTarget::Contact(ContactId(1)),..})));
         view.contacts[1].track.as_mut().unwrap().pos=Vec2::new(2.0*AU,0.0);
@@ -383,7 +456,7 @@ mod tests {
         escort.pos=Vec2::new(AU,4.0*AU);
         escort.vel=Vec2::new(0.0,-8.0*AU/eta);
         let ship=view.bodies.iter().find(|b|b.controllable).unwrap();
-        assert_eq!(choose_target(&view,ship).0.unwrap().id,ContactId(2));
+        assert_eq!(choose_target(&view,ship,None).0.unwrap().id,ContactId(2));
     }
 
     #[test]
@@ -397,7 +470,8 @@ mod tests {
         assert!(cautious.iter().any(|c|matches!(c,Command::Flyby {..})));
         assert!(!cautious.iter().any(|c|matches!(c,Command::Ping {..}|Command::Launch {..})));
         view.contacts[1].track.as_mut().unwrap().pos=Vec2::new(0.1*AU,0.0);
-        assert!(ai.orders(&view).iter().any(|c|matches!(c,Command::KeepRange {target:InterceptTarget::Contact(ContactId(2)),..})));
+        let kinetic=crate::autopilot::weapon_standoff(Payload::Kinetic);
+        assert!(ai.orders(&view).iter().any(|c|matches!(c,Command::KeepRange {target:InterceptTarget::Contact(ContactId(2)),range,..} if (*range-kinetic).abs()<1.0)));
         let ship=view.bodies.iter().find(|b|b.controllable).unwrap();
         let mut site=view.objective.as_ref().unwrap().sensor_site.clone().unwrap();
         site.sensors.passive=false;site.sensors.active=false;
@@ -484,7 +558,7 @@ mod tests {
         view.contacts[0].track.as_mut().unwrap().pos=station+Vec2::new(0.2*AU,0.0);
         let orders=Doctrine::default().orders(&view);
         for ship in view.bodies.iter().filter(|b|b.controllable) {
-            assert!(orders.iter().any(|c|matches!(c,Command::Flyby {body,..} if *body==ship.id)),"{:?} did not fight",ship.id);
+            assert!(orders.iter().any(|c|matches!(c,Command::KeepRange {body,..} if *body==ship.id)),"{:?} did not fight",ship.id);
         }
         assert!(orders.iter().all(|c|!matches!(c,Command::Follow {..}|Command::MoveTo {..})));
     }
@@ -501,14 +575,50 @@ mod tests {
         let quarry=view.bodies.iter().find(|b|b.controllable).unwrap().pos;
         view.contacts=vec![resolved_ship(1,quarry+Vec2::new(1.5*AU,0.0))];
         let orders=Doctrine::default().orders(&view);
-        assert!(orders.iter().any(|c|matches!(c,Command::Evade {..})));
+        assert!(orders.iter().any(|c|matches!(c,Command::SetThrust {..})),"{orders:?}");
         assert!(dark(&orders));
-        assert!(!orders.iter().any(|c|matches!(c,Command::KeepRange {..}|Command::Flyby {..}|Command::MoveTo {..})));
+        assert!(!orders.iter().any(|c|matches!(c,Command::KeepRange {..}|Command::Flyby {..}|Command::Evade {..}|Command::MoveTo {..}|Command::Launch {..}|Command::ArmBeams {..}|Command::EngageBeam {..})));
         view.contacts[0].track.as_mut().unwrap().pos=quarry+Vec2::new(0.05*AU,0.0);
         let orders=Doctrine::default().orders(&view);
         assert!(orders.iter().any(|c|matches!(c,Command::KeepRange {..})));
         assert!(dark(&orders));
         assert!(!orders.iter().any(|c|matches!(c,Command::Evade {..}|Command::Ping {..})));
+    }
+
+    #[test]
+    fn hunter_searches_the_ground_and_runs_down_a_track() {
+        let session=LocalSession::new(crate::scenario::Scenario::HideAndSeek.build(42,crate::scenario::home_system()));
+        let mut view=session.view(Role::Faction(crate::scenario::ESCORT));
+        own_ships(&mut view);
+        let ground=view.objective.as_ref().unwrap().center;
+        let orders=Doctrine::default().orders(&view);
+        assert!(orders.iter().any(|c|matches!(c,Command::MoveTo {point,..} if (*point-ground).length()<1.0)),"{orders:?}");
+        assert!(!orders.iter().any(|c|matches!(c,Command::KeepRange {..}|Command::Flyby {..}|Command::Evade {..})));
+        let hunter=view.bodies.iter().find(|b|b.controllable).unwrap().pos;
+        let contact=hunter+Vec2::new(1.5*AU,0.0);
+        view.contacts=vec![resolved_ship(1,contact)];
+        let radius=view.objective.as_ref().unwrap().radius;
+        let from=contact-ground;
+        let gate=ground+from.normalized()*(radius+EVADE_CATCH);
+        let orders=Doctrine::default().orders(&view);
+        assert!(orders.iter().any(|c|matches!(c,Command::MoveTo {point,..} if (*point-gate).length()<1.0)),"{orders:?}");
+        assert!(!orders.iter().any(|c|matches!(c,Command::KeepRange {..}|Command::Flyby {..}|Command::Evade {..}|Command::Launch {..}|Command::ArmBeams {..}|Command::EngageBeam {..})));
+        view.contacts[0].track.as_mut().unwrap().pos=hunter+Vec2::new(0.05*AU,0.0);
+        let orders=Doctrine::default().orders(&view);
+        let kinetic=crate::autopilot::weapon_standoff(Payload::Kinetic);
+        assert!(orders.iter().any(|c|matches!(c,Command::KeepRange {range,..} if (*range-kinetic).abs()<1.0)),"{orders:?}");
+    }
+
+    #[test]
+    fn long_range_standoff_ends_when_only_the_reserve_remains() {
+        let mut view=encounter_view();
+        let nuclear=crate::autopilot::weapon_standoff(Payload::Nuclear);
+        let kinetic=crate::autopilot::weapon_standoff(Payload::Kinetic);
+        let orders=Doctrine::default().orders(&view);
+        assert!(orders.iter().any(|c|matches!(c,Command::KeepRange {range,..} if (*range-nuclear).abs()<1.0)),"{orders:?}");
+        view.bodies.iter_mut().find(|b|b.controllable).unwrap().magazine[Payload::Nuclear.index()]=LONG_RANGE_RESERVE;
+        let orders=Doctrine::default().orders(&view);
+        assert!(orders.iter().any(|c|matches!(c,Command::KeepRange {range,..} if (*range-kinetic).abs()<1.0)),"{orders:?}");
     }
 
     #[test]
@@ -532,6 +642,72 @@ mod tests {
         let orders=Doctrine::default().orders(&view);
         assert!(orders.iter().any(|c|matches!(c,Command::Coast {..})));
         assert!(!orders.iter().any(|c|matches!(c,Command::SetThrust {..}|Command::MoveTo {..})));
+    }
+
+    #[test]
+    fn a_battle_fights_the_nearest_warship_not_the_track_nearest_the_enemy_start() {
+        let session=LocalSession::new(crate::scenario::Scenario::Armada.build(42,crate::scenario::home_system()));
+        let mut view=session.view(Role::Faction(crate::scenario::ESCORT));
+        own_ships(&mut view);
+        let ship=view.bodies.iter().find(|b|b.id==BodyId(0)).unwrap().pos;
+        let center=view.objective.as_ref().unwrap().center;
+        let axis=(center-ship).normalized();
+        let side=Vec2::new(-axis.y,axis.x);
+        let mut near=resolved_ship(1,ship+side*(3.0*AU));
+        near.resolved_class=None;
+        let mut far=resolved_ship(2,center-axis*(0.3*AU));
+        far.resolved_class=None;
+        view.contacts=vec![near,far];
+        let orders=Doctrine::default().orders(&view);
+        assert!(orders.iter().any(|c|matches!(c,Command::KeepRange {body:BodyId(0),target:InterceptTarget::Contact(ContactId(1)),..})),"{orders:?}");
+        assert!(orders.iter().all(|c|!matches!(c,Command::Flyby {body:BodyId(0),..}|Command::KeepRange {body:BodyId(0),target:InterceptTarget::Contact(ContactId(2)),..})));
+    }
+
+    #[test]
+    fn a_capital_holds_the_slow_ship_until_something_reaches_nuclear_range() {
+        let session=LocalSession::new(crate::scenario::Scenario::Armada.build(42,crate::scenario::home_system()));
+        let mut view=session.view(Role::Faction(crate::scenario::ESCORT));
+        own_ships(&mut view);
+        let ship=view.bodies.iter().find(|b|b.id==BodyId(0)).unwrap().pos;
+        let axis=(view.objective.as_ref().unwrap().center-ship).normalized();
+        let mut picket=resolved_ship(1,ship+axis*(6.0*AU));
+        picket.resolved_class=None;
+        picket.track.as_mut().unwrap().vel=-axis*20_000.0;
+        let mut capital=resolved_ship(2,ship+axis*(6.4*AU));
+        capital.resolved_class=None;
+        capital.track.as_mut().unwrap().vel=-axis*4_000.0;
+        let mut trailer=resolved_ship(3,ship+axis*(12.0*AU));
+        trailer.resolved_class=None;
+        trailer.track.as_mut().unwrap().vel=Vec2::ZERO;
+        view.contacts=vec![picket,capital,trailer];
+        let bb=view.bodies.iter().find(|b|b.id==BodyId(0)).unwrap();
+        assert_eq!(choose_target(&view,bb,None).0.unwrap().id,ContactId(2));
+        assert_eq!(choose_target(&view,bb,Some(ContactId(1))).0.unwrap().id,ContactId(2));
+        assert_eq!(choose_target(&view,bb,Some(ContactId(2))).0.unwrap().id,ContactId(2));
+        view.contacts[0].track.as_mut().unwrap().pos=ship+axis*(0.8*AU);
+        assert_eq!(choose_target(&view,bb,Some(ContactId(2))).0.unwrap().id,ContactId(1));
+        view.contacts[0].track.as_mut().unwrap().pos=ship+axis*(6.0*AU);
+        let dd=view.bodies.iter().find(|b|b.id==BodyId(2)).unwrap();
+        assert_eq!(dd.ship_class,Some(ShipClass::Destroyer));
+        assert_eq!(choose_target(&view,dd,None).0.unwrap().id,ContactId(2));
+        let picket=view.bodies.iter().find(|b|b.id==BodyId(7)).unwrap();
+        assert_eq!(picket.ship_class,Some(ShipClass::Picket));
+        assert_eq!(choose_target(&view,picket,None).0.unwrap().id,ContactId(2));
+        let mut raiders=session.view(Role::Faction(crate::scenario::RAIDER));
+        own_ships(&mut raiders);
+        let flag_pos=raiders.bodies.iter().find(|b|b.id==BodyId(10)).unwrap().pos;
+        let toward=(view.bodies.iter().find(|b|b.id==BodyId(0)).unwrap().pos-flag_pos).normalized();
+        let mut fast=resolved_ship(4,flag_pos+toward*(6.0*AU));
+        fast.resolved_class=None;
+        fast.track.as_mut().unwrap().vel=-toward*18_000.0;
+        let mut slow=resolved_ship(5,flag_pos+toward*(6.5*AU));
+        slow.resolved_class=None;
+        slow.track.as_mut().unwrap().vel=-toward*3_000.0;
+        raiders.contacts=vec![fast,slow];
+        let flag=raiders.bodies.iter().find(|b|b.id==BodyId(10)).unwrap();
+        let (chosen,engage)=choose_target(&raiders,flag,None);
+        assert_eq!(chosen.unwrap().id,ContactId(5));
+        assert!(!engage);
     }
 
     #[test]
@@ -653,6 +829,82 @@ mod tests {
         picket.bodies.iter_mut().find(|b|b.id==ship).unwrap().beam_auto=false;
         let orders=Doctrine::default().orders(&picket);
         assert!(orders.iter().all(|c|!matches!(c,Command::EngageBeam {..}|Command::ArmBeams {..})),"{orders:?}");
+    }
+
+    #[test]
+    fn an_empty_magazine_fires_into_a_raised_screen() {
+        use crate::damage::{Damage,Report,System};
+        let mut view=LocalSession::new(crate::scenario::transport_intercept_class(42,ShipClass::Destroyer)).view(Role::Faction(crate::scenario::RAIDER));
+        view.objective.as_mut().unwrap().sensor_site=None;
+        let ship=view.bodies.iter().find(|b|b.controllable).unwrap().id;
+        let origin=view.bodies.iter().find(|b|b.id==ship).unwrap().pos;
+        let mut contact=resolved_ship(7,origin+Vec2::new(4.0*LIGHT_SECOND,0.0));
+        contact.damage=Some(Report {damage:Damage::default(),installed:[true;System::COUNT],observed_at:0.0,screen_available:1.0,heat_fraction:0.0});
+        view.contacts=vec![contact];
+        let body=view.bodies.iter_mut().find(|b|b.id==ship).unwrap();
+        body.magazine=[0,0];
+        body.missile_queued=[0,0];
+        body.beam_auto=false;
+        body.beam_target=None;
+        let orders=Doctrine::default().orders(&view);
+        assert!(orders.iter().any(|c|matches!(c,Command::EngageBeam {body,target:Some(ContactId(7))} if *body==ship)),"{orders:?}");
+        assert!(!orders.iter().any(|c|matches!(c,Command::EngageBeam {target:None,..})));
+    }
+
+    #[test]
+    fn srms_do_not_hold_the_beam_against_a_raised_screen() {
+        use crate::damage::{Damage,Report,System};
+        let mut view=LocalSession::new(crate::scenario::transport_intercept_class(42,ShipClass::Destroyer)).view(Role::Faction(crate::scenario::RAIDER));
+        view.objective.as_mut().unwrap().sensor_site=None;
+        let ship=view.bodies.iter().find(|b|b.controllable).unwrap().id;
+        let origin=view.bodies.iter().find(|b|b.id==ship).unwrap().pos;
+        let mut contact=resolved_ship(7,origin+Vec2::new(4.0*LIGHT_SECOND,0.0));
+        contact.damage=Some(Report {damage:Damage::default(),installed:[true;System::COUNT],observed_at:0.0,screen_available:1.0,heat_fraction:0.0});
+        view.contacts=vec![contact];
+        let body=view.bodies.iter_mut().find(|b|b.id==ship).unwrap();
+        assert!(body.magazine[Payload::Nuclear.index()]>0,"the hold test still has long-range rounds");
+        body.magazine[Payload::Nuclear.index()]=0;
+        body.missile_queued=[0,0];
+        body.beam_auto=true;
+        body.beam_target=None;
+        let orders=Doctrine::default().orders(&view);
+        assert!(orders.iter().any(|c|matches!(c,Command::EngageBeam {body,target:Some(ContactId(7))} if *body==ship)),"{orders:?}");
+        assert!(!orders.iter().any(|c|matches!(c,Command::EngageBeam {target:None,..})));
+        let body=view.bodies.iter_mut().find(|b|b.id==ship).unwrap();
+        body.magazine=[0,0];
+        body.missile_queued=[0,1];
+        body.beam_auto=true;
+        body.beam_target=None;
+        let orders=Doctrine::default().orders(&view);
+        assert!(orders.iter().any(|c|matches!(c,Command::EngageBeam {body,target:None} if *body==ship)),"a queued long-range round still holds: {orders:?}");
+    }
+
+    #[test]
+    fn a_null_beam_solution_is_not_assigned() {
+        use crate::damage::{Damage,Report,System};
+        let mut view=LocalSession::new(crate::scenario::transport_intercept_class(42,ShipClass::Destroyer)).view(Role::Faction(crate::scenario::RAIDER));
+        view.objective.as_mut().unwrap().sensor_site=None;
+        let ship=view.bodies.iter().find(|b|b.controllable).unwrap().id;
+        let origin=view.bodies.iter().find(|b|b.id==ship).unwrap().pos;
+        let mut contact=resolved_ship(7,origin+Vec2::new(4.0*LIGHT_SECOND,0.0));
+        contact.damage=Some(Report {damage:Damage::default(),installed:[true;System::COUNT],observed_at:0.0,screen_available:0.1,heat_fraction:0.0});
+        view.contacts=vec![contact];
+        let body=view.bodies.iter_mut().find(|b|b.id==ship).unwrap();
+        body.beam_auto=false;
+        body.beam_target=Some(ContactId(7));
+        body.beam_solutions.insert(ContactId(7),crate::world::BeamSolution {
+            range_km:4.0*LIGHT_SECOND,flight_s:4.0,aim_sigma_km:100.0,spot_km:0.1,expected_j:0.0,coupled_fraction:0.0,worth_firing:false,
+        });
+        let orders=Doctrine::default().orders(&view);
+        assert!(orders.iter().any(|c|matches!(c,Command::EngageBeam {body,target:None} if *body==ship)),"{orders:?}");
+        assert!(orders.iter().any(|c|matches!(c,Command::ArmBeams {body} if *body==ship)),"{orders:?}");
+        assert!(!orders.iter().any(|c|matches!(c,Command::EngageBeam {target:Some(_),..})),"{orders:?}");
+        let body=view.bodies.iter_mut().find(|b|b.id==ship).unwrap();
+        body.beam_solutions.get_mut(&ContactId(7)).unwrap().expected_j=1.0e14;
+        body.beam_auto=false;
+        body.beam_target=None;
+        let orders=Doctrine::default().orders(&view);
+        assert!(orders.iter().any(|c|matches!(c,Command::EngageBeam {body,target:Some(ContactId(7))} if *body==ship)),"{orders:?}");
     }
 
     #[test]

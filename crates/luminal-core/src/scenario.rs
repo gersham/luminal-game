@@ -664,6 +664,10 @@ fn last_ship(seed:u64,system:System)->World {
     fit_combatant(&mut world,BodyId(0),ShipClass::Cruiser,false);
     fit_combatant(&mut world,BodyId(1),ShipClass::Frigate,true);
     world.bodies[0].damage.systems[crate::damage::System::Propulsion as usize]=crate::damage::Condition::Damaged;
+    // The long-range magazine and the interceptors were spent in the action that crippled the drive.
+    // What remains has to be fought inside kinetic range, or the ship withdraws.
+    world.bodies[0].magazine[crate::missile::Payload::Nuclear.index()]=0;
+    if let Some(battery)=world.bodies[0].interceptor_battery.as_mut() {battery.rounds=0;}
     world.set_move(BodyId(1),player).expect("the pursuer can close");
     world.objective=Some(Objective {sensor_site:None,name:"the pursuit".into(),center:player,radius:0.2*AU,
         protect:BodyId(0),player:Some(BodyId(0)),defeat:Some(BodyId(1)),prize:None,wipe:false,defender:ESCORT,attacker:RAIDER,stance:Stance::Intercept,
@@ -1094,6 +1098,9 @@ mod tests {
         let last=Scenario::LastShip.build(42,home_system());
         assert_eq!(last.bodies[0].damage.state(crate::damage::System::Propulsion),crate::damage::Condition::Damaged);
         assert_eq!(last.bodies[0].damage.state(crate::damage::System::Repair),crate::damage::Condition::Intact);
+        assert_eq!(last.bodies[0].magazine[crate::missile::Payload::Nuclear.index()],0);
+        assert!(last.bodies[0].magazine[crate::missile::Payload::Kinetic.index()]>0);
+        assert_eq!(last.bodies[0].interceptor_battery.unwrap().rounds,0);
         assert!(last.bodies[0].installed_systems()[crate::damage::System::Jump as usize]);
         let o=last.objective.as_ref().unwrap();
         assert!(o.disengage_wins && o.defeat==Some(BodyId(1)) && o.player==Some(BodyId(0)));
@@ -1121,5 +1128,14 @@ mod tests {
         assert!(outcome.reason.contains("missed"),"{}",outcome.reason);
         assert!((outcome.t-60.0).abs()<1e-6);
         assert!(world.time()>=90.0);
+    }
+
+    #[test]
+    fn quarry_surrender_loses_the_hunt() {
+        let mut world=Scenario::HideAndSeek.build(42,home_system());
+        world.surrender(BodyId(1)).unwrap();
+        let outcome=world.outcome.as_ref().unwrap();
+        assert_eq!(outcome.winner,ESCORT);
+        assert!(outcome.reason.contains("surrendered"),"{}",outcome.reason);
     }
 }

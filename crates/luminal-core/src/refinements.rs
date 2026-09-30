@@ -807,6 +807,29 @@ mod tests {
         assert!(!w.refinement.pictures[&FactionId(0)].back().unwrap().1.contacts.contains_key(&c));
         assert!(old.contacts.contains_key(&c),"retirement must not rewrite a picture already in flight");
     }
+
+    #[test]
+    fn a_delayed_picture_still_steers_keep_range() {
+        use crate::mind::{ContactId, Measurement, Observation, Perception, Source};
+        use crate::sensors::DetectionLevel;
+        use std::sync::Arc;
+        let mut w=fleet();
+        let gap=0.5*AU;
+        w.bodies[1].trajectory=Trajectory::new(0.0,State {pos:Vec2::new(AU+gap,0.0),vel:Vec2::ZERO});
+        w.time=1_000.0;
+        let mut picture=Perception::new(FactionId(0));
+        picture.ingest(Observation {detection:DetectionLevel::Resolved,contact:ContactId(7),sensor:BodyId(0),
+            origin:Vec2::new(AU,0.0),emitted_at:730.0,sensor_received_at:740.0,decider_received_at:740.0,
+            source:Source::Emission,snr:1e6,
+            measurement:Measurement::BearingRange {bearing:0.0,range:5.0*AU,sigma_range:1_000.0,sigma_bearing:1e-6}},&w.system);
+        w.refinement.pictures.entry(FactionId(0)).or_default().push_back((740.0,Arc::new(picture)));
+        let delivered=w.received_picture(BodyId(1)).unwrap();
+        assert!(delivered.contacts[&ContactId(7)].estimate(w.time,&w.system).is_none(),"the uplink is older than the stale window");
+        w.bodies[1].autopilot=Some(Autopilot {order:Order::KeepRange(InterceptTarget::Contact(ContactId(7)),0.7*AU),status:AutopilotStatus::Manoeuvring});
+        w.guide(BodyId(1));
+        let thrust=w.bodies[1].trajectory.thrust_at(w.time).unwrap();
+        assert!(thrust.x>0.1&&thrust.length()>G0,"a wingman steers on the flagship's last fresh fix, thrust {thrust:?}");
+    }
     fn fleet() -> World {
         let system = System { bodies: vec![Celestial { name: "Star".into(),kind: CelestialKind::Star,
             gm: 1.0, radius: 1.0, orbit: Orbit::Fixed(Vec2::ZERO) }] };

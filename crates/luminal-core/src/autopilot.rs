@@ -159,7 +159,10 @@ pub fn keep_range(ship:State,target:State,ff:Vec2,range:f64,max_accel:f64)->Appr
     // it at unity gain can sustain alternating full burns forever at standoff.
     // Let velocity feedback do most of the matching; friendly Follow retains
     // its separate full feed-forward formation controller.
-    approach(ship,target,ff*0.25,range,INTERCEPT_BRAKE_FRACTION*max_accel,max_accel)
+    // The stop uses the accel the brake will actually spend. Planning it at half
+    // sheds the closing speed while the range is still astronomical, the ship
+    // accelerates again, and two fleets do not meet inside a watch.
+    approach(ship,target,ff*0.25,range,max_accel,max_accel)
 }
 
 /// Full burn toward the target's current estimated position, without approach braking.
@@ -427,6 +430,33 @@ mod tests {
             }
         }
     }
+    #[test]
+    fn two_heat_limited_ships_hold_nuclear_standoff_inside_a_watch() {
+        use crate::kinematics::advance;
+        use crate::missile::Payload;
+        use crate::units::AU;
+        // A battleship past half a heat tank. This is the burn the long approach actually flies.
+        let accel=39.0*G0;
+        let standoff=weapon_standoff(Payload::Nuclear);
+        let mut ship=State {pos:Vec2::ZERO,vel:Vec2::ZERO};
+        let mut target=State {pos:Vec2::new(13.8*AU,0.0),vel:Vec2::ZERO};
+        let dt=10.0;
+        let mut nearest=(ship.pos-target.pos).length();
+        for _ in 0..(36.0*3600.0/dt) as usize {
+            let mine=keep_range(ship,target,Vec2::ZERO,standoff,accel);
+            let theirs=keep_range(target,ship,Vec2::ZERO,standoff,accel);
+            ship=advance(ship,mine.thrust,dt);
+            target=advance(target,theirs.thrust,dt);
+            nearest=nearest.min((ship.pos-target.pos).length());
+        }
+        let range=(ship.pos-target.pos).length();
+        let closing=(ship.vel-target.vel).length();
+        assert!(range<0.9*AU,"still {:.3} AU apart",range/AU);
+        assert!((range-standoff).abs()<0.05*AU,"held {:.3} AU, standoff {:.3} AU",range/AU,standoff/AU);
+        assert!(closing<500.0,"still closing at {closing:.0} km/s");
+        assert!(nearest>standoff*0.9,"flew through to {:.3} AU",nearest/AU);
+    }
+
     #[test]
     fn range_orders_close_withdraw_and_hold_without_overspeed() {
         let target=State {pos:Vec2::ZERO,vel:Vec2::ZERO};

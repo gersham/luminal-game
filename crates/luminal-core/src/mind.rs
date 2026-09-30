@@ -318,10 +318,14 @@ impl Contact {
         self.track=Some(track);
     }
 
-    pub fn best_evidence(&self,t:f64)->Option<&Observation> {
+    pub fn best_evidence(&self,t:f64)->Option<&Observation> {self.best_evidence_slack(t,0.0)}
+    /// `slack` is time the picture spent in transit after the flagship accepted it.
+    /// A fix that was fresh on departure is still the picture to steer by.
+    fn best_evidence_slack(&self,t:f64,slack:f64)->Option<&Observation> {
+        let slack=slack.max(0.0);
         self.evidence.values().filter(|o|o.detection!=crate::sensors::DetectionLevel::None &&
-            t-o.decider_received_at<=crate::params::TRACK_STALE_S.value &&
-            (o.source!=Source::Echo || t-o.sensor_received_at<crate::sensors::PING_RESOLUTION_S*2.0))
+            t-o.decider_received_at<=crate::params::TRACK_STALE_S.value+slack &&
+            (o.source!=Source::Echo || t-o.sensor_received_at<crate::sensors::PING_RESOLUTION_S*2.0+slack))
             .max_by(|a,b|self.report_level(a,t).cmp(&self.report_level(b,t)).then(a.emitted_at.total_cmp(&b.emitted_at)))
     }
     fn report_level(&self,o:&Observation,t:f64)->crate::sensors::DetectionLevel {
@@ -335,8 +339,9 @@ impl Contact {
         else if age<crate::sensors::PING_RESOLUTION_S+15.0 {o.detection.min(D::Resolved)}
         else {o.detection.min(D::Approximate)}
     }
-    pub fn detection(&self,t:f64)->crate::sensors::DetectionLevel {
-        self.best_evidence(t).map_or(crate::sensors::DetectionLevel::None,|o|self.report_level(o,t))
+    pub fn detection(&self,t:f64)->crate::sensors::DetectionLevel {self.detection_slack(t,0.0)}
+    fn detection_slack(&self,t:f64,slack:f64)->crate::sensors::DetectionLevel {
+        self.best_evidence_slack(t,slack).map_or(crate::sensors::DetectionLevel::None,|o|self.report_level(o,t))
     }
     pub fn active_fire_control(&self,t:f64,eligible:impl Fn(BodyId)->bool)->f64 {
         self.evidence.values().filter(|o|o.source==Source::Echo && o.detection>=crate::sensors::DetectionLevel::Resolved && eligible(o.sensor))
@@ -346,13 +351,16 @@ impl Contact {
         self.evidence.values().filter(|o|o.source==Source::Echo && o.detection>=crate::sensors::DetectionLevel::Resolved)
             .map(|o|(o.sensor_received_at+crate::sensors::PING_RESOLUTION_S-t).max(0.0)).fold(0.0,f64::max)
     }
-    pub fn usable_track(&self,t:f64)->Option<&Track> {
-        (self.detection(t)>=crate::sensors::DetectionLevel::Approximate).then_some(self.track.as_ref()).flatten()
+    pub fn usable_track(&self,t:f64)->Option<&Track> {self.usable_track_slack(t,0.0)}
+    fn usable_track_slack(&self,t:f64,slack:f64)->Option<&Track> {
+        (self.detection_slack(t,slack)>=crate::sensors::DetectionLevel::Approximate).then_some(self.track.as_ref()).flatten()
     }
-    pub fn estimate(&self,t:f64,sys:&System)->Option<Track> {
-        let mut track=self.usable_track(t)?.at(t,sys);
-        if self.detection(t)==crate::sensors::DetectionLevel::Approximate {
-            let evidence=self.best_evidence(t)?;
+    pub fn estimate(&self,t:f64,sys:&System)->Option<Track> {self.estimate_slack(t,sys,0.0)}
+    /// Propagate a fix that is still inside the stale window once transit time is restored.
+    pub fn estimate_slack(&self,t:f64,sys:&System,slack:f64)->Option<Track> {
+        let mut track=self.usable_track_slack(t,slack)?.at(t,sys);
+        if self.detection_slack(t,slack)==crate::sensors::DetectionLevel::Approximate {
+            let evidence=self.best_evidence_slack(t,slack)?;
             let age=(t-evidence.emitted_at).max(0.0);
             let movement=crate::sensors::movement_radius(age)+0.5*track.accel().length()*age*age;
             let offset=self.region_offset.unwrap_or_else(||region_offset(self.id,evidence));
@@ -574,6 +582,22 @@ mod tests {
         assert_eq!(c.detection(30.0),D::Bearing);
         assert_eq!(c.detection(10.0+crate::params::TRACK_STALE_S.value),D::Bearing);
         assert_eq!(c.detection(10.0+crate::params::TRACK_STALE_S.value+1.0),D::None);
+    }
+
+    #[test]
+    fn a_relayed_fix_stays_usable_for_the_light_time_beyond_the_stale_window() {
+        use crate::sensors::DetectionLevel as D;
+        let mut p=Perception::new(FactionId(0));
+        let sys=System::default();
+        let receipt=100.0;
+        p.ingest(Observation {detection:D::Resolved,contact:ContactId(1),sensor:BodyId(0),origin:Vec2::ZERO,
+            emitted_at:90.0,sensor_received_at:receipt,decider_received_at:receipt,source:Source::Emission,snr:1e6,
+            measurement:Measurement::BearingRange {bearing:0.0,range:1.0e6,sigma_range:10.0,sigma_bearing:1e-6}},&sys);
+        let c=&p.contacts[&ContactId(1)];
+        let now=receipt+crate::params::TRACK_STALE_S.value+200.0;
+        assert!(c.estimate(now,&sys).is_none(),"two hundred seconds past the window is not a fresh fix");
+        let steered=c.estimate_slack(now,&sys,200.0).unwrap();
+        assert!((steered.pos()-Vec2::new(1.0e6,0.0)).length()<1.0);
     }
 
     #[test] fn ping_identity_expires_from_sensor_receipt_not_relay_receipt() {

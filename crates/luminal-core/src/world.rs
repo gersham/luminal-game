@@ -603,6 +603,9 @@ pub struct World {
     echoes: Vec<Echo>,
     relays: Vec<Relay>,
     perceptions: BTreeMap<FactionId, Perception>,
+    /// Range fixes this hull measured itself. The flagship picture is a round trip
+    /// behind, and a beam spot at a few light-seconds is a tenth of a kilometre.
+    local_pictures: BTreeMap<BodyId, Perception>,
     /// Established gameplay assumption: reports uniquely associate with a source.
     /// Position and velocity remain uncertain; association does not expose truth.
     association: BTreeMap<(FactionId, BodyId), ContactId>,
@@ -745,6 +748,7 @@ impl World {
             echoes: vec![],
             relays: vec![],
             perceptions,
+            local_pictures: BTreeMap::new(),
             association: BTreeMap::new(),
             reverse_association:BTreeMap::new(),
             rng: Rng::stream(seed, 1),
@@ -1320,12 +1324,31 @@ impl World {
         Ok(())
     }
 
-    /// Expected coupled energy using only the received track and its transverse
+    /// Newer of this ship's own range fixes and the flagship picture, already propagated to now.
+    fn firing_solution(&self,shooter:BodyId,target:ContactId)->Option<crate::mind::Track> {
+        let t=self.time;
+        let sys=&self.system;
+        let from=|picture:&Perception| {
+            let contact=picture.contacts.get(&target)?;
+            let born=contact.track.as_ref()?.t;
+            Some((born,contact.estimate(t,sys)?))
+        };
+        let local=self.local_pictures.get(&shooter).and_then(from);
+        let uplink=self.received_picture(shooter).and_then(from);
+        match (local,uplink) {
+            (Some((born,_)),Some((other,remote))) if other>born => Some(remote),
+            (Some((_,track)),_) => Some(track),
+            (None,Some((_,track))) => Some(track),
+            (None,None) => None,
+        }
+    }
+
+    /// Expected coupled energy using only the aim track and its transverse
     /// uncertainty at pulse arrival, including pointing jitter. This is a firing
     /// policy, not knowledge of the target's actual future manoeuvres.
     pub fn beam_solution(&self,id:BodyId,target:ContactId)->Option<BeamSolution> {
         let origin=self.state(id,self.time)?.pos;
-        let track=self.received_picture(id)?.contacts.get(&target)?.estimate(self.time,&self.system)?;
+        let track=self.firing_solution(id,target)?;
         let range=(track.pos()-origin).length();
         let predicted=track.at(self.time+range/crate::units::C,&self.system);
         let direction=(predicted.pos()-origin).normalized();
@@ -1337,13 +1360,45 @@ impl World {
         let energy=SHIP_BEAM_ENERGY_J.value*self.bodies[id.0 as usize].ship_class.map_or(1.0,ShipClass::beam_power);
         let fraction=self.bodies[id.0 as usize].beam_coherence(self.time)*beam_range_factor(range)*(SHIP_RADIUS_KM.value/spot).powi(2)/(1.0+2.0*variance/(spot*spot)).sqrt();
         let expected=energy*fraction;
+        // Inside the automatic band a shot still has to be predicted to couple.
+        // A zero-energy solution spends the same waste heat as a hit and drops thrust to nothing.
+        let close=range<=SHIP_BEAM_AUTO_RANGE_LS.value*crate::units::LIGHT_SECOND
+            && expected>=SHIP_BEAM_MIN_EXPECTED_J.value;
+        let extended=variance<=4.0*spot*spot && expected>=SHIP_BEAM_MIN_EXPECTED_J.value.max(0.05*energy);
         Some(BeamSolution {range_km:range,flight_s:range/crate::units::C,aim_sigma_km:variance.sqrt(),spot_km:spot,
-            expected_j:expected,coupled_fraction:fraction,
-            worth_firing:range<=SHIP_BEAM_AUTO_RANGE_LS.value*crate::units::LIGHT_SECOND
-                || (variance<=4.0*spot*spot && expected>=SHIP_BEAM_MIN_EXPECTED_J.value.max(0.05*energy))})
+            expected_j:expected,coupled_fraction:fraction,worth_firing:close||extended})
     }
+    fn beam_auto_target(&self,id:BodyId,faction:FactionId,origin:Vec2)->Option<ContactId> {
+        let battleship=self.bodies[id.0 as usize].ship_class==Some(ShipClass::Battleship);
+        let mut seen=Vec::new();
+        for picture in [self.received_picture(id),self.local_pictures.get(&id)].into_iter().flatten() {
+            for c in picture.contacts.values() {
+                if self.contact_retired(faction,c.id) {continue;}
+                if self.body_for_contact(faction,c.id).is_some_and(|target|self.bodies[target.0 as usize].kind==BodyKind::Missile) {continue;}
+                let Some(tr)=c.track.as_ref() else {continue;};
+                seen.push((c.id,(tr.pos()-origin).length()));
+            }
+        }
+        seen.into_iter().filter(|(target,_)| self.firing_solution(id,*target).is_some() && (self.beam_worth_firing(id,*target)
+            || (battleship && self.spinal_worth_firing(id,*target))))
+            .min_by(|a,b| a.1.total_cmp(&b.1)).map(|(id,_)| id)
+    }
+
     fn beam_worth_firing(&self,id:BodyId,target:ContactId)->bool {
         self.beam_solution(id,target).is_some_and(|s|s.worth_firing && (self.bodies[id.0 as usize].beam_mode==BeamMode::Damage || s.range_km<=weapon_fit::INTERFERENCE_RANGE_LS*crate::units::LIGHT_SECOND))
+    }
+
+    /// The spinal footprint is ten times the main-beam spot and ignores the main-beam range taper.
+    /// It still has to be predicted to return a useful fraction of its own pulse, or the mount pins the tank.
+    fn spinal_worth_firing(&self,id:BodyId,target:ContactId)->bool {
+        let Some(solution)=self.beam_solution(id,target) else {return false};
+        let limit=10.0*SHIP_BEAM_AUTO_RANGE_LS.value*crate::units::LIGHT_SECOND;
+        if solution.range_km>limit || solution.spot_km<=0.0 {return false;}
+        let broad=solution.spot_km*10.0;
+        let variance=solution.aim_sigma_km*solution.aim_sigma_km;
+        let energy=10.0*SHIP_BEAM_ENERGY_J.value*self.bodies[id.0 as usize].ship_class.map_or(1.0,ShipClass::beam_power);
+        let fraction=self.bodies[id.0 as usize].beam_coherence(self.time)/(1.0+2.0*variance/(broad*broad)).sqrt();
+        energy*fraction>=SHIP_BEAM_MIN_EXPECTED_J.value.max(0.05*energy)
     }
 
     fn control_beam(&mut self, id: BodyId, order: u64) {
@@ -1355,15 +1410,8 @@ impl World {
         let automatic = b.beam_auto;
         let faction = b.faction;
         let origin = b.trajectory.state_at(self.time).unwrap().pos;
-        let target = if automatic {
-            self.received_picture(id).into_iter().flat_map(|p| p.contacts.values())
-                .filter(|c| !self.contact_retired(faction, c.id) && self.track_fresh(id, c.id))
-                .filter(|c| self.body_for_contact(faction,c.id).is_none_or(|target|
-                    self.bodies[target.0 as usize].kind!=BodyKind::Missile))
-                .filter_map(|c| c.track.as_ref().map(|tr| (c.id, (tr.at(self.time, &self.system).pos() - origin).length())))
-                .filter(|(target, range)| self.beam_worth_firing(id,*target) || (b.ship_class==Some(ShipClass::Battleship) && *range<=10.0*SHIP_BEAM_AUTO_RANGE_LS.value*crate::units::LIGHT_SECOND))
-                .min_by(|a, b| a.1.total_cmp(&b.1)).map(|(id, _)| id)
-        } else { b.beam_target };
+        let directed = b.beam_target;
+        let target = if automatic { self.beam_auto_target(id, faction, origin) } else { directed };
         if automatic { self.bodies[id.0 as usize].beam_target = target; }
         let Some(target) = target else {
             self.bodies[id.0 as usize].spinal_tracking=None;
@@ -1371,14 +1419,14 @@ impl World {
             return;
         };
         if self.bodies[id.0 as usize].ship_class==Some(ShipClass::Battleship) {
-            let aim=self.received_picture(id).and_then(|p|p.contacts.get(&target))
-                .filter(|c|c.detection(self.time)>=sensors::DetectionLevel::Resolved)
-                .and_then(|c|c.estimate(self.time,&self.system)).map(|t|t.pos()-origin);
+            let resolved=self.local_pictures.get(&id).and_then(|p|p.contacts.get(&target)).is_some_and(|c|c.detection(self.time)>=sensors::DetectionLevel::Resolved)
+                || self.received_picture(id).and_then(|p|p.contacts.get(&target)).is_some_and(|c|c.detection(self.time)>=sensors::DetectionLevel::Resolved);
+            let aim=resolved.then(|| self.firing_solution(id,target)).flatten().map(|t|t.pos()-origin);
             self.bodies[id.0 as usize].spinal_tracking=aim;
             if let Some(aim)=aim {self.bodies[id.0 as usize].face_toward(self.time,aim);}
-            let _=self.fire_spinal(id,target);
+            if self.spinal_worth_firing(id,target) {let _=self.fire_spinal(id,target);}
         }
-        if self.track_fresh(id,target) && (!automatic || self.beam_worth_firing(id,target)) {
+        if self.firing_solution(id,target).is_some() && (!automatic || self.beam_worth_firing(id,target)) {
             let _ = self.fire_beam(id, target);
         }
         let next = (self.time + 1.0).max(self.bodies[id.0 as usize].beam_ready_at);
@@ -1398,8 +1446,7 @@ impl World {
         if !b.thermal.can_fire_energy(energy) { return Err(OrderError::PowerOrHeat); }
         let faction = b.faction;
         let origin = b.trajectory.state_at(t).unwrap().pos;
-        let track = self.received_picture(id).and_then(|p| p.contacts.get(&target))
-            .and_then(|c| c.estimate(t,&self.system)).ok_or(OrderError::NoTrack)?;
+        let track = self.firing_solution(id, target).ok_or(OrderError::NoTrack)?;
         let mut flight = (track.at(t, &self.system).pos() - origin).length() / crate::units::C;
         for _ in 0..12 {
             flight = (track.at(t + flight, &self.system).pos() - origin).length() / crate::units::C;
@@ -1436,8 +1483,10 @@ impl World {
         let effectiveness=b.operating_effectiveness(crate::damage::System::Beam);
         if effectiveness<=0.0 || !b.thermal.can_fire_energy(energy) {return Err(OrderError::PowerOrHeat);}
         let faction=b.faction;let origin=b.trajectory.state_at(t).unwrap().pos;let heading=b.heading_at(t);
-        let tr=self.received_picture(id).and_then(|p|p.contacts.get(&target))
-            .filter(|c|c.detection(t)>=sensors::DetectionLevel::Resolved).and_then(|c|c.estimate(t,&self.system)).ok_or(OrderError::NoTrack)?;
+        let resolved=self.local_pictures.get(&id).and_then(|p|p.contacts.get(&target)).is_some_and(|c|c.detection(t)>=sensors::DetectionLevel::Resolved)
+            || self.received_picture(id).and_then(|p|p.contacts.get(&target)).is_some_and(|c|c.detection(t)>=sensors::DetectionLevel::Resolved);
+        if !resolved {return Err(OrderError::NoTrack);}
+        let tr=self.firing_solution(id,target).ok_or(OrderError::NoTrack)?;
         let flight=(tr.pos()-origin).length()/crate::units::C;
         let aim=tr.at(t+flight,&self.system).pos()-origin;
         if aim.length()>10.0*SHIP_BEAM_AUTO_RANGE_LS.value*crate::units::LIGHT_SECOND || heading.dot(aim.normalized())<2.0_f64.to_radians().cos() {return Err(OrderError::InvalidTarget);}
@@ -1668,13 +1717,16 @@ impl World {
             Some(Order::Intercept(target) | Order::Flyby(target) | Order::KeepRange(target,_) | Order::CombatRange(target,_)) => {
                 let flyby = matches!(b.autopilot.map(|a| a.order), Some(Order::Flyby(_)));
                 let keep=match b.autopilot.map(|a|a.order) {Some(Order::KeepRange(_,r))=>Some(r),Some(Order::CombatRange(_,standoff))=>Some(autopilot::combat_range(standoff,b.magazine[Payload::Nuclear.index()]>0)),_=>None};
+                // The wingman's picture left the flagship one light-time ago. A fix that was
+                // fresh on departure is still a course; fire control keeps the stricter window.
+                let slack=self.received_picture_epoch(id).map_or(0.0,|epoch|(t-epoch).max(0.0));
                 let known = match target {
                     InterceptTarget::Own(o) => self.known_body(b.faction,o).and_then(|known|
                         known.trajectory.state_at(t).map(|ts| (ts,known.trajectory.thrust_at(t).unwrap_or(Vec2::ZERO)))),
                     InterceptTarget::Contact(c) => self
                         .received_picture(id)
                         .and_then(|p| p.contacts.get(&c))
-                        .and_then(|c| c.estimate(t,&self.system))
+                        .and_then(|c| c.estimate_slack(t,&self.system,slack))
                         .map(|tr| {
                             let now = tr.at(t, &self.system);
                             (State { pos: now.pos(), vel: now.vel() }, now.accel())
@@ -1684,7 +1736,7 @@ impl World {
                     None => {
                         let bearing=if let InterceptTarget::Contact(c)=target {
                             self.received_picture(id).and_then(|p|p.contacts.get(&c))
-                                .filter(|c|t-c.last.decider_received_at<=TRACK_STALE_S.value)
+                                .filter(|c|t-c.last.decider_received_at<=TRACK_STALE_S.value+slack)
                                 .map(|c|match c.last.measurement {Measurement::Bearing {bearing,..}|Measurement::BearingRange {bearing,..}=>bearing})
                         } else {None};
                         if !flyby && !matches!(b.autopilot.map(|a|a.order),Some(Order::CombatRange(..))) && let Some(bearing)=bearing {
@@ -2036,7 +2088,7 @@ impl World {
             let protect_lives=o.protect!=id && self.bodies.get(o.protect.0 as usize).is_some_and(|b|b.alive_at(t));
             let winner=if o.player==Some(id) {
                     if departure && o.extract && o.prize_taken {Some(o.attacker)}
-                    else if departure && o.disengage_wins {Some(side)}
+                    else if matches!(cause,LossCause::Withdrawn) && o.disengage_wins {Some(side)}
                     // Escort and Convoy keep going while a different protect ship is still alive.
                     else if protect_lives {None}
                     else {Some(other)}
@@ -2044,7 +2096,8 @@ impl World {
                     if o.extract && !departure {take_prize=true;None} else {Some(o.attacker)}
                 } else if o.defeat==Some(id) {
                     if departure && o.withdrawal_continues {clear_defeat=true;None}
-                    else if departure && o.escape_at_center {Some(o.attacker)}
+                    // A completed withdrawal is the quarry's escape. Giving up is not.
+                    else if matches!(cause,LossCause::Withdrawn) && o.escape_at_center {Some(o.attacker)}
                     else {Some(o.defender)}
                 } else if o.defeat.is_none() && o.prize.is_none() && !o.prize_taken && o.protect==id {Some(o.attacker)}
                 else if o.wipe && side==o.attacker && !armed(o.attacker) {Some(o.defender)}
@@ -2137,6 +2190,18 @@ impl World {
     /// Look again at light that has already arrived. Construction samples once, before later platform history exists.
     pub(crate) fn sample_arriving_light(&mut self) {
         self.sensor_frame();
+    }
+
+    /// Keep the measuring ship's own fix. The flagship hears about it later, at c.
+    fn note_local(&mut self, obs: &Observation) {
+        let sensor = obs.sensor;
+        let Some(body) = self.bodies.get(sensor.0 as usize) else { return };
+        if !matches!(body.kind, BodyKind::Ship | BodyKind::Station) { return; }
+        let faction = body.faction;
+        let mut local = *obs;
+        local.decider_received_at = local.sensor_received_at;
+        let sys = &self.system;
+        self.local_pictures.entry(sensor).or_insert_with(|| Perception::new(faction)).ingest(local, sys);
     }
 
     fn sensor_frame(&mut self) {
@@ -2358,6 +2423,7 @@ impl World {
         // Route reports to each faction's decider: directly, or by laser relay at c.
         for obs in reports {
             let obs = self.bias_observation(obs);
+            self.note_local(&obs);
             let faction = self.bodies[obs.sensor.0 as usize].faction;
             let front = Front { origin: self.state(obs.sensor, obs.sensor_received_at).unwrap().pos, t_emit: obs.sensor_received_at };
             self.relays.push(Relay { faction, front, obs });
@@ -2918,12 +2984,19 @@ mod tests {
         assert_eq!(hide.outcome.as_ref().unwrap().winner,FactionId(1));
         assert!(hide.outcome.as_ref().unwrap().reason.contains("withdrew"));
         let mut hide=Scenario::HideAndSeek.build(42,home.clone());
+        hide.destroy(BodyId(1),0.0,LossCause::Surrendered);
+        assert_eq!(hide.outcome.as_ref().unwrap().winner,FactionId(0),"giving up is not reaching the ground");
+        assert!(hide.outcome.as_ref().unwrap().reason.contains("surrendered"));
+        let mut hide=Scenario::HideAndSeek.build(42,home.clone());
         hide.destroy(BodyId(0),0.0,LossCause::Withdrawn);
         assert_eq!(hide.outcome.as_ref().unwrap().winner,FactionId(1),"the hunter disengaging scores for the quarry");
 
         let mut last=Scenario::LastShip.build(42,home.clone());
         last.destroy(BodyId(0),0.0,LossCause::Withdrawn);
         assert_eq!(last.outcome.as_ref().unwrap().winner,FactionId(0));
+        let mut last=Scenario::LastShip.build(42,home.clone());
+        last.destroy(BodyId(0),0.0,LossCause::Surrendered);
+        assert_eq!(last.outcome.as_ref().unwrap().winner,FactionId(1),"giving up is not the withdrawal");
         let mut last=Scenario::LastShip.build(42,home.clone());
         last.destroy(BodyId(1),0.0,LossCause::Impact(0));
         assert_eq!(last.outcome.as_ref().unwrap().winner,FactionId(0));
@@ -3014,6 +3087,12 @@ mod tests {
     }
 
     /// Controlled, accurate fire-control solution for testing physical beam delivery.
+    fn know_track_velocity(w:&mut World,c:ContactId) {
+        let tr=w.perceptions.get_mut(&FactionId(0)).unwrap().contacts.get_mut(&c).unwrap().track.as_mut().unwrap();
+        tr.p[2][2]=1e-4;
+        tr.p[3][3]=1e-4;
+    }
+
     pub(super) fn beam_trial() -> (World, ContactId) {
         let base = Vec2::new(20.0 * AU, 0.0);
         let mut w = World::new(sun(), vec![
@@ -3149,8 +3228,14 @@ mod tests {
     #[test]
     fn armed_beams_acquire_without_target_orders_and_obey_hold_fire() {
         let (mut w, c) = beam_trial();
+        // The first fix does not know velocity, so the pulse is predicted to miss by thousands of kilometres.
+        assert!(!w.beam_worth_firing(BodyId(0),c));
         w.arm_beams(BodyId(0)).unwrap();
         assert!(w.bodies[0].beam_auto);
+        assert_eq!(w.bodies[0].beam_target, None);
+        assert_eq!(w.bodies[0].beam_emitted_j, 0.0);
+        know_track_velocity(&mut w, c);
+        w.control_beam(BodyId(0), w.bodies[0].beam_order);
         assert_eq!(w.bodies[0].beam_target, Some(c));
         assert_eq!(w.bodies[0].beam_emitted_j, SHIP_BEAM_ENERGY_J.value);
         w.advance_to(SHIP_BEAM_RECHARGE_S.value);
@@ -3161,6 +3246,7 @@ mod tests {
         assert_eq!(w.bodies[0].beam_emitted_j, 2.0 * SHIP_BEAM_ENERGY_J.value);
 
         let (mut w, c) = beam_trial();
+        know_track_velocity(&mut w, c);
         w.perceptions.get_mut(&FactionId(0)).unwrap().contacts.get_mut(&c).unwrap().track.as_mut().unwrap().x[0] += 10.0 * LIGHT_SECOND;
         w.arm_beams(BodyId(0)).unwrap();
         assert_eq!(w.bodies[0].beam_target, None);
@@ -3182,6 +3268,7 @@ mod tests {
         w.arm_beams(BodyId(0)).unwrap();
         assert_eq!(w.bodies[0].beam_emitted_j, 0.0);
         w.perceptions.get_mut(&FactionId(0)).unwrap().contacts.get_mut(&c).unwrap().track.as_mut().unwrap().x[0] -= 10.0 * LIGHT_SECOND;
+        know_track_velocity(&mut w, c);
         w.control_beam(BodyId(0), w.bodies[0].beam_order);
         assert_eq!(w.bodies[0].beam_emitted_j, SHIP_BEAM_ENERGY_J.value);
         w.perceptions.get_mut(&FactionId(0)).unwrap().contacts.get_mut(&c).unwrap().track = None;
@@ -3214,6 +3301,43 @@ mod tests {
         assert!(!w.beam_worth_firing(BodyId(0),c),"uncertain aim must hold fire even at moderately extended range");
         w.engage_beam(BodyId(0),Some(c)).unwrap();
         assert_eq!(w.bodies[0].beam_emitted_j,SHIP_BEAM_ENERGY_J.value,"directed shots accept the player's risk");
+    }
+
+    #[test]
+    fn a_null_close_solution_does_not_fire_or_spin_up_the_spinal() {
+        let (mut w,c)=beam_trial();
+        let tr=w.perceptions.get_mut(&FactionId(0)).unwrap().contacts.get_mut(&c).unwrap().track.as_mut().unwrap();
+        tr.x[0]+=LIGHT_SECOND;
+        tr.p=[[0.0;6];6];
+        tr.p[1][1]=10_000.0;
+        assert!(!w.beam_worth_firing(BodyId(0),c),"a hundred-kilometre miss inside two light-seconds is not a shot");
+        w.arm_beams(BodyId(0)).unwrap();
+        assert_eq!(w.bodies[0].beam_emitted_j,0.0);
+        assert!(w.combat_events(None).iter().all(|e|e.kind!=CombatKind::SpinalPulse));
+
+        let (mut w,c)=beam_trial();
+        let b=&mut w.bodies[0];
+        b.ship_class=Some(ShipClass::Battleship);
+        b.thermal.capacity_scale=8.0;
+        b.thermal.capacitor_multiplier=2.0;
+        b.thermal.capacitor_j=b.thermal.capacitor_capacity();
+        b.facing=0.0;
+        b.turn_target=0.0;
+        let tr=w.perceptions.get_mut(&FactionId(0)).unwrap().contacts.get_mut(&c).unwrap().track.as_mut().unwrap();
+        tr.p=[[0.0;6];6];
+        tr.p[1][1]=10_000.0;
+        assert!(!w.spinal_worth_firing(BodyId(0),c));
+        w.arm_beams(BodyId(0)).unwrap();
+        assert_eq!(w.bodies[0].beam_emitted_j,0.0,"the spinal mount does not spend the tank on an empty solution");
+        assert!(w.combat_events(None).iter().all(|e|e.kind!=CombatKind::SpinalPulse));
+
+        let (mut w,c)=beam_trial();
+        let tr=w.perceptions.get_mut(&FactionId(0)).unwrap().contacts.get_mut(&c).unwrap().track.as_mut().unwrap();
+        tr.x[0]+=LIGHT_SECOND;
+        tr.p=[[0.0;6];6];
+        assert!(w.beam_worth_firing(BodyId(0),c));
+        w.arm_beams(BodyId(0)).unwrap();
+        assert_eq!(w.bodies[0].beam_emitted_j,SHIP_BEAM_ENERGY_J.value);
     }
     #[test]
     fn damaged_systems_change_capability_and_destroyed_weapons_stop() {
@@ -3553,6 +3677,45 @@ mod tests {
         assert_eq!(w.bodies.iter().filter(|b|b.missile.is_some()).count(),12);
         assert_eq!(w.bodies[0].missile_queued[1],0);assert_eq!(w.bodies[0].magazine[1],8);
         assert_eq!(w.bodies[0].missile_ready_at[1],20.0);
+    }
+
+    #[test]
+    fn a_wing_beam_uses_its_own_range_fix() {
+        let wing_x = 0.5 * AU;
+        let mut w = World::new(sun(), vec![
+            ship("Flagship", 0, Vec2::ZERO, Vec2::ZERO, Vec2::ZERO),
+            ship("Wing", 0, Vec2::new(wing_x, 0.0), Vec2::ZERO, Vec2::ZERO),
+            ship("Enemy", 1, Vec2::new(wing_x + 2.0 * LIGHT_SECOND, 0.0), Vec2::ZERO, Vec2::ZERO),
+        ], 0.0, 7);
+        for b in &mut w.bodies {
+            b.controls.ecm = controls::Mode::Off;
+            b.controls.screens = controls::Mode::Off;
+            b.screen_up = false;
+            b.damage.armour = 0.0;
+            b.damage.armour_max = 0.0;
+        }
+        // Long enough for the wing's own fixes, and short of the flagship round trip.
+        w.advance_to(90.0);
+        let enemy = w.contact_id(FactionId(0), BodyId(2));
+        assert!(w.local_pictures.get(&BodyId(1)).is_some_and(|p| p.contacts.contains_key(&enemy)), "the wing measured the ship in front of it");
+        w.perceptions.get_mut(&FactionId(0)).unwrap().ingest(Observation {
+            detection: crate::sensors::DetectionLevel::Resolved,
+            contact: enemy,
+            sensor: BodyId(0),
+            origin: Vec2::ZERO,
+            emitted_at: 0.0,
+            sensor_received_at: 0.0,
+            decider_received_at: 0.0,
+            measurement: Measurement::BearingRange { bearing: 0.0, range: wing_x, sigma_bearing: 1e-6, sigma_range: 1.0 },
+            snr: 10.0,
+            source: Source::Emission,
+        }, &w.system);
+        let before = w.bodies[2].damage.hull;
+        w.engage_beam(BodyId(1), Some(enemy)).unwrap();
+        w.advance_to(120.0);
+        assert!(w.bodies[1].beam_emitted_j > 0.0, "the wing fired");
+        let landed = w.hits.iter().filter(|h| h.body == BodyId(2)).map(|h| h.energy_j).sum::<f64>();
+        assert!(landed > 1e12, "a flagship picture has not arrived; landed {landed:.3e} J, hull {before} -> {}", w.bodies[2].damage.hull);
     }
 
     #[test]

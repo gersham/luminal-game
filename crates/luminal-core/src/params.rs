@@ -525,9 +525,9 @@ pub const BOT_SALVO_S: Param = Param { key: "doctrine.salvo_interval", value: 12
 
 pub const SHIP_BEAM_AUTO_RANGE_LS: Param = Param {
     key: "ship_beam.auto_range", value: 6.0, unit: "ls", commitment: Placeholder,
-    note: "Close-combat automatic engagement band. Beyond it, automatic fire requires useful predicted energy; main-beam coupling tapers to zero at 10 LS, including directed fire.",
+    note: "Close-combat automatic engagement band. Automatic fire requires the minimum expected energy inside it, and a useful fraction beyond it. Main-beam coupling tapers to zero at 10 LS, including directed fire.",
 };
-pub const SHIP_BEAM_MIN_EXPECTED_J:Param=Param {key:"ship_beam.min_expected_energy",value:1e12,unit:"J",commitment:Proposal,note:"Minimum expected coupled energy beyond 6 LS; also requires 5% of emitted energy and transverse uncertainty within two beam radii."};
+pub const SHIP_BEAM_MIN_EXPECTED_J:Param=Param {key:"ship_beam.min_expected_energy",value:1e12,unit:"J",commitment:Proposal,note:"Automatic fire, including inside 6 LS, requires at least this expected coupled energy. Beyond 6 LS it also requires 5% of the pulse and transverse uncertainty within two beam radii."};
 
 pub const SHIP_BEAM_ENERGY_J: Param = Param {
     key: "ship_beam.pulse_energy", value: 7.5e13, unit: "J", commitment: Placeholder,

@@ -149,6 +149,20 @@ mod tests {
         assert_eq!(w.outcome.unwrap().winner,FactionId(1),"escort departure concedes rather than winning");
     }
     #[test]
+    fn surrender_is_not_a_scored_withdrawal() {
+        let mut w=fixture();
+        w.objective.as_mut().unwrap().disengage_wins=true;
+        w.surrender(BodyId(0)).unwrap();
+        assert_eq!(w.outcome.unwrap().winner,FactionId(1),"giving up is not the withdrawal");
+        let mut w=fixture();
+        w.objective.as_mut().unwrap().disengage_wins=true;
+        w.withdraw(BodyId(0)).unwrap();
+        w.advance_to(jump::SPOOL_SECONDS);
+        let outcome=w.outcome.as_ref().unwrap();
+        assert_eq!(outcome.winner,FactionId(0));
+        assert!(outcome.reason.contains("withdrew"));
+    }
+    #[test]
     fn destroyed_weapons_and_failed_repair_are_not_future_combat_capability() {
         let mut d=Damage::default();d.systems[Subsystem::Beam as usize]=Condition::Destroyed;
         assert!(!can_fight_again(ShipClass::Destroyer,&d,[0,0]));
