@@ -24,6 +24,35 @@ pub struct Doctrine {
     probe_at: BTreeMap<crate::world::BodyId, f64>,
     ping_at: BTreeMap<crate::world::BodyId, f64>,
     salvo_at: BTreeMap<crate::world::BodyId, f64>,
+    /// Ships already braking onto an unscreened prize, and the contact they are braking for.
+    closing: BTreeMap<crate::world::BodyId,crate::mind::ContactId>,
+    /// The doctrine as it stood before the braking run-in, kept as the opponent for A/B surveys.
+    legacy: bool,
+}
+
+/// Margin on the stopping distance. The track is delayed and the brake is not instant.
+const RUN_IN_MARGIN: f64 = 1.3;
+
+/// A full-thrust run at an unscreened prize has to turn into a stop somewhere. Past this
+/// point the speed can no longer be shed before the weapons envelope, and the ship crosses
+/// it in seconds, then spends hours coming back.
+///
+/// The whole relative velocity has to go, not only the closing part. The stop is planned at
+/// the thrust the radiators can sustain, because a brake this long is run at heat balance,
+/// not at the class maximum.
+fn run_in_due(ship:&BodyView,track:&crate::session::TrackView,standoff:f64,class:ShipClass)->bool {
+    let delta=track.pos-ship.pos;
+    let range=delta.length();
+    if range<=standoff {return true;}
+    let relative=ship.vel-track.vel;
+    if relative.dot(delta)<=0.0 {return false;}
+    let brake=cruise_g(&ship.thermal,class).min(ship.thermal_rated_accel/G0).max(1.0)*G0;
+    // A prize braking for its exit is opening the speed difference while this ship closes it.
+    // Only what is left of the drive after matching that sheds the relative speed.
+    let matched=if track.accel.dot(track.vel)<0.0 {track.accel.dot(relative.normalized())} else {0.0};
+    let brake=(brake+matched).clamp(0.3*brake,brake);
+    let stop=relative.dot(relative)/(2.0*brake);
+    range-standoff<=RUN_IN_MARGIN*stop
 }
 
 /// Earliest predicted encounter along an accelerating route to the transport.
@@ -58,7 +87,7 @@ fn choose_target<'a>(view:&'a View,ship:&BodyView,previous:Option<crate::mind::C
     let attacker=view.objective.as_ref().is_some_and(|o|o.attacker==ship.faction);
     let hunt_prize=attacker && view.objective.as_ref().is_some_and(|o|o.prize.is_some());
     let mut contacts:Vec<_>=view.contacts.iter().filter(|c|!c.stale && c.track.is_some()
-        && !c.resolved_missile && !matches!(c.resolved_kind,Some(BodyKind::Probe))
+        && !c.resolved_missile && !c.decoy && !matches!(c.resolved_kind,Some(BodyKind::Probe))
         && (hunt_prize || !matches!(c.resolved_kind,Some(BodyKind::Station)))).collect();
     // The station is the raid. Shoot it once no ship is still inside the screen leash.
     if hunt_prize {
@@ -136,7 +165,7 @@ fn station_detour(ship:&BodyView,site:&crate::world::SensorSite,destination:crat
 }
 
 /// Burn toward a point, and coast only when a timed run is already on a vector that arrives.
-fn press_course(out:&mut Vec<Command>,b:&BodyView,point:crate::kinematics::Vec2,running:bool,time_left:Option<f64>,class:ShipClass) {
+fn press_course(out:&mut Vec<Command>,decoys:bool,b:&BodyView,point:crate::kinematics::Vec2,running:bool,time_left:Option<f64>,class:ShipClass) {
     let toward=point-b.pos;
     let distance=toward.length();
     let direction=if distance>1.0 {toward.normalized()} else {crate::kinematics::Vec2::new(1.0,0.0)};
@@ -148,7 +177,11 @@ fn press_course(out:&mut Vec<Command>,b:&BodyView,point:crate::kinematics::Vec2,
     };
     let coast=running && aligned && arrives;
     if coast {
-        if b.autopilot.is_some() || b.thrust.length()>1e-6 {out.push(Command::Coast {body:b.id});}
+        if b.autopilot.is_some() || b.thrust.length()>1e-6 {
+            // Going dark is the moment for a decoy: it carries the burn on, and the hunter's track with it.
+            if decoys && b.decoys>0 && b.thrust.length()>1e-6 {out.push(Command::DeployDecoy {body:b.id});}
+            out.push(Command::Coast {body:b.id});
+        }
     } else if running {
         let thrust=direction*class.max_g()*G0;
         let burning=b.autopilot.is_none() && (b.thrust-thrust).length()<thrust.length()*0.05;
@@ -201,6 +234,9 @@ fn push_heat(out:&mut Vec<Command>,b:&BodyView,view:&View,detouring:bool) {
 }
 
 impl Doctrine {
+    /// The previous doctrine, for measuring a change against what it replaced.
+    pub fn legacy() -> Self { Self {legacy:true,..Self::default()} }
+
     pub fn orders(&mut self, view: &View) -> Vec<Command> {
         let mut out = vec![];
         if view.outcome.is_some() { return out; }
@@ -281,14 +317,14 @@ impl Doctrine {
             }
             if target.is_none() && let Some(point)=search_destination {
                 let time_left=objective.and_then(|o|o.escape_by).map(|deadline|deadline-view.time);
-                press_course(&mut out,b,point,running,time_left,class);
+                press_course(&mut out,!self.legacy,b,point,running,time_left,class);
                 push_heat(&mut out,b,view,false);
                 continue;
             }
             if running && target.is_none() {push_heat(&mut out,b,view,false);continue;}
             if target.is_none() && hunting {
                 if let Some(point)=view.objective.as_ref().map(|o|o.center) {
-                    press_course(&mut out,b,point,false,None,class);
+                    press_course(&mut out,!self.legacy,b,point,false,None,class);
                 }
             }
             if target.is_none() && view.time >= *self.ping_at.get(&b.id).unwrap_or(&0.0) {
@@ -307,8 +343,15 @@ impl Doctrine {
                 if b.missile_queued.iter().any(|n|*n>0) {out.push(Command::CancelLaunches {body:b.id});}
                 self.salvo_at.remove(&b.id);
             }
+            if self.closing.get(&b.id).is_some_and(|held|*held!=c.id) {self.closing.remove(&b.id);}
             let tr = c.track.as_ref().unwrap();
             let range = (tr.pos-b.pos).length();
+            if !self.legacy && class!=ShipClass::Picket {
+                use crate::world::weapon_fit::BeamAim;
+                // A faster ship cannot be held at range. Its drive is the thing to hit.
+                let aim=if c.resolved_class.is_some_and(|other|other.max_g()>class.max_g()) {BeamAim::Drive} else {BeamAim::Hull};
+                if b.beam_aim!=aim {out.push(Command::SetBeamAim {body:b.id,aim});}
+            }
             if class.has_projector() {
                 use crate::world::weapon_fit::{BeamMode,support_worthwhile};
                 let mode=if support_worthwhile(view,b,c) {BeamMode::Interference} else {BeamMode::Damage};
@@ -323,7 +366,7 @@ impl Doctrine {
                 // On the clock, and dark: a hunter outside catch range is not a fight.
                 if let Some(point)=view.objective.as_ref().map(|o|o.center) {
                     let time_left=objective.and_then(|o|o.escape_by).map(|deadline|deadline-view.time);
-                    press_course(&mut out,b,point,true,time_left,class);
+                    press_course(&mut out,!self.legacy,b,point,true,time_left,class);
                 }
                 push_heat(&mut out,b,view,false);
                 continue;
@@ -333,7 +376,7 @@ impl Doctrine {
                 if let Some(obj)=view.objective.as_ref() {
                     let from=tr.pos-obj.center;
                     let dir=if from.length()>1.0 {from.normalized()} else {crate::kinematics::Vec2::new(1.0,0.0)};
-                    press_course(&mut out,b,obj.center+dir*(obj.radius+EVADE_CATCH),false,None,class);
+                    press_course(&mut out,!self.legacy,b,obj.center+dir*(obj.radius+EVADE_CATCH),false,None,class);
                 }
                 push_heat(&mut out,b,view,false);
                 continue;
@@ -347,7 +390,16 @@ impl Doctrine {
                     else if kinetic {Payload::Kinetic} else if nuclear {Payload::Nuclear} else {Payload::Beam};
                 out.push(Command::KeepRange {body:b.id,target:InterceptTarget::Contact(c.id),
                     range:crate::autopilot::weapon_standoff(payload)});
-            } else {out.push(Command::Flyby { body: b.id, target: InterceptTarget::Contact(c.id) });}
+            } else {
+                // A clear run at the prize: full thrust, then a stop inside the envelope rather than a pass through it.
+                let payload=if b.magazine[Payload::Nuclear.index()]>0 {Payload::Nuclear}
+                    else if b.magazine[Payload::Kinetic.index()]>0 {Payload::Kinetic} else {Payload::Beam};
+                let standoff=crate::autopilot::weapon_standoff(payload);
+                if !self.legacy && (self.closing.contains_key(&b.id) || run_in_due(b,tr,standoff,class)) {
+                    self.closing.insert(b.id,c.id);
+                    out.push(Command::KeepRange {body:b.id,target:InterceptTarget::Contact(c.id),range:standoff});
+                } else {out.push(Command::Flyby { body: b.id, target: InterceptTarget::Contact(c.id) });}
+            }
             // Inside ten light-seconds a raised field is waited out while a long-range round can still break it.
             // SRMs do not count. They are the range the ship is already holding, and waiting on them
             // leaves the beam dark against a coasting target.
@@ -422,7 +474,7 @@ mod tests {
         view.objective.as_mut().unwrap().center=Vec2::new(10.0*AU,0.0);
         let ship=view.bodies.iter_mut().find(|b|b.controllable).unwrap();
         ship.pos=Vec2::ZERO;ship.vel=Vec2::ZERO;
-        view.contacts=(1..=2).map(|id|ContactView {identified_name:None,display_class:None,detection:crate::sensors::DetectionLevel::Resolved,
+        view.contacts=(1..=2).map(|id|ContactView {decoy:false,identified_name:None,display_class:None,detection:crate::sensors::DetectionLevel::Resolved,
             ping_remaining:0.0,active_fire_control:0.0,reporting_sensor:None,
             resolved_class:Some(if id==1 {ShipClass::Transport} else {ShipClass::Frigate}),
             resolved_interceptor:false,damage:None,id:ContactId(id),resolved_kind:Some(BodyKind::Ship),
@@ -446,6 +498,83 @@ mod tests {
         assert!(ai.orders(&view).iter().any(|c|matches!(c,Command::KeepRange {target:InterceptTarget::Contact(ContactId(2)),..})));
         view.contacts[1].stale=true;
         assert!(ai.orders(&view).iter().any(|c|matches!(c,Command::Flyby {target:InterceptTarget::Contact(ContactId(1)),..})));
+    }
+
+    #[test]
+    fn a_clear_run_at_the_prize_turns_into_a_stop_before_the_envelope() {
+        let mut view=encounter_view();
+        view.contacts[1].track.as_mut().unwrap().pos=Vec2::new(0.0,4.0*AU);
+        let nuclear=crate::autopilot::weapon_standoff(Payload::Nuclear);
+        let braking=|orders:&[Command]|orders.iter().any(|c|matches!(c,Command::KeepRange {target:InterceptTarget::Contact(ContactId(1)),range,..} if (*range-nuclear).abs()<1.0));
+        let passing=|orders:&[Command]|orders.iter().any(|c|matches!(c,Command::Flyby {target:InterceptTarget::Contact(ContactId(1)),..}));
+        let mut ai=Doctrine::default();
+        assert!(passing(&ai.orders(&view)),"from rest the run is flat out");
+        // 20,000 km/s needs about 1.5 AU to shed at a destroyer's sustained thrust. Four AU out is early.
+        let set_speed=|view:&mut View,speed:f64|view.bodies.iter_mut().find(|b|b.controllable).unwrap().vel=Vec2::new(speed,0.0);
+        set_speed(&mut view,20_000.0);
+        assert!(passing(&ai.orders(&view)));
+        view.contacts[0].track.as_mut().unwrap().pos=Vec2::new(1.8*AU,0.0);
+        assert!(passing(&Doctrine::legacy().orders(&view)),"the previous doctrine flies through");
+        let orders=ai.orders(&view);
+        assert!(braking(&orders) && !passing(&orders),"{orders:?}");
+        // Once committed it stays committed: the stopping distance shrinks with the speed it sheds.
+        set_speed(&mut view,2_000.0);
+        let orders=ai.orders(&view);
+        assert!(braking(&orders) && !passing(&orders),"{orders:?}");
+        // A prize braking for its exit lengthens the stop, so the run-in starts earlier.
+        let mut early=encounter_view();
+        early.contacts[1].track.as_mut().unwrap().pos=Vec2::new(0.0,4.0*AU);
+        set_speed(&mut early,20_000.0);
+        early.contacts[0].track.as_mut().unwrap().pos=Vec2::new(2.6*AU,0.0);
+        assert!(passing(&Doctrine::default().orders(&early)));
+        early.contacts[0].track.as_mut().unwrap().accel=Vec2::new(-30.0*G0,0.0);
+        early.contacts[0].track.as_mut().unwrap().vel=Vec2::new(5_000.0,0.0);
+        assert!(passing(&Doctrine::default().orders(&early)),"15,000 km/s of closure still fits a full-drive stop");
+        set_speed(&mut early,25_000.0);
+        assert!(braking(&Doctrine::default().orders(&early)));
+        early.contacts[0].track.as_mut().unwrap().accel=Vec2::ZERO;
+        assert!(passing(&Doctrine::default().orders(&early)),"the same closure on a coasting prize is not yet due");
+        // Opening range is not a run-in.
+        set_speed(&mut early,-20_000.0);
+        assert!(passing(&Doctrine::default().orders(&early)));
+    }
+
+    #[test]
+    fn beams_go_for_the_drive_of_a_faster_ship_and_the_hull_of_anything_else() {
+        use crate::world::weapon_fit::BeamAim;
+        let mut view=encounter_view();
+        let own=view.bodies.iter().find(|b|b.controllable).unwrap().ship_class.unwrap();
+        let aims=|orders:&[Command]|orders.iter().filter_map(|c|match c {Command::SetBeamAim {aim,..}=>Some(*aim),_=>None}).collect::<Vec<_>>();
+        let faster=ShipClass::COMBAT.into_iter().find(|c|c.max_g()>own.max_g()).expect("a faster class exists");
+        let slower=ShipClass::COMBAT.into_iter().find(|c|c.max_g()<=own.max_g()).unwrap();
+        view.contacts[1].resolved_class=Some(faster);
+        assert_eq!(aims(&Doctrine::default().orders(&view)),vec![BeamAim::Drive]);
+        assert!(aims(&Doctrine::legacy().orders(&view)).is_empty(),"the previous doctrine never lays its beam");
+        view.bodies.iter_mut().find(|b|b.controllable).unwrap().beam_aim=BeamAim::Drive;
+        assert!(aims(&Doctrine::default().orders(&view)).is_empty(),"an aim already held is not ordered again");
+        view.contacts[1].resolved_class=Some(slower);
+        assert_eq!(aims(&Doctrine::default().orders(&view)),vec![BeamAim::Hull]);
+    }
+
+    #[test]
+    fn a_quarry_going_dark_leaves_a_decoy_to_carry_its_burn() {
+        let session=LocalSession::new(crate::scenario::Scenario::HideAndSeek.build(42,crate::scenario::home_system()));
+        let mut view=session.view(Role::Faction(crate::scenario::RAIDER));
+        let hunt=view.objective.as_ref().unwrap().center;
+        let deadline=view.objective.as_ref().unwrap().escape_by.unwrap();
+        let quarry=view.bodies.iter_mut().find(|b|b.controllable).unwrap();
+        assert!(quarry.decoys>0,"combatants carry decoys");
+        let direction=(hunt-quarry.pos).normalized();
+        quarry.vel=direction*((hunt-quarry.pos).length()/(deadline*0.5));
+        quarry.thrust=direction*120.0*G0;
+        let orders=Doctrine::default().orders(&view);
+        let decoy=orders.iter().position(|c|matches!(c,Command::DeployDecoy {..})).expect("a decoy is released");
+        let coast=orders.iter().position(|c|matches!(c,Command::Coast {..})).unwrap();
+        assert!(decoy<coast,"the decoy leaves while the drive is still lit");
+        assert!(!Doctrine::legacy().orders(&view).iter().any(|c|matches!(c,Command::DeployDecoy {..})));
+        let quarry=view.bodies.iter_mut().find(|b|b.controllable).unwrap();
+        quarry.decoys=0;
+        assert!(!Doctrine::default().orders(&view).iter().any(|c|matches!(c,Command::DeployDecoy {..})));
     }
 
     #[test]
@@ -496,7 +625,7 @@ mod tests {
         let mut view=session.view(Role::Faction(crate::scenario::RAIDER));
         view.objective.as_mut().unwrap().sensor_site=None;
         let ship=view.bodies.iter().find(|b|b.controllable).unwrap().clone();
-        view.contacts=(1..=2).map(|id|ContactView {identified_name:None,display_class:None,detection:crate::sensors::DetectionLevel::Resolved,ping_remaining:0.0,active_fire_control:0.0,reporting_sensor:None,resolved_class:None,
+        view.contacts=(1..=2).map(|id|ContactView {decoy:false,identified_name:None,display_class:None,detection:crate::sensors::DetectionLevel::Resolved,ping_remaining:0.0,active_fire_control:0.0,reporting_sensor:None,resolved_class:None,
             resolved_interceptor:false,
             damage:None,
             id:ContactId(id),resolved_kind:Some(BodyKind::Ship),resolved_missile:false,
@@ -525,7 +654,7 @@ mod tests {
     }
 
     fn resolved_ship(id:u32,pos:Vec2)->ContactView {
-        ContactView {identified_name:None,display_class:None,detection:crate::sensors::DetectionLevel::Resolved,
+        ContactView {decoy:false,identified_name:None,display_class:None,detection:crate::sensors::DetectionLevel::Resolved,
             ping_remaining:0.0,active_fire_control:0.0,reporting_sensor:None,resolved_class:Some(ShipClass::Cruiser),
             resolved_interceptor:false,damage:None,id:ContactId(id),resolved_kind:Some(BodyKind::Ship),
             resolved_missile:false,quality:"resolved",stale:false,

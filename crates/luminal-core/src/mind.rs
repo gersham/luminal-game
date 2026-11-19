@@ -356,6 +356,11 @@ impl Contact {
         (self.detection_slack(t,slack)>=crate::sensors::DetectionLevel::Approximate).then_some(self.track.as_ref()).flatten()
     }
     pub fn estimate(&self,t:f64,sys:&System)->Option<Track> {self.estimate_slack(t,sys,0.0)}
+    /// Whether [`Self::estimate`] would return a track, without propagating it.
+    pub fn can_estimate(&self,t:f64)->bool {
+        let Some(best)=self.best_evidence_slack(t,0.0) else {return false};
+        self.report_level(best,t)>=crate::sensors::DetectionLevel::Approximate && self.track.is_some()
+    }
     /// Propagate a fix that is still inside the stale window once transit time is restored.
     pub fn estimate_slack(&self,t:f64,sys:&System,slack:f64)->Option<Track> {
         let mut track=self.usable_track_slack(t,slack)?.at(t,sys);

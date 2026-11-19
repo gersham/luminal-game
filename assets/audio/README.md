@@ -35,3 +35,35 @@ in `scripts/generate-contact-audio.py`: two low, descending bell strikes,
 1.8 seconds, mono 24 kHz PCM, peak 0.24. It has priority over routine weapon
 sounds and can replace an occupied voice; its two-second cooldown still applies.
 The spinal cue is likewise generated locally by `scripts/generate-spinal-audio.py`.
+
+## Effects resynthesized, 18 November 2026
+
+`scripts/generate-sfx.py` (Python standard library only, deterministic) makes
+`click`, `ping`, `pd`, `spinal`, `explosion`, `jump-spool`, `jump` and the
+`drive` loop: stereo, 48 kHz, as long as each sound needs, peak-normalized to
+0.24. After a listen the operator kept the earlier Curds renders of `launch`,
+`beam`, `impact` and `alert`, and a separate hull-hit sound was tried and
+dropped. `contact.wav` and `ambient.wav` are unchanged.
+`generate-spinal-audio.py` is superseded: the spinal recipe keeps its bass
+drop, sweep and crack, with a hull ring and a stereo tail added.
+
+Playback:
+
+- A sound leans toward where its light arrived on the plot, at most 70% to one
+  side. Interface sounds and the contact and alert tones stay centred. Mono
+  clips are spread to both speakers first.
+- Physical sounds vary by about ±4.5% in pitch and up to 1.3 dB in level from
+  one play to the next. Signals (click, contact, alert) never vary.
+- Point defence no longer shares the beam sound. Jump spool, departure and
+  arrival have cues.
+- A heavy hit on the command ship plays the alert and the hit together.
+  Contact and alert no longer hold back the sound that follows them.
+- The drive loop follows the command ship's thrust, fading in and rising
+  slightly in pitch. It is silent when coasting, paused or muted.
+- Six voices instead of four. Cooldowns and the no-backlog rule are unchanged.
+  With the drive and the music, every peak would have to coincide at a full
+  effects slider to reach full scale; four voices could not get there at all.
+
+The synthesized recipes were checked by level, length, loop seam and
+spectrogram, and then by the operator's ear for the four reverted above. The
+rest still want a listen in play.

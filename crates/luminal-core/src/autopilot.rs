@@ -162,8 +162,22 @@ pub fn keep_range(ship:State,target:State,ff:Vec2,range:f64,max_accel:f64)->Appr
     // The stop uses the accel the brake will actually spend. Planning it at half
     // sheds the closing speed while the range is still astronomical, the ship
     // accelerates again, and two fleets do not meet inside a watch.
-    approach(ship,target,ff*0.25,range,max_accel,max_accel)
+    //
+    // A target that is itself braking takes part of the drive just to keep pace. Planning
+    // the stop with the whole drive then puts the braking curve out of reach: the ship
+    // falls behind it, passes the target at speed and spends hours coming back. Plan with
+    // what is left. A target pulling away is not counted on; that estimate is the noisy one.
+    //
+    // Only a target that is slowing counts. One accelerating head-on looks the same along
+    // the line of approach, but it will brake for its own range, and planning as if it
+    // never will is the early stop the paragraph above warns about.
+    let line=(target.pos-ship.pos).normalized();
+    let slowing=ff.dot(target.vel)<0.0;
+    let pace=if slowing {(-ff.dot(line)).clamp(0.0,(1.0-KEEP_RANGE_MIN_BRAKE)*max_accel)} else {0.0};
+    approach(ship,target,ff*0.25,range,max_accel-pace,max_accel)
 }
+/// Least fraction of the drive a range order plans its stop with, however hard the target brakes.
+const KEEP_RANGE_MIN_BRAKE: f64 = 0.25;
 
 /// Full burn toward the target's current estimated position, without approach braking.
 pub fn flyby(ship: State, target: State, _target_accel: Vec2, max_accel: f64) -> Approach {
@@ -351,6 +365,32 @@ fn clamp(v: Vec2, max: f64) -> Vec2 {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_range_order_brakes_earlier_for_a_target_that_is_itself_braking() {
+        use crate::units::{AU,G0};
+        let drive=80.0*G0;
+        // Closing at 15,000 km/s from 1 AU: inside the stop a full drive can still make.
+        let ship=State {pos:Vec2::ZERO,vel:Vec2::new(25_000.0,0.0)};
+        let target=State {pos:Vec2::new(AU,0.0),vel:Vec2::new(10_000.0,0.0)};
+        let coasting=keep_range(ship,target,Vec2::ZERO,1_000.0,drive);
+        assert!(coasting.thrust.x>0.0,"a coasting target still allows acceleration, thrust {:?}",coasting.thrust);
+        // The same target shedding 30 g toward the ship leaves 50 g of brake. The stop no longer fits.
+        let braking=keep_range(ship,target,Vec2::new(-30.0*G0,0.0),1_000.0,drive);
+        assert!(braking.thrust.x<0.0,"thrust {:?}",braking.thrust);
+        assert!(braking.eta>coasting.eta);
+        // A target pulling away is not counted on, and a hard-braking one never plans below the floor.
+        let fleeing=keep_range(ship,target,Vec2::new(30.0*G0,0.0),1_000.0,drive);
+        assert_eq!(fleeing.eta,coasting.eta);
+        let extreme=keep_range(ship,target,Vec2::new(-500.0*G0,0.0),1_000.0,drive);
+        assert!(extreme.eta.is_finite() && extreme.thrust.length()<=drive*(1.0+1e-9));
+        // Head-on, an enemy accelerating toward the ship is speeding up, not braking. It will
+        // stop for its own range, so the plan keeps the whole drive.
+        let oncoming=State {pos:Vec2::new(AU,0.0),vel:Vec2::new(-10_000.0,0.0)};
+        let slow=State {pos:Vec2::ZERO,vel:Vec2::new(5_000.0,0.0)};
+        let charging=keep_range(slow,oncoming,Vec2::new(-30.0*G0,0.0),1_000.0,drive);
+        assert_eq!(charging.eta,keep_range(slow,oncoming,Vec2::ZERO,1_000.0,drive).eta);
+    }
+
     use super::*;
     #[test]
     fn evasive_burn_maximizes_lateral_miss_distance() {

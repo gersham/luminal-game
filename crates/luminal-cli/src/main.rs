@@ -150,6 +150,54 @@ fn main() {
         scenario_survey(seeds,hours,first_seed,&only,&only_mode);
         return;
     }
+    if first.as_deref()==Some("--trace") {
+        // --trace <scenario> <seed> <hours> <every-min> [from-hour]: both sides on doctrine, with each side's orders.
+        let scenario=args.next().and_then(|s|scenario::Scenario::parse(&s)).expect("scenario");
+        let seed=args.next().and_then(|s|s.parse().ok()).unwrap_or(1);
+        let hours=args.next().and_then(|s|s.parse::<f64>().ok()).unwrap_or(24.0);
+        let every=args.next().and_then(|s|s.parse::<f64>().ok()).unwrap_or(60.0)*60.0;
+        let from=args.next().and_then(|s|s.parse::<f64>().ok()).unwrap_or(0.0)*3600.0;
+        let world=scenario.build(seed,scenario::home_system());
+        for event in &world.script {println!("SCRIPT T+ {:.0} min {:?}",event.at/60.0,event.kind);}
+        let mut s=LocalSession::new(world);
+        s.set_watch(Some(luminal_core::world::FactionId(255)));
+        s.enable_bot(ESCORT,true);s.enable_bot(RAIDER,true);
+        s.command(Role::Spectator,Command::SetPaused(false)).unwrap();
+        let mut t=0.0;
+        let mut shown=0.0;
+        while t<hours*3600.0 {
+            s.tick(every);t+=every;
+            if t<from {continue;}
+            let truth=s.view(Role::Spectator);
+            println!("T+ {:.0} min",truth.time/60.0);
+            if let Some(o)=&truth.outcome {println!("  OUTCOME {:?}: {}",o.winner,o.reason);}
+            let center=truth.objective.as_ref().map(|o|o.center);
+            for b in truth.bodies.iter().filter(|b|matches!(b.kind,luminal_core::world::BodyKind::Ship)) {
+                println!("  {:<18} {} hull {:>3.0}% heat {:>3.0}% SRM {:>2} LRM {:>2} v {:>6.0} km/s burn {:>5.1} g goal {:>6.2} AU order {:?}",
+                    b.name,if b.faction==ESCORT {"E"} else {"R"},100.0*b.damage.damage.hull/b.damage.damage.hull_max.max(1.0),
+                    100.0*b.thermal.heat_fraction(),b.magazine[0],b.magazine[1],b.vel.length(),b.thrust.length()/luminal_core::units::G0,
+                    center.map_or(-1.0,|c|(b.pos-c).length()/luminal_core::units::AU),b.autopilot.map(|a|(a.order,a.status)));
+            }
+            for f in [ESCORT,RAIDER] {
+                let v=s.view(Role::Faction(f));
+                let own=v.bodies.iter().find(|b|b.kind==luminal_core::world::BodyKind::Ship);
+                for c in &v.contacts {
+                    if c.resolved_missile {continue;}
+                    let range=c.track.as_ref().zip(own).map_or(-1.0,|(tr,b)|(tr.pos-b.pos).length()/luminal_core::units::AU);
+                    println!("    {} sees C{} {:?} {:?} {} range {:.3} AU{}",if f==ESCORT {"E"} else {"R"},c.id.0,c.resolved_kind,c.resolved_class,c.quality,range,if c.stale {" STALE"} else {""});
+                }
+                // Standing orders are reissued every frame. Show each distinct one once, with its count.
+                let mut notes:Vec<(String,u32,f64)>=vec![];
+                for (at,_,note) in s.bot_debug(f).filter(|(at,_,_)|*at>shown) {
+                    match notes.iter_mut().find(|(seen,_,_)|seen==note) {Some(entry)=>entry.1+=1,None=>notes.push((note.clone(),1,*at))}
+                }
+                for (note,count,at) in notes {println!("    {} @{:.0}m ×{count} {note}",if f==ESCORT {"E"} else {"R"},at/60.0);}
+            }
+            shown=truth.time;
+            if truth.outcome.is_some() {break;}
+        }
+        return;
+    }
     let raider_only = first.as_deref() == Some("--raider-only");
     let bots = first.as_deref() == Some("--doctrine") || raider_only;
     let hours: f64 = if bots { args.next() } else { first }.and_then(|a| a.parse().ok()).unwrap_or(6.0);
@@ -201,8 +249,12 @@ fn scenario_survey(seeds:u64,hours:f64,first_seed:u64,only:&str,only_mode:&str) 
                 let start_sep=separation(&opening,player,player_faction);
                 if mode=="doctrine" {
                     session.set_watch(Some(FactionId(255)));
-                    session.enable_bot(ESCORT,true);
-                    session.enable_bot(RAIDER,true);
+                    // `LUMINAL_LEGACY=escort|raider|both` flies that side on the previous doctrine.
+                    let legacy=std::env::var("LUMINAL_LEGACY").unwrap_or_default();
+                    for (faction,name) in [(ESCORT,"escort"),(RAIDER,"raider")] {
+                        if legacy==name || legacy=="both" {session.enable_bot_with(faction,luminal_core::doctrine::Doctrine::legacy());}
+                        else {session.enable_bot(faction,true);}
+                    }
                 } else {
                     for faction in scenario.bots() {session.enable_bot(*faction,true);}
                 }

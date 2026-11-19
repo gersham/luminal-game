@@ -55,6 +55,18 @@ impl Theme {
 mod tests {
     use super::*;
     #[test]
+    fn every_theme_system_has_debris_and_a_giant_to_hide_against() {
+        for theme in [Theme::Luminal,Theme::GrimDark,Theme::Imperium,Theme::Culture] {
+            let system=theme.star_system(7);
+            let terrain=luminal_core::world::terrain::Terrain::generate(&system,7);
+            let giants=system.bodies.iter().filter(|b|b.kind==CelestialKind::Planet && b.radius>luminal_core::params::GIANT_RADIUS_KM.value).count();
+            println!("TERRAIN {theme:?}: {} fields, {giants} giants",terrain.fields.len());
+            assert!(!terrain.fields.is_empty(),"{theme:?} has no gap wide enough for a debris field");
+            assert!(giants>0,"{theme:?} has no giant");
+            for field in &terrain.fields {assert!(field.radius>0.01*luminal_core::units::AU && field.center.length()>0.3*luminal_core::units::AU);}
+        }
+    }
+    #[test]
     fn distinct_repeatable_systems_support_the_escort_mission() {
         for (theme,planets,moons) in [(Theme::Luminal,8,13),(Theme::GrimDark,6,7),(Theme::Imperium,5,6),(Theme::Culture,4,8)] {
             for seed in [7,42,99] {

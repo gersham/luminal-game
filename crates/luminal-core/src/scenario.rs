@@ -195,6 +195,7 @@ pub fn transport_intercept_in_system(seed:u64,system:System)->World {
     world.bodies[0].point_defence.as_mut().unwrap().rate_hz=0.5;
     for id in [BodyId(1),BodyId(2)] {world.bodies[id.0 as usize].point_defence.as_mut().unwrap().rate_hz=0.2;}
     for id in [BodyId(1), BodyId(2)] {
+        world.bodies[id.0 as usize].decoys=crate::params::DECOY_INVENTORY.value as u32;
         world.bodies[id.0 as usize].damage.hull=crate::damage::FRIGATE_HULL_HP;
         world.bodies[id.0 as usize].damage.hull_max=crate::damage::FRIGATE_HULL_HP;
         world.bodies[id.0 as usize].magazine=crate::world::ShipClass::Frigate.magazine();
@@ -260,7 +261,7 @@ static HIDE_PLAY:Play=Play {
 };
 static ARMADA_PLAY:Play=Play {
     name:"Armada",token:"armada",brief:"Ten ships each, from opposite ends.",forces:"Battleship and a mixed fleet of nine",
-    detail:"Your battleship is at the rear of nine ships, and they hold formation on you. Fleet orders travel at light speed: screen, close, or weapons free.",
+    detail:"Your battleship is at the rear of nine ships, and they hold formation on you. Fleet orders travel at light speed: screen, close, engage a track, weapons free or hold, or go silent.",
     flagship:ShipClass::Battleship,bots:RAIDER_SIDE,player_class:false,inspect_protect:false,opposed_ship:None,opposed_bots:NO_SIDE,build:armada_world,
 };
 static CONVOY_PLAY:Play=Play {
@@ -328,7 +329,50 @@ impl Scenario {
     pub fn build(self,seed:u64,system:System)->World {self.build_with(seed,system,self.flagship())}
     pub fn build_with(self,seed:u64,system:System,class:ShipClass)->World {
         let class=if self.play().player_class {class} else {self.flagship()};
-        (self.play().build)(seed,system,class)
+        let mut world=(self.play().build)(seed,system,class);
+        let script=self.script(seed,&world);
+        world.schedule_script(script);
+        world
+    }
+    /// What this scenario has arranged to happen part-way through, from the seed alone.
+    /// Its own random stream, so adding an event never moves anything else.
+    fn script(self,seed:u64,world:&World)->Vec<crate::world::events::Timed> {
+        use crate::world::events::{Scripted,Timed};
+        // The scenario is mixed in, or two scenarios on one seed would roll the same chances.
+        let mut rng=Rng::stream(seed,0x4556_4E54^self.token().bytes().fold(0u64,|hash,byte|hash.wrapping_mul(131).wrapping_add(byte as u64)));
+        let mut hours=|from:f64,to:f64|3_600.0*(from+(to-from)*rng.uniform());
+        let objective=world.objective.as_ref();
+        let transport=|skip:Option<BodyId>|world.bodies.iter().enumerate().map(|(i,b)|(BodyId(i as u32),b))
+            .find(|(id,b)|b.ship_class==Some(ShipClass::Transport) && Some(*id)!=skip).map(|(id,_)|id);
+        let opponent=objective.and_then(|o|o.player).and_then(|id|world.body(id)).map(|b|if b.faction==ESCORT {RAIDER} else {ESCORT});
+        let mut events=vec![];
+        match self.token() {
+            "escort"=>{
+                events.push(Timed {at:hours(4.0,9.0),kind:Scripted::Flare});
+                let (at,chance)=(hours(3.0,8.0),hours(0.0,1.0)/3_600.0);
+                if chance<0.4 && let Some(id)=transport(None) {events.push(Timed {at,kind:Scripted::Casualty(id)});}
+            }
+            "raid"=>events.push(Timed {at:hours(6.0,12.0),kind:Scripted::Flare}),
+            "hide"=>events.push(Timed {at:hours(8.0,16.0),kind:Scripted::Flare}),
+            "armada"=>events.push(Timed {at:hours(18.0,24.0),kind:Scripted::Reinforcement {faction:None,class:ShipClass::Destroyer}}),
+            "convoy"=>{
+                let (at,chance)=(hours(4.0,8.0),hours(0.0,1.0)/3_600.0);
+                // The second transport, so the one the scenario is scored on keeps its drive.
+                if chance<0.7 && let Some(id)=transport(objective.map(|o|o.protect)) {events.push(Timed {at,kind:Scripted::Casualty(id)});}
+                let (at,chance)=(hours(5.0,10.0),hours(0.0,1.0)/3_600.0);
+                if chance<0.3 {events.push(Timed {at,kind:Scripted::Flare});}
+            }
+            "relief"=>{
+                let (at,chance)=(hours(6.0,9.0),hours(0.0,1.0)/3_600.0);
+                if chance<0.5 {events.push(Timed {at,kind:Scripted::Reinforcement {faction:opponent,class:ShipClass::Frigate}});}
+            }
+            "last"=>{
+                let (at,chance)=(hours(3.0,5.0),hours(0.0,1.0)/3_600.0);
+                if chance<0.5 {events.push(Timed {at,kind:Scripted::Reinforcement {faction:opponent,class:ShipClass::Picket}});}
+            }
+            _=>{}
+        }
+        events
     }
 }
 
@@ -344,14 +388,14 @@ fn clear_of_celestials(system:&System,pos:Vec2)->bool {
 fn spec(name:&str,kind:BodyKind,faction:FactionId,pos:Vec2,magazine:u32)->BodySpec {
     BodySpec {name:name.into(),kind,faction,state:State {pos,vel:Vec2::ZERO},thrust:Vec2::ZERO,magazine}
 }
-fn fit_combatant(world:&mut World,id:BodyId,class:ShipClass,screens:bool) {
+pub(crate) fn fit_combatant(world:&mut World,id:BodyId,class:ShipClass,screens:bool) {
     {
         let b=&mut world.bodies[id.0 as usize];
         b.controls.ecm_rating=class.sensor_rating();b.controls.eccm_rating=class.sensor_rating()*0.5;b.baseline_emission_factor=0.5;
         b.ship_class=Some(class);
         b.damage.hull_max=crate::damage::FRIGATE_HULL_HP*class.scale();b.damage.hull=b.damage.hull_max;
         b.damage.armour_max=500.0*class.protection();b.damage.armour=b.damage.armour_max;
-        b.magazine=class.magazine();b.armed=true;
+        b.magazine=class.magazine();b.armed=true;b.decoys=crate::params::DECOY_INVENTORY.value as u32;
         b.thermal.capacity_scale=class.scale();
         b.thermal.capacitor_multiplier=if class==ShipClass::Battleship {2.0} else {1.0};
         b.thermal.capacitor_j=b.thermal.capacitor_capacity();

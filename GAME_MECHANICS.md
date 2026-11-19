@@ -245,6 +245,66 @@ The player commands one assigned ship: the frigate in the escort scenario. Allie
 
 The allied lunar sensor station orbits the Moon, is drawn as a small square, carries no weapons or screens, and pings automatically once per simulation minute. Its outgoing ping circles are hidden from the player, but its received sensor reports are shared. See [REFINEMENTS.md](REFINEMENTS.md) for implemented uncertainty, local missile sensors, probe behavior and current prototype limits.
 
+## Fleet orders, deception, aimed fire, terrain and events (November 18)
+
+Every number here is a `Placeholder` in `params.rs`. None of it has been played for balance.
+
+### Fleet orders
+
+The flagship has six orders for the rest of its side. Each travels at light speed as one order per ship, can be blocked by a planet, and replaces the posture the previous one left standing.
+
+- **SCREEN**, **CLOSE** and **WEAPONS FREE** are as before.
+- **ENGAGE** names one track. Each ship closes to the standoff of its longest weapon, lays its beam on that track, and launches a volley each salvo interval while its own delivered picture puts the track inside that weapon's reach. It stands until another order arrives or the side sees the track end.
+- **WEAPONS HOLD** ceases beam fire and cancels queued launches. Ships keep their stations.
+- **EMISSION SILENCE** coasts with active sensors and screens off and weapons held. Any other fleet order ends it and restores those two settings as they were; it does not restart the drive or re-arm anything.
+
+### Decoys
+
+Each combatant carries two deception drones. Releasing one puts a drone where the ship is, with its velocity, name, class and signature, burning on the ship's present burn (or along its course at 20 g if it was coasting) for 30 minutes.
+
+- Every enemy track on the ship passes to the drone. Two things separating from one point cannot be told apart, and the one still burning is the one that stays in the picture. The hand-over reaches each watcher at light speed: light that left the ship before the release still belongs to the old track, and only light it emits afterward makes it a new contact.
+- Rounds already in flight that have not found the target with their own seekers follow the track to the drone. This one change is applied at the moment of release, not when the round would learn of it; such a round is by definition still far off.
+- An identity-level look, once it reaches the enemy's command ship, shows the track to be a decoy. Nothing less does.
+- A decoy has no sensors, weapons or screens, and any hit destroys it. The enemy sees a ship destroyed. Its own side is not told a ship was lost.
+
+The emissions are real power for a real half hour, per §12: a decoy that did not burn would deceive nobody.
+
+### Aim points and heat
+
+The main beam is laid on one of five aim points.
+
+- **Hull** is the rule as it was.
+- **Drive**, **Sensors** and **Weapons** are small aim points. Inside 3 light-seconds, half the coupled pulse lands; the casualty roll is twice as exposed, so the chance of a subsystem casualty is about that of an unaimed hit; and three times in four the casualty falls in the chosen group. Beyond 3 light-seconds the shot goes to the hull. The reactor, the mind and the crew cannot be aimed at.
+- **Heat** warms instead of holing. Whatever the screens do not take goes into the target's heat tank, with no hull or armour damage and no casualty.
+
+Nothing passes the screens and nothing is multiplied. An aim changes only what the energy does behind them. The shooter learns the result the way it learns any damage: from an identity-level echo.
+
+### Terrain
+
+Three things lower what a look returns. None is an extra detection roll.
+
+- **A giant behind the target.** A passive look at a target within four disc radii of a giant planet's direction, with the planet behind it, returns a bearing at best. Active returns are unaffected.
+- **Debris.** Two fields sit in gaps between planetary orbits, placed by the scenario seed. An active return from a target inside one is an approximate position at best. Passive looks are unaffected.
+- **Stellar flare.** While a flare's light is on a sensor, every passive look loses one level. The front travels at c, so each ship is dazzled at its own time, and a ship in a planet's shadow is not dazzled at all.
+
+Missile seekers ignore all three.
+
+### Arranged events
+
+A scenario may schedule events from its seed. A side learns of one when its light or its report arrives.
+
+| Scenario | Event |
+|---|---|
+| Escort | A flare between hours 4 and 9. Two games in five, a drive casualty on the transport between hours 3 and 8. |
+| Raid | A flare between hours 6 and 12. |
+| Hide and Seek | A flare between hours 8 and 16. |
+| Armada | Between hours 18 and 24 a destroyer jumps in for whichever side has fewer armed ships. Level sides get nobody. |
+| Convoy | Seven games in ten, a drive casualty on the second transport between hours 4 and 8. Three in ten, a flare. |
+| Relief | Half the time, an enemy frigate jumps in between hours 6 and 9. |
+| Last Ship | Half the time, an enemy picket jumps in between hours 3 and 5. |
+
+A drive casualty takes propulsion from intact to damaged and is repaired like any other. A reinforcement arrives 0.3 AU from its side's senior ship, moving with it, fresh and fully loaded, with a jump flash anyone can see.
+
 ## Project principle: modern Royal Navy terminology
 
 Established by the user, 2026-09-27: use **modern, post-Second World War Royal Navy terminology** consistently throughout the game's player-facing language and design documentation, including contacts, tracks, weapons, manoeuvring, sensors and command/status reports. Prefer contemporary usage; avoid age-of-sail, First World War and Second World War terminology unless the term remains in modern service.

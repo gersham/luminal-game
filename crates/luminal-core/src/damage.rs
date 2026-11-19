@@ -103,6 +103,22 @@ impl Damage {
         if points<=0.0 || rng.uniform()>=chance {return None;}
         self.hit_system(installed,rng)
     }
+    /// As `penetrate`, for a pulse held on `group`. The casualty roll is `exposure` times as
+    /// exposed, and with chance `bias` the casualty is one of the group's fitted, surviving systems.
+    pub fn penetrate_aimed(&mut self,energy_j:f64,installed:&[bool;System::COUNT],rng:&mut Rng,group:&[System],exposure:f64,bias:f64)->Option<System> {
+        let points=energy_j.max(0.0)/JOULES_PER_HP;
+        let soaked=(points*0.5).min(self.armour);
+        self.armour-=soaked;
+        self.hull=(self.hull-(points-soaked)).max(0.0);
+        let scale=exposure*points/(self.hull_max.max(1e-9)*CRITICAL_MIN_HULL_FRACTION);
+        let chance=1.0-(1.0-self.system_hit_chance()).powf(scale);
+        if points<=0.0 || rng.uniform()>=chance {return None;}
+        let aimed:Vec<_>=group.iter().copied().filter(|s|installed[*s as usize] && self.state(*s)!=Condition::Destroyed).collect();
+        if aimed.is_empty() || rng.uniform()>=bias {return self.hit_system(installed,rng);}
+        let system=aimed[((rng.uniform()*aimed.len() as f64) as usize).min(aimed.len()-1)];
+        self.systems[system as usize].hit();
+        Some(system)
+    }
     pub fn hit_system(&mut self,installed:&[bool;System::COUNT],rng:&mut Rng)->Option<System> {
         let eligible:Vec<_>=System::ALL.into_iter().filter(|s|installed[*s as usize] && self.state(*s)!=Condition::Destroyed).collect();
         if eligible.is_empty() {return None;}
@@ -290,6 +306,37 @@ mod tests {
         assert_eq!((d.hull,d.armour),(73.0,0.0));
         d.penetrate(100.0*JOULES_PER_HP,&[false;System::COUNT],&mut rng);
         assert_eq!(d.hull,0.0);
+    }
+    #[test] fn an_aimed_pulse_chooses_its_casualty_and_never_the_reactor() {
+        use crate::world::weapon_fit::BeamAim;
+        let installed=[true;System::COUNT];
+        for aim in [BeamAim::Drive,BeamAim::Sensors,BeamAim::Weapons] {
+            assert!(!aim.systems().is_empty());
+            // Power, the mind and the crew end a ship outright or stop everything aboard. They are not aim points.
+            assert!(aim.systems().iter().all(|s|!matches!(s,System::Power|System::Mind|System::Crew)),"{aim:?}");
+        }
+        assert!(BeamAim::Hull.systems().is_empty() && BeamAim::Heat.systems().is_empty());
+        let mut rng=Rng::new(11);
+        let (mut inside,mut casualties)=(0,0);
+        for _ in 0..4000 {
+            let mut d=Damage {hull:1000.0,hull_max:1000.0,armour:0.0,..Default::default()};
+            if let Some(system)=d.penetrate_aimed(40.0*JOULES_PER_HP,&installed,&mut rng,BeamAim::Drive.systems(),2.0,0.75) {
+                casualties+=1;
+                if BeamAim::Drive.systems().contains(&system) {inside+=1;}
+            }
+            assert_eq!(d.hull,960.0,"the hull takes what lands, aimed or not");
+        }
+        let share=inside as f64/casualties as f64;
+        // Three in four by choice, plus the lottery's own share of the remaining quarter.
+        assert!(casualties>1000 && share>0.76 && share<0.86,"{inside}/{casualties}");
+        // A group with nothing left to hit falls back to the lottery, and no group at all is the plain rule.
+        let mut d=Damage {hull:1000.0,hull_max:1000.0,armour:0.0,..Default::default()};
+        for s in BeamAim::Drive.systems() {d.systems[*s as usize]=Condition::Destroyed;}
+        let hit=(0..400).find_map(|_|d.penetrate_aimed(40.0*JOULES_PER_HP,&installed,&mut rng,BeamAim::Drive.systems(),2.0,1.0));
+        assert!(hit.is_some_and(|s|!BeamAim::Drive.systems().contains(&s)));
+        let (mut a,mut b)=(Damage::default(),Damage::default());
+        let (mut ra,mut rb)=(Rng::new(5),Rng::new(5));
+        for _ in 0..50 {assert_eq!(a.penetrate(3.0*JOULES_PER_HP,&installed,&mut ra),b.penetrate_aimed(3.0*JOULES_PER_HP,&installed,&mut rb,&[],1.0,0.75));}
     }
     #[test] fn two_system_hits_destroy_without_system_hitpoints() {
         let mut c=Condition::Intact;c.hit();assert_eq!(c.effectiveness(),0.5);

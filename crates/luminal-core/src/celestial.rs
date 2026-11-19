@@ -88,25 +88,50 @@ impl System {
         (0..self.bodies.len()).find(|&i| (self.state(i, t).pos - pos).length() < self.bodies[i].radius * margin)
     }
 
+    /// Visit every body's state at `t` in index order, computing each parent once.
+    /// A moon otherwise recomputes its planet, and gravity is summed many times a frame.
+    #[inline]
+    fn each_state(&self, t: f64, mut visit: impl FnMut(&Celestial, State)) {
+        const INLINE: usize = 32;
+        if self.bodies.len() > INLINE {
+            for (i, b) in self.bodies.iter().enumerate() { visit(b, self.state(i, t)); }
+            return;
+        }
+        let mut states = [State { pos: Vec2::ZERO, vel: Vec2::ZERO }; INLINE];
+        for (i, b) in self.bodies.iter().enumerate() {
+            let state = match b.orbit {
+                Orbit::Fixed(pos) | Orbit::Frozen { pos, .. } => State { pos, vel: Vec2::ZERO },
+                Orbit::Circular { parent, radius, period, phase } => {
+                    // Same arithmetic as `state`, so results are bit-identical.
+                    let p = if parent < i { states[parent] } else { self.state(parent, t) };
+                    let w = TAU / period;
+                    let a = phase + w * t;
+                    let (s, c) = a.sin_cos();
+                    State { pos: p.pos + Vec2::new(c, s) * radius, vel: p.vel + Vec2::new(-s, c) * (radius * w) }
+                }
+            };
+            states[i] = state;
+            visit(b, state);
+        }
+    }
+
     pub fn gravity(&self, pos: Vec2, t: f64) -> Vec2 {
-        self.bodies.iter().enumerate().fold(Vec2::ZERO, |g, (i, b)| {
-            let d = self.state(i, t).pos - pos;
+        let mut g = Vec2::ZERO;
+        self.each_state(t, |b, state| {
+            let d = state.pos - pos;
             let r = d.length().max(b.radius);
-            g + d * (b.gm / (r * r * r))
-        })
+            g = g + d * (b.gm / (r * r * r));
+        });
+        g
     }
 
     /// Integration step suited to the strongest local gravity gradient.
     pub fn step_size(&self, pos: Vec2, t: f64) -> f64 {
-        let tau = self
-            .bodies
-            .iter()
-            .enumerate()
-            .map(|(i, b)| {
-                let r = (self.state(i, t).pos - pos).length().max(b.radius);
-                (r * r * r / b.gm).sqrt()
-            })
-            .fold(f64::INFINITY, f64::min);
+        let mut tau = f64::INFINITY;
+        self.each_state(t, |b, state| {
+            let r = (state.pos - pos).length().max(b.radius);
+            tau = f64::min(tau, (r * r * r / b.gm).sqrt());
+        });
         (STEP_FRACTION * tau).clamp(MIN_STEP_S, MAX_STEP_S)
     }
 

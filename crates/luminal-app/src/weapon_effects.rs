@@ -98,9 +98,7 @@ impl WeaponEffects {
                 draw_missile(painter,p,e.marker.color.gamma_multiply(alpha*alpha),false);
                 let radius=8.0+24.0*(1.0-alpha);
                 let color=Color32::from_rgb(255,45,45);
-                for layer in (1..=8).rev() {
-                    painter.circle_filled(p,radius*layer as f32/8.0,color.gamma_multiply(alpha*0.18));
-                }
+                fx::glow(painter,p,radius*1.5,Color32::from_rgb(255,120,60),alpha*0.9);
                 painter.circle_filled(p,3.0+3.0*alpha,color.gamma_multiply(alpha));
                 if let luminal_core::world::weapon_fit::WeaponVisual::Canister(count)=e.visual {
                     for i in 0..count {

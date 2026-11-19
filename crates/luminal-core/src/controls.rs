@@ -151,10 +151,15 @@ pub struct Controls {
     pub ecm:Mode,pub screens:Mode,
     pub ecm_active:bool,pub screens_latched:bool,
     pub ecm_rating:f64,pub eccm_rating:f64,
+    /// Standing order to fight one track: hold weapon range, lay the beam on it, keep launching.
+    pub engage:Option<ContactId>,
+    pub engage_salvo_at:f64,
+    /// Emission silence. Holds the active-sensor and screen modes to put back on release.
+    pub emcon:Option<(Mode,Mode)>,
 }
 impl Default for Controls {
     fn default()->Self {Self {active:Mode::Off,next_ping_at:0.0,transport_alerted:false,evade:Mode::Auto,evading:false,evasion:None,drift_side:None,last_auto_ping:None,ecm:Mode::Auto,screens:Mode::Auto,
-        ecm_active:false,screens_latched:false,ecm_rating:100.0,eccm_rating:50.0}}
+        ecm_active:false,screens_latched:false,ecm_rating:100.0,eccm_rating:50.0,engage:None,engage_salvo_at:0.0,emcon:None}}
 }
 impl Body {
     pub fn ecm_strength(&self)->f64 {
@@ -208,7 +213,8 @@ impl World {
         let origin=b.trajectory.state_at(self.time).unwrap().pos;
         let mut resolved_ship=false;let mut missile_watch=false;
         if let Some(p)=self.received_picture(id) {for c in p.contacts.values() {
-            if self.contact_retired(b.faction,c.id) {continue;}
+            // Only a classified contact can set either flag.
+            if !c.resolved || (resolved_ship && missile_watch) || self.contact_retired(b.faction,c.id) {continue;}
             let level=c.detection(self.time);
             let kind=if c.resolved {self.body_for_contact(b.faction,c.id).map(|id|self.bodies[id.0 as usize].kind)} else {None};
             resolved_ship|=level>=sensors::DetectionLevel::Resolved && kind==Some(BodyKind::Ship);

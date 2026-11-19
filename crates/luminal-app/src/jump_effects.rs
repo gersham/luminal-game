@@ -14,9 +14,7 @@ fn key(e:&luminal_core::world::CombatEvent)->CombatLogKey {
     (e.emitted_at.to_bits(),e.received_at.to_bits(),e.kind as u8,e.own_body.map(|id|id.0),e.contact.map(|id|id.0))
 }
 fn glow(painter:&egui::Painter,p:Pos2,radius:f32,strength:f32) {
-    for layer in (1..=12).rev() {
-        painter.circle_filled(p,radius*layer as f32/12.0,BLUE.gamma_multiply(strength*0.06));
-    }
+    fx::glow(painter,p,radius*1.2,BLUE,strength*0.6);
 }
 impl JumpEffects {
     pub(super) fn observe(&mut self,view:&View,now:f64) {
@@ -74,10 +72,7 @@ impl JumpEffects {
             let p=to_screen(cam,rect,pos);
             // An initial white flash opens into a hot asymmetric debris cloud.
             let radius=18.0+95.0*age.sqrt();
-            for layer in (1..=14).rev() {
-                let fraction=layer as f32/14.0;
-                painter.circle_filled(p,radius*fraction,Color32::from_rgb(255,90,24).gamma_multiply(fade*(1.0-fraction*0.6)*0.10));
-            }
+            fx::glow(painter,p,radius*1.25,Color32::from_rgb(255,90,24),fade*0.85);
             let flash=(-seconds*2.8).exp();
             painter.circle_filled(p,7.0+15.0*flash,Color32::from_rgb(255,242,210).gamma_multiply(fade*(0.3+0.7*flash)));
             painter.circle_stroke(p,12.0+130.0*age.sqrt(),Stroke::new(2.5*(1.0-age)+0.5,Color32::from_rgb(255,185,90).gamma_multiply(fade*0.65)));

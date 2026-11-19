@@ -29,6 +29,8 @@ pub enum Role {
 #[derive(Clone, Debug, PartialEq)]
 pub enum Command {
     SetBeamMode {body:BodyId,mode:crate::world::weapon_fit::BeamMode},
+    /// Lay the main beam on the hull, a system group, or as heat.
+    SetBeamAim {body:BodyId,aim:crate::world::weapon_fit::BeamAim},
     Withdraw {body:BodyId},
     Surrender {body:BodyId},
     SetRepairGoal {body:BodyId,goal:crate::damage::RepairGoal},
@@ -56,6 +58,12 @@ pub enum Command {
     AllStop { body: BodyId },
     /// Hold the current vector. Zero thrust, no braking.
     Coast { body: BodyId },
+    /// Fight one track until told otherwise, or stand down from that with `None`.
+    Engage { body: BodyId, target: Option<ContactId> },
+    /// Check fire: stand down, cease beam fire and cancel queued launches.
+    HoldFire { body: BodyId },
+    /// Emission silence: coast, active sensors and screens off, weapons held. `false` restores the modes it replaced.
+    Emcon { body: BodyId, silent: bool },
     /// One order for every other armed ship of this flagship's faction. It travels at light speed.
     Fleet { body: BodyId, order: FleetOrder },
     /// Cap autopilot thrust, in g. Lower thrust means a fainter drive signature.
@@ -64,6 +72,8 @@ pub enum Command {
     Launch { body: BodyId, target: ContactId, payload: Payload },
     CancelLaunches { body: BodyId },
     DeployProbe { body: BodyId, direction: Vec2, destination: Vec2 },
+    /// Release a deception drone on the ship's present burn.
+    DeployDecoy { body: BodyId },
     FireBeam { body: BodyId, target: ContactId },
     /// Emit one pulse. Pings are visible far beyond their echo range.
     Ping { body: BodyId },
@@ -84,8 +94,14 @@ pub enum FleetOrder {
     Screen,
     /// Close on the objective.
     Close,
-    /// Arm beams.
+    /// Arm beams. Each ship picks its own targets.
     WeaponsFree,
+    /// Cease fire and cancel queued launches. Ships keep their stations.
+    WeaponsHold,
+    /// Fight this track: close to weapon range, lay beams on it and keep launching.
+    Engage(ContactId),
+    /// Emission silence: coast with active sensors and screens off, weapons held.
+    Silent,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -112,11 +128,12 @@ pub enum Rejection {
 impl Command {
     pub fn body(&self) -> Option<BodyId> {
         match *self {
-            Self::SetBeamMode {body,..} | Self::Withdraw {body} | Self::Surrender {body} | Self::SetRepairGoal {body,..} | Self::Jump {body,..} | Self::CancelJump {body} | Self::Alongside {body,..} | Self::Follow {body,..} | Self::SetThrust { body, .. } | Self::Orbit { body, .. } | Self::Intercept { body, .. }
+            Self::SetBeamAim {body,..} | Self::SetBeamMode {body,..} | Self::Withdraw {body} | Self::Surrender {body} | Self::SetRepairGoal {body,..} | Self::Jump {body,..} | Self::CancelJump {body} | Self::Alongside {body,..} | Self::Follow {body,..} | Self::SetThrust { body, .. } | Self::Orbit { body, .. } | Self::Intercept { body, .. }
             | Self::AppendWaypoint {body,..} | Self::Flyby { body, .. } | Self::CombatRange {body,..} | Self::KeepRange {body,..} | Self::Evade {body,..} | Self::MoveTo { body, .. } | Self::AllStop { body }
             | Self::SetDriveLimit { body, .. } | Self::Launch { body, .. } | Self::FireBeam { body, .. }
             | Self::SetHeatDump {body,..} | Self::Ping { body } | Self::EngageBeam { body, .. } | Self::SetScreen { body, .. } | Self::SetSystemMode {body,..}
-            | Self::CancelLaunches { body } | Self::DeployProbe {body,..} | Self::ArmBeams { body }
+            | Self::CancelLaunches { body } | Self::DeployProbe {body,..} | Self::DeployDecoy { body } | Self::ArmBeams { body }
+            | Self::Engage { body, .. } | Self::HoldFire { body } | Self::Emcon { body, .. }
             | Self::Coast { body } | Self::Fleet { body, .. } => Some(body),
             Self::SetWarp(_) | Self::SetPaused(_) => None,
         }
@@ -145,6 +162,7 @@ impl From<OrderError> for Rejection {
 #[derive(Clone, Debug)]
 pub struct BodyView {
     pub beam_mode:crate::world::weapon_fit::BeamMode,
+    pub beam_aim:crate::world::weapon_fit::BeamAim,
     pub interference_remaining:f64,
     pub display_class:Option<String>,
     pub withdrawing:bool,
@@ -163,6 +181,9 @@ pub struct BodyView {
     pub baseline_emission_factor: f64,
     pub sensors: crate::sensors::SensorSuite,
     pub probes: u32,
+    pub decoys: u32,
+    /// One of our own deception drones.
+    pub decoy: bool,
     pub thermal: crate::thermal::Thermal,
     pub thermal_rated_accel:f64,
     pub id: BodyId,
@@ -241,6 +262,8 @@ pub struct BearingView {
 /// Something the faction has sensed. Only received identity is included; no truth IDs.
 #[derive(Clone, Debug)]
 pub struct ContactView {
+    /// An identity-level look has shown this track to be a deception drone.
+    pub decoy:bool,
     /// Remembered name only after an identity-level observation arrives.
     pub identified_name:Option<String>,
     pub display_class:Option<String>,
@@ -337,6 +360,12 @@ pub struct View {
     pub system: System,
     /// The scenario goal, known to every side.
     pub objective: Option<Objective>,
+    /// Reports of arranged events that have reached this side, oldest first.
+    pub notices: Vec<(f64,String)>,
+    /// Debris fields. Public, like the ephemeris.
+    pub debris: Vec<crate::world::terrain::DebrisField>,
+    /// When the flare now dazzling this side's command ship ends. For the spectator, any flare now leaving the star.
+    pub flare_until: Option<f64>,
     /// False in Hide and Seek. The helm hides jump, and the drive will not spool.
     pub jumps_enabled: bool,
     /// Referee's verdict once the game is decided.
@@ -432,6 +461,11 @@ impl LocalSession {
         }
     }
 
+    /// Fly a faction with a particular doctrine, for comparing one against another.
+    pub fn enable_bot_with(&mut self, faction: FactionId, doctrine: crate::doctrine::Doctrine) {
+        self.bots.insert(faction, doctrine);
+    }
+
     pub fn enable_bot(&mut self, faction: FactionId, enabled: bool) {
         if enabled { self.bots.entry(faction).or_default(); } else { self.bots.remove(&faction); }
     }
@@ -491,6 +525,7 @@ impl LocalSession {
         }
         match cmd {
             Command::SetBeamMode {body,mode}=>self.world.set_beam_mode(body,mode)?,
+            Command::SetBeamAim {body,aim}=>self.world.set_beam_aim(body,aim)?,
             Command::Withdraw {body}=>self.world.withdraw(body)?,
             Command::Surrender {body}=>self.world.surrender(body)?,
             Command::SetRepairGoal {body,goal}=>self.world.set_repair_goal(body,goal)?,
@@ -509,6 +544,7 @@ impl LocalSession {
                 }
             }
             Command::DeployProbe {body,direction,destination} => { self.owned(role,body)?; self.world.deploy_probe(body,direction,destination)?; }
+            Command::DeployDecoy {body} => { self.owned(role,body)?; self.world.deploy_decoy(body)?; }
             Command::CancelLaunches { body } => { self.owned(role, body)?; self.world.cancel_launches(body)?; }
             Command::SetWarp(w) => {self.cancel_event_wait();self.warp = w.clamp(0.0, 1e6);},
             Command::SetPaused(p) => {self.cancel_event_wait();self.paused = p;},
@@ -560,6 +596,9 @@ impl LocalSession {
                 self.owned(role, body)?;
                 self.world.set_thrust(body, Vec2::ZERO)?;
             }
+            Command::Engage {body,target}=>{self.owned(role,body)?;self.world.set_engage(body,target)?;}
+            Command::HoldFire {body}=>{self.owned(role,body)?;self.world.hold_fire(body)?;}
+            Command::Emcon {body,silent}=>{self.owned(role,body)?;self.world.set_emcon(body,silent)?;}
             Command::Fleet { body, order } => {
                 self.owned(role, body)?;
                 self.world.order_fleet(body, order)?;
@@ -667,7 +706,7 @@ impl LocalSession {
             .filter(|(_, b)| visible(b.faction))
             .filter_map(|(i, b)| {
                 let known;
-                let b = if let Role::Faction(f) = role { known = w.known_body(f, BodyId(i as u32))?; &known } else { b };
+                let b:&crate::world::Body = if let Role::Faction(f) = role { known = w.known_body(f, BodyId(i as u32))?; &known } else { b };
                 let s = b.trajectory.state_at(t).or_else(||b.jump.and_then(|jump|jump.display_state(t)))?;
                 Some(BodyView {withdrawing:b.withdrawing,jump:b.jump,jump_ready_at:b.jump_ready_at,beam_solutions:if b.controllable && b.kind==BodyKind::Ship {
                     w.received_picture(BodyId(i as u32)).into_iter().flat_map(|p|p.contacts.keys())
@@ -681,11 +720,11 @@ impl LocalSession {
                     has_screen: b.has_screen,
                     baseline_emission_factor: b.baseline_emission_factor,
                     sensors: b.sensors,
-                    probes: b.probes,
+                    probes: b.probes,decoys:b.decoys,decoy:b.decoy,
                     thermal: b.thermal,
                     thermal_rated_accel:b.heat_rated_accel(),
                     id: BodyId(i as u32),
-                    beam_mode:b.beam_mode,interference_remaining:(b.disrupted_until-t).max(0.0),
+                    beam_mode:b.beam_mode,beam_aim:b.beam_aim,interference_remaining:(b.disrupted_until-t).max(0.0),
                     name: b.name.clone(),display_class:b.display_class.clone(),
                     kind: b.kind,
                     faction: b.faction,
@@ -756,6 +795,7 @@ impl LocalSession {
                             Measurement::Bearing { .. } => None,
                         };
                         ContactView {
+                            decoy:w.decoy_exposed(f,c.id),
                             identified_name:if c.identified {w.body_for_contact(f,c.id).and_then(|id|w.body(id)).filter(|b|matches!(b.kind,BodyKind::Ship|BodyKind::Station)).map(|b|b.name.clone())} else {None},
                             display_class:if c.resolved {w.body_for_contact(f,c.id).and_then(|id|w.body(id)).and_then(|b|b.display_class.clone())} else {None},
                             detection,reporting_sensor:c.best_evidence(t).map(|o|o.sensor),ping_remaining:c.ping_remaining(t),active_fire_control:c.active_fire_control(t,|sensor|w.body(sensor).is_some_and(|b|matches!(b.kind,BodyKind::Ship|BodyKind::Station))),
@@ -794,7 +834,7 @@ impl LocalSession {
         let losses = w
             .losses
             .iter()
-            .filter(|l| l.cause != LossCause::Expended && w.body(l.body).is_some_and(|b| visible(b.faction))
+            .filter(|l| l.cause != LossCause::Expended && w.body(l.body).is_some_and(|b| visible(b.faction) && !b.decoy)
                 && match role { Role::Spectator => true, Role::Faction(f) => w.loss_known(f,l.body) })
             .map(|l| LossView {
                 body: l.body,
@@ -842,6 +882,12 @@ impl LocalSession {
             losses,
             system: w.system.clone(),
             objective: w.objective.clone(),
+            notices: w.notices(match role {Role::Faction(f)=>Some(f),Role::Spectator=>None}),
+            debris: w.terrain.fields.clone(),
+            flare_until: match role {
+                Role::Faction(f) => w.decider(f,t).and_then(|id|w.body(id)).and_then(|b|b.trajectory.state_at(t)).and_then(|s|w.flared(s.pos,t)),
+                Role::Spectator => w.terrain.flares.iter().filter(|flare|t>=flare.t_emit && t<flare.t_emit+flare.duration).map(|flare|flare.t_emit+flare.duration).reduce(f64::max),
+            },
             jumps_enabled: w.jumps_enabled,
             outcome: match role {Role::Spectator=>w.outcome.clone(),Role::Faction(f)=>w.received_outcome(f)},
         }
@@ -1236,6 +1282,42 @@ mod tests {
         s.command(me,Command::SetThrust {body,thrust:Vec2::ZERO}).unwrap();
         s.command(me,Command::AppendWaypoint {body,point}).unwrap();
         assert_eq!(s.world.bodies[1].route.as_ref().unwrap().points.len(),2);
+    }
+
+    #[test]
+    fn fleet_orders_are_one_packet_a_ship_and_each_replaces_the_last_posture() {
+        use crate::scenario::{Scenario,home_system,ESCORT};
+        use crate::world::{Body,Order,ShipClass,controls};
+        let mut s=LocalSession::new(Scenario::Armada.build(42,home_system()));
+        let c=s.world.seed_debug_contact(BodyId(0),BodyId(10));
+        let wings=|s:&LocalSession|->Vec<Body> {s.world.bodies.iter().enumerate().filter(|(i,b)|*i!=0 && b.faction==ESCORT && b.kind==BodyKind::Ship && b.armed).map(|(_,b)|b.clone()).collect()};
+        let send=|s:&mut LocalSession,order:FleetOrder| {
+            s.command(Role::Faction(ESCORT),Command::Fleet {body:BodyId(0),order}).unwrap();
+            assert_eq!(s.view(Role::Faction(ESCORT)).pending_orders,9,"{order:?} is one packet a ship");
+            s.command(Role::Spectator,Command::SetPaused(false)).unwrap();
+            s.tick(400.0);
+            assert_eq!(s.view(Role::Faction(ESCORT)).pending_orders,0,"{order:?} has arrived");
+        };
+        assert!(s.command(Role::Faction(ESCORT),Command::Fleet {body:BodyId(0),order:FleetOrder::Engage(ContactId(77))}).is_err());
+        send(&mut s,FleetOrder::Engage(c));
+        assert!(wings(&s).iter().all(|b|b.controls.engage==Some(c)));
+        assert!(wings(&s).iter().all(|b|matches!(b.autopilot.map(|a|a.order),Some(Order::KeepRange(InterceptTarget::Contact(id),_)) if id==c)));
+        send(&mut s,FleetOrder::Silent);
+        for b in wings(&s) {
+            assert!(b.controls.emcon.is_some() && b.controls.engage.is_none() && b.autopilot.is_none(),"{}",b.name);
+            assert_eq!((b.controls.active,b.controls.screens,b.beam_auto),(controls::Mode::Off,controls::Mode::Off,false),"{}",b.name);
+        }
+        send(&mut s,FleetOrder::Screen);
+        for b in wings(&s) {
+            assert!(b.controls.emcon.is_none(),"a new order ends silence on {}",b.name);
+            assert!(matches!(b.autopilot.map(|a|a.order),Some(Order::Follow {target:BodyId(0),..})));
+        }
+        send(&mut s,FleetOrder::Engage(c));
+        send(&mut s,FleetOrder::WeaponsHold);
+        assert!(wings(&s).iter().all(|b|b.controls.engage.is_none() && !b.beam_auto && b.beam_target.is_none()));
+        send(&mut s,FleetOrder::WeaponsFree);
+        assert!(wings(&s).iter().filter(|b|b.ship_class!=Some(ShipClass::Picket)).all(|b|b.beam_auto));
+        assert_eq!(s.world.bodies[0].controls.engage,None,"the flagship is not one of its own wingmen");
     }
 
     #[test]

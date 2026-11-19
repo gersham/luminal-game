@@ -66,7 +66,9 @@ fn impact_intensity_distinguishes_absorption_damage_and_severe_hits() {
     after=before;after.hull-=before.hull_max*0.2;
     assert_eq!(impact_strength(&before,&after),1.0);
 }
-struct OrderPacket { front: Front, body: BodyId, cmd: Command }
+struct OrderPacket { front: Front, body: BodyId, cmd: Command,
+    /// A flagship's fleet order. On arrival it replaces the standing posture a previous one set.
+    fleet: bool }
 struct AlertPacket { front: Front, faction: FactionId, kind: AlertKind }
 
 #[derive(Default)]
@@ -79,6 +81,8 @@ pub(super) struct Refinements {
     pub received: BTreeMap<FactionId, Vec<CombatEvent>>,
     pub truth_events: Vec<CombatEvent>,
     pub retired_contacts: BTreeSet<(FactionId, ContactId)>,
+    /// Tracks a faction has seen at identity level and found to be decoys.
+    pub exposed_decoys: BTreeSet<(FactionId, ContactId)>,
     pictures: BTreeMap<FactionId, VecDeque<(f64, Arc<Perception>)>>,
     cached_pictures: BTreeMap<BodyId, Arc<Perception>>,
     telemetry: BTreeMap<BodyId, VecDeque<(f64, Body)>>,
@@ -330,8 +334,85 @@ impl World {
         let Some(sender) = self.decider(b.faction, self.time) else { return false };
         if sender == id { return false; }
         let Some(s) = self.state(sender, self.time) else { return false };
-        self.refinement.orders.push(OrderPacket { front: Front { origin: s.pos, t_emit: self.time }, body: id, cmd });
+        self.refinement.orders.push(OrderPacket { front: Front { origin: s.pos, t_emit: self.time }, body: id, cmd, fleet: false });
         true
+    }
+    /// One fleet order to one wingman. One packet, so the count in flight is the count of ships still to hear it.
+    fn transmit_fleet_order(&mut self, id: BodyId, cmd: Command) {
+        if self.transmit_order(id, cmd) && let Some(packet)=self.refinement.orders.last_mut() {packet.fleet=true;}
+    }
+    /// A new fleet order ends the posture the last one left standing, unless it is that posture.
+    fn fleet_release(&mut self, id: BodyId, cmd: &Command) {
+        if !matches!(cmd,Command::Emcon {silent:true,..}) {let _=self.set_emcon(id,false);}
+        if !matches!(cmd,Command::Engage {target:Some(_),..}) && let Some(b)=self.bodies.get_mut(id.0 as usize) {b.controls.engage=None;}
+    }
+    /// Fight one track until told otherwise. `None` stands down without touching weapons already assigned.
+    pub fn set_engage(&mut self, id: BodyId, target: Option<ContactId>) -> Result<(), OrderError> {
+        let t=self.time;
+        let b=self.live_body_mut(id)?;
+        if b.kind!=BodyKind::Ship || !b.armed {return Err(OrderError::Unarmed);}
+        let faction=b.faction;
+        if let Some(target)=target && !self.perceptions.get(&faction).is_some_and(|p|p.contacts.contains_key(&target)) {return Err(OrderError::NoTrack);}
+        let b=&mut self.bodies[id.0 as usize];
+        b.controls.engage=target;b.controls.engage_salvo_at=t;
+        if target.is_some() {let _=self.set_emcon(id,false);self.press_engagement(id);}
+        Ok(())
+    }
+    /// Check fire: stand down, cease beam fire and cancel queued launches. The ship keeps its station.
+    pub fn hold_fire(&mut self, id: BodyId) -> Result<(), OrderError> {
+        let b=self.live_body_mut(id)?;
+        if b.kind!=BodyKind::Ship || !b.armed {return Err(OrderError::Unarmed);}
+        b.controls.engage=None;
+        let beam=b.ship_class!=Some(ShipClass::Picket);
+        if beam {self.engage_beam(id,None)?;}
+        self.cancel_launches(id)
+    }
+    /// Emission silence, or its release. Silence coasts, turns active sensors and screens off and
+    /// holds weapons. Release puts back the two modes silence replaced and nothing else.
+    pub fn set_emcon(&mut self, id: BodyId, silent: bool) -> Result<(), OrderError> {
+        use controls::{ControlledSystem,Mode};
+        let b=self.live_body_mut(id)?;
+        if b.kind!=BodyKind::Ship {return Err(OrderError::Unarmed);}
+        let screened=b.has_screen;
+        if silent {
+            if b.controls.emcon.is_none() {b.controls.emcon=Some((b.controls.active,b.controls.screens));}
+            if b.armed {let _=self.hold_fire(id);}
+            self.set_system_mode(id,ControlledSystem::Active,Mode::Off)?;
+            if screened {self.set_system_mode(id,ControlledSystem::Screens,Mode::Off)?;}
+            self.set_thrust(id,Vec2::ZERO)
+        } else if let Some((active,screens))=b.controls.emcon.take() {
+            self.set_system_mode(id,ControlledSystem::Active,active)?;
+            if screened {self.set_system_mode(id,ControlledSystem::Screens,screens)?;}
+            Ok(())
+        } else {Ok(())}
+    }
+    /// Carry out a standing engage order from what this ship has been told. Runs once a sensor frame.
+    pub(super) fn press_engagement(&mut self, id: BodyId) {
+        let t=self.time;
+        let i=id.0 as usize;
+        let Some(target)=self.bodies[i].controls.engage else {return};
+        if !self.bodies[i].alive_at(t) || self.bodies[i].jump.is_some() {return;}
+        let faction=self.bodies[i].faction;
+        // A track the faction has seen end is not fought any longer.
+        if self.contact_retired(faction,target) {self.bodies[i].controls.engage=None;return;}
+        let magazine=self.bodies[i].magazine;
+        let queued=self.bodies[i].missile_queued;
+        let payload=if magazine[Payload::Nuclear.index()]>0 {Payload::Nuclear} else if magazine[Payload::Kinetic.index()]>0 {Payload::Kinetic} else {Payload::Beam};
+        let standoff=crate::autopilot::weapon_standoff(payload);
+        let wanted=Order::KeepRange(InterceptTarget::Contact(target),standoff);
+        if self.bodies[i].autopilot.map(|a|a.order)!=Some(wanted) {let _=self.set_tactical_range(id,InterceptTarget::Contact(target),Some(standoff));}
+        if self.bodies[i].ship_class!=Some(ShipClass::Picket) && self.bodies[i].beam_target!=Some(target) {let _=self.engage_beam(id,Some(target));}
+        if t<self.bodies[i].controls.engage_salvo_at {return;}
+        // Range from the picture this ship holds, never from where the target is.
+        let Some(origin)=self.state(id,t).map(|s|s.pos) else {return};
+        let Some(range)=self.received_picture(id).and_then(|p|p.contacts.get(&target)).and_then(|c|c.estimate(t,&self.system)).map(|track|(track.pos()-origin).length()) else {return};
+        for payload in [Payload::Nuclear,Payload::Kinetic] {
+            if range>payload.engagement_range() || magazine[payload.index()]<=queued[payload.index()] {continue;}
+            if self.queue_launch(id,target,payload).is_ok() {
+                self.bodies[i].controls.engage_salvo_at=t+BOT_SALVO_S.value;
+                break;
+            }
+        }
     }
     /// Drop jump orders still in flight to this faction, other than `except`.
     /// A cancel issued later can otherwise lose the race to an earlier jump packet.
@@ -381,30 +462,36 @@ impl World {
             ranked.sort_by(|a,b| b.1.total_cmp(&a.1).then(a.0.0.cmp(&b.0.0)));
             let scales:Vec<f64>=ranked.iter().map(|(_,scale)|*scale).collect();
             for ((id,_),offset) in ranked.iter().zip(formation_offsets(facing,&scales)) {
-                self.transmit_order(*id,Command::Follow {body:*id,target:flagship,offset:Some(offset)});
+                self.transmit_fleet_order(*id,Command::Follow {body:*id,target:flagship,offset:Some(offset)});
             }
             return Ok(());
         }
         let point = match order { crate::session::FleetOrder::Close => Some(center.ok_or(OrderError::InvalidTarget)?), _ => None };
+        if let crate::session::FleetOrder::Engage(target)=order && !self.perceptions.get(&faction).is_some_and(|p|p.contacts.contains_key(&target)) {return Err(OrderError::NoTrack);}
         for wing in wings {
             let cmd = match order {
                 crate::session::FleetOrder::Screen => unreachable!("screen returns above"),
                 crate::session::FleetOrder::Close => Command::MoveTo { body: wing, point: point.unwrap() },
                 crate::session::FleetOrder::WeaponsFree => Command::ArmBeams { body: wing },
+                crate::session::FleetOrder::WeaponsHold => Command::HoldFire { body: wing },
+                crate::session::FleetOrder::Engage(target) => Command::Engage { body: wing, target: Some(target) },
+                crate::session::FleetOrder::Silent => Command::Emcon { body: wing, silent: true },
             };
-            self.transmit_order(wing, cmd);
+            self.transmit_fleet_order(wing, cmd);
         }
         Ok(())
     }
     fn execute_transmitted(&mut self, cmd: Command) -> Result<(), OrderError> {
         match cmd {
             Command::SetBeamMode {body,mode}=>self.set_beam_mode(body,mode),
+            Command::SetBeamAim {body,aim}=>self.set_beam_aim(body,aim),
             Command::Withdraw {body}=>self.withdraw(body),
             Command::Surrender {body}=>self.surrender(body),
             Command::SetRepairGoal {body,goal}=>self.set_repair_goal(body,goal),
             Command::Jump {body,destination}=>self.start_jump(body,destination),
             Command::CancelJump {body}=>self.cancel_jump(body),
             Command::DeployProbe {body,direction,destination} => self.deploy_probe(body,direction,destination).map(|_|()),
+            Command::DeployDecoy {body} => self.deploy_decoy(body).map(|_|()),
             Command::SetThrust { body, thrust } => self.set_thrust(body, thrust),
             Command::Orbit { body, celestial } => self.set_orbit(body, celestial),
             Command::Alongside {body,target}=>self.set_alongside(body,target),
@@ -415,6 +502,9 @@ impl World {
             Command::MoveTo { body, point } => self.set_move(body, point),
             Command::AllStop { body } => self.set_all_stop(body),
             Command::Coast { body } => self.set_thrust(body, Vec2::ZERO),
+            Command::Engage {body,target}=>self.set_engage(body,target),
+            Command::HoldFire {body}=>self.hold_fire(body),
+            Command::Emcon {body,silent}=>self.set_emcon(body,silent),
             Command::Fleet { body, order } => self.order_fleet(body, order),
             Command::SetDriveLimit { body, g } => self.set_drive_limit(body, g * crate::units::G0),
             Command::Launch { body, target, payload } => self.queue_launch(body, target, payload),
@@ -520,12 +610,13 @@ impl World {
             let (measurement,detection)=if let Some(body)=flash.body.filter(|id|matches!(self.bodies[id.0 as usize].kind,BodyKind::Ship|BodyKind::Station)) {
                 let ef=self.historical_ef(body,flash.front.t_emit);
                 let level=self.detect_ship(observer,body,flash.front.t_emit,relative.length(),false);
+                let level=self.through_terrain(level,observer,rx,flash.front.origin,arrival,false);
                 if level==sensors::DetectionLevel::None {return None;}
                 (sensors::ship_measurement(level,relative.length(),bearing_of(relative),ef),level)
             } else {(measurement,sensors::DetectionLevel::Resolved)};
             if matches!(measurement,Measurement::Bearing {..})
                 && flash.body.is_some_and(|id|self.bodies[id.0 as usize].kind==BodyKind::Missile) {return None;}
-            let observation=Observation {detection,contact:flash.body.map_or(ContactId(u32::MAX),|body|self.contact_id(faction,body)),
+            let observation=Observation {detection,contact:flash.body.map_or(ContactId(u32::MAX),|body|self.contact_at(faction,body,flash.front.t_emit)),
                 sensor:observer,origin:rx,emitted_at:flash.front.t_emit,sensor_received_at:arrival,decider_received_at:arrival,
                 measurement,snr,source:Source::Emission};
             let observation=self.bias_observation(observation);
@@ -573,9 +664,11 @@ impl World {
         self.refinement.received.get(&f).is_some_and(|events| events.iter().any(|e| e.own_body == Some(id) && matches!(e.kind, CombatKind::Destroyed | CombatKind::Expended | CombatKind::Withdrawn | CombatKind::Surrendered)))
     }
     /// Remote telemetry is extrapolated from the latest packet whose light has arrived.
-    pub fn known_body(&self, f: FactionId, id: BodyId) -> Option<Body> {
+    pub fn known_body(&self, f: FactionId, id: BodyId) -> Option<std::borrow::Cow<'_,Body>> {
+        use std::borrow::Cow;
         if self.loss_known(f, id) || self.missile_departure_seen(f,id) { return None; }
-        if self.decider(f, self.time) == Some(id) { return self.body(id).cloned(); }
+        // The command ship knows itself. Borrow it: its committed history is long.
+        if self.decider(f, self.time) == Some(id) { return self.body(id).map(Cow::Borrowed); }
         let receiver = self.decider(f, self.time)?;
         let at = self.state(receiver, self.time)?.pos;
         self.refinement.telemetry.get(&id)?.iter().rev().find(|(t, b)| {
@@ -583,10 +676,12 @@ impl World {
             (*t + (pos - at).length() / crate::units::C <= self.time)
                 && self.system.occluder(pos, *t, at, self.time).is_none()
         }).or_else(|| self.refinement.telemetry.get(&id)?.front().filter(|(at,_)| *at == 0.0)).map(|(_, b)| {
-            let mut known = b.clone();
             // Command authority is scenario metadata, not remote telemetry.
-            known.controllable = self.bodies[id.0 as usize].controllable;
-            known
+            let controllable = self.bodies[id.0 as usize].controllable;
+            if b.controllable==controllable {return Cow::Borrowed(b);}
+            let mut known = b.clone();
+            known.controllable = controllable;
+            Cow::Owned(known)
         })
     }
     /// Delivered fire-control picture; never the current remote flagship picture.
@@ -604,11 +699,14 @@ impl World {
         let b = self.body(id)?;
         let source = self.decider(b.faction, self.time)?;
         if source == id { return self.perceptions.get(&b.faction); }
-        self.uplink_snapshot(id).map(AsRef::as_ref)
+        self.uplink_snapshot_from(id,source).map(AsRef::as_ref)
     }
     fn uplink_snapshot(&self,id:BodyId)->Option<&Arc<Perception>> {
+        let source=self.decider(self.body(id)?.faction,self.time)?;
+        self.uplink_snapshot_from(id,source)
+    }
+    fn uplink_snapshot_from(&self,id:BodyId,source:BodyId)->Option<&Arc<Perception>> {
         let b=self.body(id)?;
-        let source=self.decider(b.faction,self.time)?;
         if source==id {return None;}
         let me = b.trajectory.state_at(self.time)?;
         let (emitted, src) = retarded_state(&self.bodies[source.0 as usize].trajectory, me.pos, self.time)?;
@@ -639,12 +737,11 @@ impl World {
         self.snapshot_platform(id,self.time);
     }
     pub(super) fn snapshot_platform(&mut self,id:BodyId,t:f64) {
-        let b=&self.bodies[id.0 as usize];
+        let b=&mut self.bodies[id.0 as usize];
         if !matches!(b.kind,BodyKind::Ship|BodyKind::Station) {return;}
         let Some(state)=b.trajectory.state_at(t) else {return;};
-        let mut snapshot=b.clone();
-        snapshot.trajectory=Trajectory::new(t,state);
-        snapshot.trajectory.set_thrust(t,b.trajectory.thrust_at(t).unwrap_or(Vec2::ZERO)).unwrap();
+        let thrust=b.trajectory.thrust_at(t).unwrap_or(Vec2::ZERO);
+        let snapshot=b.snapshot(t,state,thrust);
         let h=self.refinement.telemetry.entry(id).or_default();
         if h.back().is_some_and(|(at,_)|*at>t) {return;}
         if h.back().is_some_and(|(at,_)|*at==t) {h.pop_back();}
@@ -658,7 +755,73 @@ impl World {
     pub fn known_damage(&self,f:FactionId,c:ContactId)->Option<crate::damage::Report> {
         self.refinement.damage_reports.get(&(f,c)).copied()
     }
+    pub(super) fn refinement_seed(&self) -> u64 { self.refinement.bias_seed }
+    pub fn decoy_exposed(&self, faction: FactionId, contact: ContactId) -> bool {
+        self.refinement.exposed_decoys.contains(&(faction, contact))
+    }
+    /// Release a deception drone on the ship's present burn, or along its course if it is coasting.
+    ///
+    /// The drone starts where the ship is, with its velocity, name and signature. Every
+    /// foreign track on the ship passes to the drone, because two things that separate
+    /// from one point cannot be told apart and the one still burning is the one that stays
+    /// in the picture. The ship is a new contact when it is next detected. Rounds already
+    /// in flight that have not found the target for themselves follow the track.
+    pub fn deploy_decoy(&mut self, id: BodyId) -> Result<BodyId, OrderError> {
+        self.ensure_not_jumping(id)?;
+        let t=self.time;
+        let b=self.live_body_mut(id)?;
+        if b.kind!=BodyKind::Ship || b.decoy {return Err(OrderError::Unarmed);}
+        if b.decoys==0 {return Err(OrderError::EmptyMagazine);}
+        let state=b.trajectory.state_at(t).unwrap();
+        let burn=b.trajectory.thrust_at(t).unwrap_or(Vec2::ZERO);
+        let heading=if burn.length()>1e-9 {burn.normalized()} else if state.vel.length()>1e-9 {state.vel.normalized()} else {b.heading_at(t)};
+        let limit=b.ship_class.map_or(SHIP_MAX_ACCEL_G.value,|c|c.max_g())*crate::units::G0;
+        let thrust=heading*burn.length().max(DECOY_MIN_G.value*crate::units::G0).min(limit);
+        b.decoys-=1;
+        let faction=b.faction;
+        let mut decoy=b.clone();
+        let did=BodyId(self.bodies.len() as u32);
+        decoy.decoy=true;decoy.decoys=0;decoy.probes=0;
+        decoy.controllable=false;decoy.armed=false;
+        decoy.magazine=[0;2];decoy.missile_queued=[0;2];decoy.missile=None;
+        decoy.point_defence=None;decoy.interceptor_battery=None;decoy.interceptor=None;
+        // No sensors: a decoy reports nothing and relays nothing.
+        decoy.sensors=sensors::SensorSuite {passive:false,active:false,direction_finding:false};
+        decoy.controls.active=controls::Mode::Off;decoy.controls.engage=None;decoy.controls.emcon=None;
+        decoy.controls.evade=controls::Mode::Off;decoy.controls.evading=false;decoy.controls.evasion=None;
+        decoy.has_screen=false;decoy.screen_up=false;decoy.controls.screens=controls::Mode::Off;
+        decoy.beam_auto=false;decoy.beam_target=None;decoy.last_beam=None;decoy.spinal_tracking=None;
+        decoy.jump=None;decoy.withdrawing=false;decoy.step_generation=0;
+        decoy.autopilot=None;decoy.route=None;decoy.commanded=thrust;decoy.drive_limit=f64::INFINITY;
+        decoy.damage.hull_max=DECOY_HULL_HP.value;decoy.damage.hull=DECOY_HULL_HP.value;decoy.damage.armour=0.0;decoy.damage.armour_max=0.0;
+        decoy.hull_j=0.0;
+        decoy.trajectory=Trajectory::new(t,state);
+        decoy.trajectory.set_thrust(t,thrust).unwrap();
+        decoy.probe_burn_until=Some(t+DECOY_BURN_S.value);
+        self.bodies.push(decoy);
+        self.last_step.push(t);
+        self.snapshot_platform(did,t);
+        self.scheduler.schedule(t,Event::Step(did,0));
+        // Hand every foreign track on the ship to the drone.
+        self.releases.push((id,did,t));
+        let watchers:Vec<(FactionId,ContactId)>=self.association.iter().filter(|((f,body),_)|*body==id && *f!=faction).map(|((f,_),c)|(*f,*c)).collect();
+        for (watcher,contact) in watchers {
+            self.association.remove(&(watcher,id));
+            self.association.insert((watcher,did),contact);
+            self.reverse_association.insert((watcher,contact),did);
+            for body in &mut self.bodies {
+                if body.faction==watcher && let Some(round)=body.missile.as_mut()
+                    && round.target==contact && round.target_body==id && round.local_fix.is_none() {round.target_body=did;}
+            }
+        }
+        Ok(did)
+    }
     pub(super) fn observe_damage(&mut self,obs:&Observation) {
+        // An identity-level look tells a drone from a ship, once that look has reached the decider.
+        if obs.detection==sensors::DetectionLevel::Identity && obs.decider_received_at.is_finite() && obs.decider_received_at<=self.time {
+            let f=self.bodies[obs.sensor.0 as usize].faction;
+            if self.body_for_contact(f,obs.contact).is_some_and(|id|self.bodies[id.0 as usize].decoy) {self.refinement.exposed_decoys.insert((f,obs.contact));}
+        }
         // Explicit game abstraction: a resolved active echo can inspect damage.
         // The report uses only the target snapshot at reflection time, and is
         // published after both the echo and any allied relay have arrived.
@@ -704,6 +867,7 @@ impl World {
         let mut expended=Vec::new();
         for i in 0..self.bodies.len() {
             let kind=self.bodies[i].kind;
+            if self.bodies[i].decoy && self.bodies[i].alive_at(t) && self.bodies[i].probe_burn_until.is_some_and(|until|t>=until) {expended.push(BodyId(i as u32));continue;}
             if !matches!(kind,BodyKind::Probe|BodyKind::Station) || !self.bodies[i].alive_at(t) { continue; }
             if kind==BodyKind::Probe {
                 let burned_out=self.bodies[i].probe_burn_until.is_some_and(|until| t>=until);
@@ -719,6 +883,7 @@ impl World {
             if let Some(arrival) = packet.front.arrival(traj, lo.max(packet.front.t_emit), t) {
                 let at = traj.state_at(arrival).unwrap().pos;
                 if self.system.occluder(packet.front.origin, packet.front.t_emit, at, arrival).is_none() {
+                    if packet.fleet {self.fleet_release(packet.body,&packet.cmd);}
                     if let Err(e) = self.execute_transmitted(packet.cmd) { self.refinement.command_log.push((t, format!("Order rejected on arrival: {e:?}"))); }
                 } else { self.refinement.command_log.push((t, "Order link blocked".into())); }
             } else if t - packet.front.t_emit < MAX_FRONT_RADIUS_KM / crate::units::C { self.refinement.orders.push(packet); }
@@ -735,6 +900,13 @@ impl World {
             flash.pending=pending;
             if !flash.pending.is_empty() && t-flash.front.t_emit < MAX_FRONT_RADIUS_KM/crate::units::C { self.refinement.flashes.push(flash); }
         }
+        for (faction,front,text) in std::mem::take(&mut self.pending_notices) {
+            match self.report_arrival(faction,front,lo) {
+                Ok(Some(at)) => self.notices.entry(faction).or_default().push((at,text)),
+                Ok(None) if t-front.t_emit < MAX_FRONT_RADIUS_KM/crate::units::C => self.pending_notices.push((faction,front,text)),
+                _ => {},
+            }
+        }
         for packet in std::mem::take(&mut self.refinement.alerts) {
             match self.report_arrival(packet.faction, packet.front, lo) {
                 Ok(Some(_)) => self.alert(Some(packet.faction), packet.kind),
@@ -743,6 +915,9 @@ impl World {
             }
         }
         if (t / SENSOR_FRAME_S.value).fract().abs() < 1e-8 {
+            for i in 0..self.bodies.len() {
+                if self.bodies[i].controls.engage.is_some() {self.press_engagement(BodyId(i as u32));}
+            }
             self.refinement.cached_pictures.retain(|id,_|self.bodies[id.0 as usize].alive_at(t));
             for i in 0..self.bodies.len() {
                 let id=BodyId(i as u32);
@@ -766,11 +941,10 @@ impl World {
                 h.push_back((t, Arc::new(snapshot)));
                 while h.front().is_some_and(|(at,_)| *at < cutoff) { h.pop_front(); }
             }
-            for (i,b) in self.bodies.iter().enumerate() {
+            for (i,b) in self.bodies.iter_mut().enumerate() {
                 if let Some(s) = b.trajectory.state_at(t) {
-                    let mut snapshot = b.clone();
-                    snapshot.trajectory = Trajectory::new(t,s);
-                    snapshot.trajectory.set_thrust(t,b.trajectory.last().thrust).unwrap();
+                    let thrust=b.trajectory.last().thrust;
+                    let snapshot = b.snapshot(t,s,thrust);
                     let h = self.refinement.telemetry.entry(BodyId(i as u32)).or_default();
                     h.push_back((t,snapshot));
                     while h.front().is_some_and(|(at,_)| *at < cutoff) { h.pop_front(); }
@@ -788,6 +962,203 @@ mod tests {
     use super::*;
     use crate::celestial::{Celestial, CelestialKind, Orbit};
     use crate::units::{LIGHT_SECOND, G0};
+    #[test]
+    fn a_standing_engage_order_closes_lays_the_beam_and_keeps_launching_until_held() {
+        use crate::mind::{Measurement, Observation, Source};
+        use crate::sensors::DetectionLevel;
+        let mut w=fleet();
+        let enemy_at=Vec2::new(AU+0.5*AU,0.0);
+        let mut enemy=w.bodies[1].clone();
+        enemy.faction=FactionId(1);enemy.name="Enemy".into();
+        enemy.trajectory=Trajectory::new(0.0,State {pos:enemy_at,vel:Vec2::ZERO});
+        w.bodies.push(enemy);w.last_step.push(0.0);
+        w.perceptions.insert(FactionId(1),Perception::new(FactionId(1)));
+        let c=w.contact_id(FactionId(0),BodyId(2));
+        let origin=w.state(BodyId(0),0.0).unwrap().pos;
+        // The flagship keeps a fresh range on the enemy. The wingman hears of it ten light-seconds later.
+        let look=|w:&mut World,t:f64| {
+            w.perceptions.get_mut(&FactionId(0)).unwrap().ingest(Observation {detection:DetectionLevel::Resolved,contact:c,sensor:BodyId(0),
+                origin,emitted_at:t,sensor_received_at:t,decider_received_at:t,source:Source::Echo,snr:1e6,
+                measurement:Measurement::BearingRange {bearing:0.0,range:0.5*AU,sigma_range:10.0,sigma_bearing:1e-7}},&w.system);
+        };
+        look(&mut w,0.0);
+        assert_eq!(w.set_engage(BodyId(1),Some(ContactId(99))),Err(OrderError::NoTrack),"an order against no track is refused");
+        w.set_engage(BodyId(1),Some(c)).unwrap();
+        let stock=w.bodies[1].magazine;
+        let mut t=0.0;
+        while t<3.0*BOT_SALVO_S.value {t+=10.0;look(&mut w,t-0.001);w.advance_to(t);}
+        let wing=&w.bodies[1];
+        assert!(matches!(wing.autopilot.map(|a|a.order),Some(Order::KeepRange(InterceptTarget::Contact(id),_)) if id==c),"{:?}",wing.autopilot);
+        assert_eq!(wing.beam_target,Some(c));
+        let spent=stock[Payload::Nuclear.index()]-wing.magazine[Payload::Nuclear.index()]+wing.missile_queued[Payload::Nuclear.index()];
+        assert!(spent>=2,"a standing order launches again each interval, spent {spent}");
+        assert_eq!(wing.magazine[Payload::Kinetic.index()],stock[Payload::Kinetic.index()],"half an AU is outside short-range reach");
+        assert_eq!(w.bodies[0].magazine,stock,"the order was to the wingman only");
+        // Check fire ends it. The ship keeps its station.
+        w.hold_fire(BodyId(1)).unwrap();
+        let held=w.bodies[1].magazine;
+        while t<6.0*BOT_SALVO_S.value {t+=10.0;look(&mut w,t-0.001);w.advance_to(t);}
+        let wing=&w.bodies[1];
+        assert_eq!((wing.controls.engage,wing.beam_target,wing.beam_auto,wing.magazine),(None,None,false,held));
+        assert!(matches!(wing.autopilot.map(|a|a.order),Some(Order::KeepRange(..))));
+    }
+
+    /// Two friendly ships and an enemy half an AU off that holds a ranged track on ship 0.
+    fn watched()->(World,ContactId) {
+        use crate::mind::{Measurement, Observation, Source};
+        let mut w=fleet();
+        let mut enemy=w.bodies[1].clone();
+        enemy.faction=FactionId(1);enemy.name="Enemy".into();
+        enemy.trajectory=Trajectory::new(0.0,State {pos:Vec2::new(1.5*AU,0.0),vel:Vec2::ZERO});
+        w.bodies.push(enemy);w.last_step.push(0.0);
+        w.perceptions.insert(FactionId(1),Perception::new(FactionId(1)));
+        w.bodies[0].decoys=2;
+        w.bodies[0].trajectory=Trajectory::new(0.0,State {pos:Vec2::new(AU,0.0),vel:Vec2::new(0.0,40.0)});
+        let c=w.contact_id(FactionId(1),BodyId(0));
+        w.perceptions.get_mut(&FactionId(1)).unwrap().ingest(Observation {detection:crate::sensors::DetectionLevel::Resolved,contact:c,sensor:BodyId(2),
+            origin:Vec2::new(1.5*AU,0.0),emitted_at:0.0,sensor_received_at:0.0,decider_received_at:0.0,source:Source::Echo,snr:1e6,
+            measurement:Measurement::BearingRange {bearing:std::f64::consts::PI,range:0.5*AU,sigma_range:10.0,sigma_bearing:1e-7}},&w.system);
+        (w,c)
+    }
+
+    #[test]
+    fn a_decoy_takes_over_the_enemys_track_and_the_ship_becomes_a_new_contact() {
+        let (mut w,c)=watched();
+        assert_eq!(w.deploy_decoy(BodyId(1)),Err(OrderError::EmptyMagazine));
+        let decoy=w.deploy_decoy(BodyId(0)).unwrap();
+        let (ship,drone)=(&w.bodies[0],&w.bodies[decoy.0 as usize]);
+        assert_eq!(ship.decoys,1);
+        assert!(drone.decoy && !drone.armed && !drone.controllable && drone.decoys==0);
+        assert_eq!((drone.kind,&drone.name,drone.faction),(BodyKind::Ship,&ship.name,ship.faction),"nothing an observer reads tells them apart");
+        assert_eq!(drone.trajectory.state_at(0.0),ship.trajectory.state_at(0.0),"it starts where the ship is, moving as the ship moves");
+        assert!(!drone.sensors.passive && !drone.sensors.active && !drone.sensors.direction_finding);
+        // A coasting ship's decoy burns along its course at the floor rate.
+        let burn=drone.trajectory.thrust_at(0.0).unwrap();
+        assert!((burn.length()-DECOY_MIN_G.value*G0).abs()<1e-9 && burn.normalized().dot(Vec2::new(0.0,1.0))>0.999);
+        assert_eq!(w.bodies[0].trajectory.thrust_at(0.0).unwrap(),Vec2::ZERO,"the helm of the ship itself is untouched");
+        // The enemy's track now follows the drone. The ship is a fresh contact when next seen.
+        assert_eq!(w.body_for_contact(FactionId(1),c),Some(decoy));
+        let again=w.contact_id(FactionId(1),BodyId(0));
+        assert_ne!(again,c);
+        assert_eq!(w.body_for_contact(FactionId(1),again),Some(BodyId(0)));
+        assert_eq!(w.deploy_decoy(decoy),Err(OrderError::Unarmed),"a decoy carries no decoys");
+        // Only an identity-level look that has reached the decider exposes it.
+        assert!(!w.decoy_exposed(FactionId(1),c));
+        let mut look=crate::mind::Observation {detection:crate::sensors::DetectionLevel::Resolved,contact:c,sensor:BodyId(2),origin:Vec2::new(1.5*AU,0.0),
+            emitted_at:0.0,sensor_received_at:0.0,decider_received_at:0.0,source:crate::mind::Source::Echo,snr:1e6,
+            measurement:crate::mind::Measurement::BearingRange {bearing:0.0,range:0.5*AU,sigma_range:10.0,sigma_bearing:1e-7}};
+        w.observe_damage(&look);
+        assert!(!w.decoy_exposed(FactionId(1),c),"a resolved return is still a ship");
+        look.detection=crate::sensors::DetectionLevel::Identity;look.decider_received_at=50.0;
+        w.observe_damage(&look);
+        assert!(!w.decoy_exposed(FactionId(1),c),"not before the report arrives");
+        look.decider_received_at=0.0;
+        w.observe_damage(&look);
+        assert!(w.decoy_exposed(FactionId(1),c) && !w.decoy_exposed(FactionId(1),again));
+    }
+
+    #[test]
+    fn the_hand_over_reaches_a_watcher_at_light_speed() {
+        use crate::mind::{Measurement, Observation, Source};
+        let (mut w,c)=watched();
+        let release=1_000.0;
+        w.advance_to(release);
+        let decoy=w.deploy_decoy(BodyId(0)).unwrap();
+        // Half an AU is about 250 seconds of light. A look that left the ship before the release
+        // and arrives after it is still the old track.
+        let look=|w:&mut World,emitted:f64,body:BodyId| {
+            let contact=w.contact_at(FactionId(1),body,emitted);
+            w.perceptions.get_mut(&FactionId(1)).unwrap().ingest(Observation {detection:crate::sensors::DetectionLevel::Resolved,contact,sensor:BodyId(2),
+                origin:Vec2::new(1.5*AU,0.0),emitted_at:emitted,sensor_received_at:emitted+250.0,decider_received_at:emitted+250.0,source:Source::Emission,snr:1e6,
+                measurement:Measurement::BearingRange {bearing:std::f64::consts::PI,range:0.5*AU,sigma_range:10.0,sigma_bearing:1e-7}},&w.system);
+            contact
+        };
+        let known=|w:&World|w.perception(FactionId(1)).unwrap().contacts.len();
+        // The watcher may hold other tracks of its own by now. Count from here.
+        let held=known(&w);
+        assert_eq!(look(&mut w,release-200.0,BodyId(0)),c);
+        assert_eq!(look(&mut w,release-0.001,BodyId(0)),c);
+        assert_eq!(known(&w),held,"nothing new has appeared: the release has not been seen yet");
+        // The decoy's light is the old track from its first moment.
+        assert_eq!(look(&mut w,release+1.0,decoy),c);
+        assert_eq!(known(&w),held);
+        // Only light that left the ship after the release is a new contact.
+        let fresh=look(&mut w,release+1.0,BodyId(0));
+        assert_ne!(fresh,c);
+        assert_eq!(known(&w),held+1);
+        assert_eq!(look(&mut w,release-50.0,BodyId(0)),c,"a late-arriving old look still does not move");
+        // A second release hands on the contact the ship had between the two.
+        w.advance_to(release+500.0);
+        let second=w.deploy_decoy(BodyId(0)).unwrap();
+        assert_eq!(w.contact_at(FactionId(1),BodyId(0),release+400.0),fresh);
+        assert_eq!(w.contact_at(FactionId(1),second,release+501.0),fresh);
+        assert_eq!(w.contact_at(FactionId(1),BodyId(0),release-1.0),c);
+        let third=w.contact_at(FactionId(1),BodyId(0),release+501.0);
+        assert!(third!=c && third!=fresh);
+    }
+
+    #[test]
+    fn rounds_still_flying_on_the_track_follow_it_to_the_decoy() {
+        let (mut w,c)=watched();
+        let round=w.launch(BodyId(2),c,Payload::Nuclear).expect("the enemy holds a track to launch on");
+        assert_eq!(w.bodies[round.0 as usize].missile.unwrap().target_body,BodyId(0));
+        let decoy=w.deploy_decoy(BodyId(0)).unwrap();
+        let flying=w.bodies[round.0 as usize].missile.unwrap();
+        assert_eq!((flying.target,flying.target_body),(c,decoy),"it was steering by the track, and the track moved");
+        // A round that has found the ship for itself is not fooled.
+        let (mut w,c)=watched();
+        let round=w.launch(BodyId(2),c,Payload::Nuclear).unwrap();
+        let at=w.state(BodyId(0),0.0).unwrap().pos;
+        w.bodies[round.0 as usize].missile.as_mut().unwrap().local_fix=Some(crate::sensors::SeekerFix::update(None,0.0,at,Vec2::ZERO));
+        w.deploy_decoy(BodyId(0)).unwrap();
+        assert_eq!(w.bodies[round.0 as usize].missile.unwrap().target_body,BodyId(0));
+    }
+
+    #[test]
+    fn a_decoy_burns_out_quietly_and_is_never_counted_a_lost_ship() {
+        let (mut w,_)=watched();
+        let decoy=w.deploy_decoy(BodyId(0)).unwrap();
+        w.advance_to(DECOY_BURN_S.value-20.0);
+        assert!(w.bodies[decoy.0 as usize].alive_at(w.time()));
+        w.advance_to(DECOY_BURN_S.value+20.0);
+        assert!(!w.bodies[decoy.0 as usize].alive_at(w.time()));
+        assert!(w.losses.iter().any(|l|l.body==decoy && l.cause==LossCause::Expended));
+        assert!(w.outcome.is_none());
+        // Shot down, it is still not a ship lost: no alert goes to its own side.
+        let second=w.deploy_decoy(BodyId(0)).unwrap();
+        let before=w.refinement.alerts.len();
+        w.destroy(second,w.time(),LossCause::ShipBeam {shooter:BodyId(2)});
+        assert_eq!(w.refinement.alerts.len(),before);
+        assert!(w.bodies[0].alive_at(w.time()) && w.bodies[0].decoys==0);
+    }
+
+    #[test]
+    fn emission_silence_coasts_dark_and_release_restores_only_what_it_changed() {
+        use controls::{ControlledSystem,Mode};
+        let mut w=fleet();
+        w.bodies[1].has_screen=true;
+        w.set_system_mode(BodyId(1),ControlledSystem::Active,Mode::Auto).unwrap();
+        w.set_system_mode(BodyId(1),ControlledSystem::Screens,Mode::On).unwrap();
+        w.set_thrust(BodyId(1),Vec2::new(5.0*G0,0.0)).unwrap();
+        w.arm_beams(BodyId(1)).unwrap();
+        w.set_emcon(BodyId(1),true).unwrap();
+        let b=&w.bodies[1];
+        assert_eq!((b.controls.active,b.controls.screens,b.beam_auto,b.beam_target),(Mode::Off,Mode::Off,false,None));
+        assert_eq!(b.trajectory.thrust_at(w.time()).unwrap(),Vec2::ZERO);
+        assert_eq!(b.controls.emcon,Some((Mode::Auto,Mode::On)));
+        // Ordered silent twice, the modes to restore are still the ones from before the first.
+        w.set_emcon(BodyId(1),true).unwrap();
+        assert_eq!(w.bodies[1].controls.emcon,Some((Mode::Auto,Mode::On)));
+        w.set_emcon(BodyId(1),false).unwrap();
+        let b=&w.bodies[1];
+        assert_eq!((b.controls.active,b.controls.screens,b.controls.emcon),(Mode::Auto,Mode::On,None));
+        assert_eq!(b.trajectory.thrust_at(w.time()).unwrap(),Vec2::ZERO,"release does not restart the drive");
+        assert!(!b.beam_auto,"or re-arm weapons");
+        w.set_system_mode(BodyId(1),ControlledSystem::Screens,Mode::Off).unwrap();
+        w.set_emcon(BodyId(1),false).unwrap();
+        assert_eq!(w.bodies[1].controls.screens,Mode::Off,"a release with nothing to release changes nothing");
+    }
+
     #[test]
     fn delivered_pictures_share_storage_and_new_snapshots_omit_retired_contacts() {
         let mut w=fleet();

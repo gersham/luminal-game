@@ -427,6 +427,9 @@ pub const MISSILE_SEEKER_ANGLE_FLOOR: Param = Param {
 
 
 pub const ALL: &[Param] = &[
+    REINFORCEMENT_OFFSET_AU,
+    GIANT_RADIUS_KM, GIANT_MASK_RADII, DEBRIS_FIELDS, DEBRIS_RADIUS_AU, DEBRIS_MIN_GAP_AU, FLARE_DURATION_S,
+    DECOY_INVENTORY, DECOY_BURN_S, DECOY_MIN_G, DECOY_HULL_HP,
     PROBE_INVENTORY, PROBE_BURN_S, PROBE_SENSOR_FACTOR, PROBE_PING_INTERVAL_S,
     PASSIVE_SYSTEMATIC_FRACTION, ACTIVE_SYSTEMATIC_FRACTION, DIRECTION_SYSTEMATIC_RAD,
     SEEKER_RESOLVE_LS, SEEKER_FIX_INTERVAL_S, SEEKER_RANGE_SIGMA_KM,
@@ -442,6 +445,10 @@ pub const ALL: &[Param] = &[
     SHIP_BEAM_ENERGY_J,
     SHIP_BEAM_AUTO_RANGE_LS,
     SHIP_BEAM_MIN_EXPECTED_J,
+    BEAM_AIMED_RANGE_LS,
+    BEAM_AIMED_ENERGY_FRACTION,
+    BEAM_AIMED_SYSTEM_FACTOR,
+    BEAM_AIMED_BIAS,
     SHIP_BEAM_RECHARGE_S,
     SHIP_BEAM_DIVERGENCE,
     SHIP_BEAM_POINTING_RAD,
@@ -508,6 +515,17 @@ pub const SEEKER_RESOLVE_LS: Param = Param { key: "missile.resolve_range", value
 pub const SEEKER_FIX_INTERVAL_S: Param = Param { key: "missile.fix_interval", value: 0.1, unit: "s", commitment: Placeholder, note: "Independent local ranging integration, not every guidance iteration." };
 pub const SEEKER_RANGE_SIGMA_KM: Param = Param { key: "missile.range_sigma", value: 0.1, unit: "km", commitment: Placeholder, note: "Local optical/TL7 ranging error at SNR 1; never an exact truth handoff." };
 pub const PROBE_INVENTORY: Param = Param {key:"probe.inventory",value:3.0,unit:"per military ship",commitment:Established,note:"Three reconnaissance probes per military ship; transports, stations and other platforms carry none."};
+pub const REINFORCEMENT_OFFSET_AU:Param=Param {key:"events.reinforcement_offset",value:0.3,unit:"AU",commitment:Placeholder,note:"A ship jumping in mid-mission arrives this far from its side's senior ship, moving with it."};
+pub const GIANT_RADIUS_KM:Param=Param {key:"terrain.giant_radius",value:20_000.0,unit:"km",commitment:Placeholder,note:"A planet larger than this is warm and broad enough to hide a drive against."};
+pub const GIANT_MASK_RADII:Param=Param {key:"terrain.giant_mask",value:4.0,unit:"disc radii",commitment:Placeholder,note:"A target within this many disc radii of a giant's direction, with the giant behind it, gives passive sensors a bearing at best."};
+pub const DEBRIS_FIELDS:Param=Param {key:"terrain.debris_fields",value:2.0,unit:"count",commitment:Placeholder,note:"Debris fields placed in the gaps between planetary orbits."};
+pub const DEBRIS_RADIUS_AU:Param=Param {key:"terrain.debris_radius",value:0.25,unit:"AU",commitment:Placeholder,note:"Largest debris field radius. An active return from a target inside is an approximate position at best."};
+pub const DEBRIS_MIN_GAP_AU:Param=Param {key:"terrain.debris_min_gap",value:0.4,unit:"AU",commitment:Placeholder,note:"Narrowest gap between two orbits that can hold a debris field."};
+pub const FLARE_DURATION_S:Param=Param {key:"terrain.flare_duration",value:1_200.0,unit:"s",commitment:Placeholder,note:"How long a stellar flare dazzles a passive array once its light arrives. Every passive look loses one level."};
+pub const DECOY_INVENTORY:Param=Param {key:"decoy.inventory",value:2.0,unit:"count",commitment:Placeholder,note:"Deception drones carried by each combatant. A convincing drive signature takes real power, so they are few."};
+pub const DECOY_BURN_S:Param=Param {key:"decoy.burn",value:1_800.0,unit:"s",commitment:Placeholder,note:"A decoy holds its launch burn this long and is then expended."};
+pub const DECOY_MIN_G:Param=Param {key:"decoy.min_burn",value:20.0,unit:"g",commitment:Placeholder,note:"A decoy released from a coasting ship still burns at least this hard. A cold decoy would deceive nobody."};
+pub const DECOY_HULL_HP:Param=Param {key:"decoy.hull",value:5.0,unit:"HP",commitment:Placeholder,note:"A decoy is a drive and an emitter. Any hit ends it."};
 pub const PROBE_BURN_S: Param = Param {key:"probe.burn",value:6.0*3_600.0,unit:"s",commitment:Placeholder,note:"Fixed-heading 20 g burn. The probe is expended at the aim point, or when this burn ends, whichever comes first."};
 pub const PROBE_SENSOR_FACTOR: Param = Param {key:"probe.sensor_factor",value:0.01,unit:"power/SNR fraction",commitment:Placeholder,note:"Weaker passive arrays and active transmitter than a warship; local observations relay home at c."};
 pub const PROBE_PING_INTERVAL_S: Param = Param {key:"probe.ping_interval",value:300.0,unit:"s",commitment:Placeholder,note:"After a probe detects a ship or station it has not resolved, it pulses on this interval to seek a range fix. A search with nothing unresolved stays silent."};
@@ -528,6 +546,11 @@ pub const SHIP_BEAM_AUTO_RANGE_LS: Param = Param {
     note: "Close-combat automatic engagement band. Automatic fire requires the minimum expected energy inside it, and a useful fraction beyond it. Main-beam coupling tapers to zero at 10 LS, including directed fire.",
 };
 pub const SHIP_BEAM_MIN_EXPECTED_J:Param=Param {key:"ship_beam.min_expected_energy",value:1e12,unit:"J",commitment:Proposal,note:"Automatic fire, including inside 6 LS, requires at least this expected coupled energy. Beyond 6 LS it also requires 5% of the pulse and transverse uncertainty within two beam radii."};
+
+pub const BEAM_AIMED_RANGE_LS:Param=Param {key:"ship_beam.aimed_range",value:3.0,unit:"ls",commitment:Placeholder,note:"Beyond this a beam laid on a system group is fired at the hull instead. A drive or an array is a small aim point."};
+pub const BEAM_AIMED_ENERGY_FRACTION:Param=Param {key:"ship_beam.aimed_energy_fraction",value:0.5,unit:"",commitment:Placeholder,note:"Share of the coupled pulse that lands when the beam is held on one system group. The rest is the price of the smaller aim point."};
+pub const BEAM_AIMED_SYSTEM_FACTOR:Param=Param {key:"ship_beam.aimed_system_factor",value:2.0,unit:"x",commitment:Placeholder,note:"Subsystem-casualty exposure of an aimed pulse, relative to the same energy on the hull. With half the energy landing, the chance of a casualty is about that of an unaimed hit."};
+pub const BEAM_AIMED_BIAS:Param=Param {key:"ship_beam.aimed_bias",value:0.75,unit:"",commitment:Placeholder,note:"Chance that a casualty from an aimed pulse falls inside the chosen group. Otherwise the usual lottery applies."};
 
 pub const SHIP_BEAM_ENERGY_J: Param = Param {
     key: "ship_beam.pulse_energy", value: 7.5e13, unit: "J", commitment: Placeholder,

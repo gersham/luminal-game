@@ -3,6 +3,26 @@
 use super::*;
 #[derive(Clone,Copy,Debug,Default,PartialEq,Eq)]
 pub enum BeamMode {#[default] Damage,Interference}
+/// Where the main beam is laid. Hull is the whole target. A system group is a smaller aim
+/// point: less of the pulse lands, and a casualty usually falls where it was aimed. Heat
+/// warms the target instead of holing it.
+#[derive(Clone,Copy,Debug,Default,PartialEq,Eq)]
+pub enum BeamAim {#[default] Hull,Drive,Sensors,Weapons,Heat}
+impl BeamAim {
+    pub const ALL:[Self;5]=[Self::Hull,Self::Drive,Self::Sensors,Self::Weapons,Self::Heat];
+    pub fn label(self)->&'static str {match self {Self::Hull=>"HULL",Self::Drive=>"DRIVE",Self::Sensors=>"SENSORS",Self::Weapons=>"WEAPONS",Self::Heat=>"HEAT"}}
+    /// Systems a casualty is steered toward. The reactor, the mind and the crew are never aim points.
+    pub fn systems(self)->&'static [crate::damage::System] {
+        use crate::damage::System as S;
+        match self {
+            Self::Drive=>&[S::Propulsion,S::Jump],
+            Self::Sensors=>&[S::Passive,S::Active,S::Direction,S::Ecm,S::Eccm],
+            Self::Weapons=>&[S::Beam,S::Launcher,S::SrmLauncher,S::PdMissiles,S::PdLaser],
+            Self::Hull|Self::Heat=>&[],
+        }
+    }
+    pub fn next(self)->Self {Self::ALL[(Self::ALL.iter().position(|a|*a==self).unwrap()+1)%Self::ALL.len()]}
+}
 #[derive(Clone,Copy,Debug,Default,PartialEq,Eq)]
 pub enum WeaponVisual {#[default] Standard,Pulse(u8),Canister(u8)}
 pub const INTERFERENCE_RANGE_LS:f64=6.0;
@@ -25,6 +45,12 @@ impl World {
         let b=self.live_body_mut(id)?;
         if b.kind!=BodyKind::Ship || !b.armed || !b.ship_class.is_some_and(ShipClass::has_projector) {return Err(OrderError::Unarmed);}
         b.beam_mode=mode;self.snapshot_platform(id,self.time);Ok(())
+    }
+    /// Lay the main beam on the hull, a system group, or as heat. Any armed ship with a beam can.
+    pub fn set_beam_aim(&mut self,id:BodyId,aim:BeamAim)->Result<(),OrderError> {
+        let b=self.live_body_mut(id)?;
+        if b.kind!=BodyKind::Ship || !b.armed || b.ship_class==Some(ShipClass::Picket) {return Err(OrderError::Unarmed);}
+        b.beam_aim=aim;Ok(())
     }
     pub(super) fn weapon_visual(&self,kind:CombatKind,id:Option<BodyId>)->WeaponVisual {
         let Some(b)=id.and_then(|id|self.body(id)) else {return WeaponVisual::Standard;};

@@ -36,6 +36,10 @@ pub mod controls;
 pub mod weapon_probability;
 #[path = "jump.rs"]
 pub mod jump;
+#[path = "terrain.rs"]
+pub mod terrain;
+#[path = "events.rs"]
+pub mod events;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct FactionId(pub u8);
@@ -133,6 +137,7 @@ pub struct Autopilot {
 #[derive(Clone, Debug)]
 pub struct Body {
     pub beam_mode:BeamMode,
+    pub beam_aim:weapon_fit::BeamAim,
     pub disrupted_until:f64,
     /// Cosmetic class title; the ship_class enum alone determines capabilities.
     pub display_class:Option<String>,
@@ -158,6 +163,10 @@ pub struct Body {
     pub visibility_multiplier: f64,
     pub sensors: sensors::SensorSuite,
     pub probes: u32,
+    /// Deception drones aboard.
+    pub decoys: u32,
+    /// A deception drone: a drive and an emitter that an observer cannot tell from the ship that released it.
+    pub decoy: bool,
     /// End of the fixed burn. The probe is expended at this time if it has not already arrived.
     pub probe_burn_until: Option<f64>,
     /// Aim point on the launch ray. The probe is expended once it reaches this.
@@ -229,6 +238,15 @@ pub struct MissileState {
 }
 
 impl Body {
+    /// A copy holding only the state at `t`. The committed history stays here and is not copied.
+    pub(crate) fn snapshot(&mut self,t:f64,state:State,thrust:Vec2)->Body {
+        let mut brief=Trajectory::new(t,state);
+        brief.set_thrust(t,thrust).unwrap();
+        let history=std::mem::replace(&mut self.trajectory,brief);
+        let snapshot=self.clone();
+        self.trajectory=history;
+        snapshot
+    }
     pub fn emissivity_factors(&self,t:f64)->sensors::EmissivityFactors {
         let recent=|at:Option<f64>|at.is_some_and(|at|t>=at && t-at<60.0);
         let size=if self.kind==BodyKind::Station {20.0} else {match self.ship_class {Some(class)=>7.0*class.scale().cbrt(),_=>10.0}};
@@ -515,6 +533,8 @@ enum Event {
     QueuedLaunch(BodyId, ContactId, Payload, u64, u32),
     /// A laser missile's beam, resolved when its light reaches the target.
     Beam(Beam),
+    /// A mid-mission event, by its index in the script.
+    Scripted(usize),
 }
 
 /// Main beams lose effective coupling smoothly between 6 and 10 light-seconds.
@@ -538,6 +558,8 @@ pub struct BeamSolution {
 
 #[derive(Clone, Copy, Debug)]
 struct Beam {
+    /// The aim the shooter held when the pulse left. It cannot change in flight.
+    aim:weapon_fit::BeamAim,
     interference:bool,
     coherence:f64,
     missile: BodyId,
@@ -586,6 +608,16 @@ pub struct World {
     refinement: refinements::Refinements,
     time: f64,
     pub system: System,
+    /// Mid-mission events, in the order they were scheduled.
+    pub script: Vec<events::Timed>,
+    /// Off for a scenario that should run with nothing arranged.
+    pub events_enabled: bool,
+    notices: BTreeMap<FactionId, Vec<(f64, String)>>,
+    /// Decoy releases: ship, decoy, time. Light that left the ship earlier still belongs to its old track.
+    releases: Vec<(BodyId, BodyId, f64)>,
+    pending_notices: Vec<(FactionId, Front, String)>,
+    /// Debris fields and flares. Public knowledge, like the ephemeris.
+    pub terrain: terrain::Terrain,
     pub bodies: Vec<Body>,
     pub losses: Vec<Loss>,
     pub hits: Vec<Hit>,
@@ -667,7 +699,7 @@ impl World {
             .into_iter()
             .map(|spec| {
                 let trajectory = ballistic_history(&system, spec.state, spec.thrust, history_s);
-                Body {beam_mode:BeamMode::Damage,disrupted_until:0.0,display_class:None,withdrawing:false,
+                Body {beam_aim:weapon_fit::BeamAim::Hull,beam_mode:BeamMode::Damage,disrupted_until:0.0,display_class:None,withdrawing:false,
                     jump:None,jump_ready_at:0.0,step_generation:0,
                     controls:controls::Controls::default(),last_missile_launch:None,
                     ship_class: (spec.kind==BodyKind::Ship).then_some(ShipClass::Frigate),
@@ -682,6 +714,7 @@ impl World {
                         BodyKind::Station=>sensors::SensorSuite {passive:false,active:false,direction_finding:true},
                         _=>sensors::SensorSuite::FULL,
                     },
+                    decoys:0,decoy:false,
                     probes: if spec.kind==BodyKind::Ship && spec.magazine>0 { PROBE_INVENTORY.value as u32 } else { 0 },
                     probe_burn_until: None,
                     probe_destination: None,
@@ -732,6 +765,8 @@ impl World {
             probability_flights:BTreeMap::new(),
             refinement: refinements::Refinements::with_seed(seed),
             time: 0.0,
+            script: vec![], events_enabled: true, notices: BTreeMap::new(), pending_notices: vec![], releases: vec![],
+            terrain: terrain::Terrain::generate(&system, seed),
             system,
             last_step: vec![0.0; bodies.len()],
             bodies,
@@ -787,11 +822,16 @@ impl World {
 
     /// One assigned command ship; destruction never transfers player command.
     pub fn decider(&self, f: FactionId, t: f64) -> Option<BodyId> {
-        self.bodies
-            .iter()
-            .enumerate()
-            .filter(|(_, b)| b.faction == f && b.kind == BodyKind::Ship && b.controllable)
-            .min_by_key(|(i,b)| (!b.controllable, !b.armed, *i))
+        // The lowest-numbered armed command ship, else the lowest-numbered command ship.
+        // Ships sit ahead of the rounds they launch, so the scan ends at the first armed one.
+        let mut unarmed=None;
+        let mut chosen=None;
+        for (i,b) in self.bodies.iter().enumerate() {
+            if b.faction != f || b.kind != BodyKind::Ship || !b.controllable {continue;}
+            if b.armed {chosen=Some((i,b));break;}
+            if unarmed.is_none() {unarmed=Some((i,b));}
+        }
+        chosen.or(unarmed)
             .filter(|(_,b)| b.alive_at(t) || (b.trajectory.end().is_none() && matches!(b.jump,Some(jump::JumpState::Transit {..}))))
             .map(|(i, _)| BodyId(i as u32))
     }
@@ -1225,7 +1265,7 @@ impl World {
         let mut start = b.trajectory.state_at(t).expect("alive");start.pos=start.pos+offset;
         let dv = payload.delta_v();
         let mid = BodyId(self.bodies.len() as u32);
-        self.bodies.push(Body {beam_mode:BeamMode::Damage,disrupted_until:0.0,display_class:None,withdrawing:false,
+        self.bodies.push(Body {beam_aim:weapon_fit::BeamAim::Hull,beam_mode:BeamMode::Damage,disrupted_until:0.0,display_class:None,withdrawing:false,
             jump:None,jump_ready_at:0.0,step_generation:0,
             controls:controls::Controls::default(),last_missile_launch:None,
             ship_class: None,facing:0.0,turn_target:0.0,facing_at:0.0,spinal_ready_at:0.0,spinal_tracking:None,
@@ -1236,6 +1276,7 @@ impl World {
             baseline_emission_factor: if payload==Payload::Nuclear {0.001} else {1.0},
             visibility_multiplier:1.0,
             sensors: sensors::SensorSuite::MISSILE,
+            decoys:0,decoy:false,
             probes: 0,
             probe_burn_until: None,
             probe_destination: None,
@@ -1326,29 +1367,40 @@ impl World {
 
     /// Newer of this ship's own range fixes and the flagship picture, already propagated to now.
     fn firing_solution(&self,shooter:BodyId,target:ContactId)->Option<crate::mind::Track> {
+        self.firing_solution_from(shooter,target,self.received_picture(shooter))
+    }
+    /// As `firing_solution`, with the delivered picture already looked up. Finding it solves
+    /// a light-time root against the flagship's history, once per ship rather than per contact.
+    fn firing_solution_from(&self,shooter:BodyId,target:ContactId,delivered:Option<&Perception>)->Option<crate::mind::Track> {
         let t=self.time;
         let sys=&self.system;
-        let from=|picture:&Perception| {
+        // Choose the picture first. Propagating a track is the expensive part, and only one is used.
+        fn usable(picture:&Perception,target:ContactId,t:f64)->Option<(f64,&crate::mind::Contact)> {
             let contact=picture.contacts.get(&target)?;
             let born=contact.track.as_ref()?.t;
-            Some((born,contact.estimate(t,sys)?))
-        };
-        let local=self.local_pictures.get(&shooter).and_then(from);
-        let uplink=self.received_picture(shooter).and_then(from);
-        match (local,uplink) {
-            (Some((born,_)),Some((other,remote))) if other>born => Some(remote),
-            (Some((_,track)),_) => Some(track),
-            (None,Some((_,track))) => Some(track),
-            (None,None) => None,
+            contact.can_estimate(t).then_some((born,contact))
         }
+        let local=self.local_pictures.get(&shooter).and_then(|p|usable(p,target,t));
+        let uplink=delivered.and_then(|p|usable(p,target,t));
+        let chosen=match (local,uplink) {
+            (Some((born,_)),Some((other,remote))) if other>born => remote,
+            (Some((_,contact)),_) => contact,
+            (None,Some((_,contact))) => contact,
+            (None,None) => return None,
+        };
+        chosen.estimate(t,sys)
     }
 
     /// Expected coupled energy using only the aim track and its transverse
     /// uncertainty at pulse arrival, including pointing jitter. This is a firing
     /// policy, not knowledge of the target's actual future manoeuvres.
     pub fn beam_solution(&self,id:BodyId,target:ContactId)->Option<BeamSolution> {
-        let origin=self.state(id,self.time)?.pos;
+        self.state(id,self.time)?;
         let track=self.firing_solution(id,target)?;
+        self.beam_solution_on(id,&track)
+    }
+    fn beam_solution_on(&self,id:BodyId,track:&crate::mind::Track)->Option<BeamSolution> {
+        let origin=self.state(id,self.time)?.pos;
         let range=(track.pos()-origin).length();
         let predicted=track.at(self.time+range/crate::units::C,&self.system);
         let direction=(predicted.pos()-origin).normalized();
@@ -1371,7 +1423,8 @@ impl World {
     fn beam_auto_target(&self,id:BodyId,faction:FactionId,origin:Vec2)->Option<ContactId> {
         let battleship=self.bodies[id.0 as usize].ship_class==Some(ShipClass::Battleship);
         let mut seen=Vec::new();
-        for picture in [self.received_picture(id),self.local_pictures.get(&id)].into_iter().flatten() {
+        let delivered=self.received_picture(id);
+        for picture in [delivered,self.local_pictures.get(&id)].into_iter().flatten() {
             for c in picture.contacts.values() {
                 if self.contact_retired(faction,c.id) {continue;}
                 if self.body_for_contact(faction,c.id).is_some_and(|target|self.bodies[target.0 as usize].kind==BodyKind::Missile) {continue;}
@@ -1379,19 +1432,29 @@ impl World {
                 seen.push((c.id,(tr.pos()-origin).length()));
             }
         }
-        seen.into_iter().filter(|(target,_)| self.firing_solution(id,*target).is_some() && (self.beam_worth_firing(id,*target)
-            || (battleship && self.spinal_worth_firing(id,*target))))
-            .min_by(|a,b| a.1.total_cmp(&b.1)).map(|(id,_)| id)
+        // One solution per contact. A contact held in both pictures, and each worth test, share it.
+        let mut verdicts:BTreeMap<ContactId,bool>=BTreeMap::new();
+        seen.into_iter().filter(|(target,_)| *verdicts.entry(*target).or_insert_with(|| {
+            let Some(track)=self.firing_solution_from(id,*target,delivered) else {return false};
+            let solution=self.beam_solution_on(id,&track);
+            self.beam_worth(id,solution.as_ref()) || (battleship && self.spinal_worth(id,solution.as_ref()))
+        })).min_by(|a,b| a.1.total_cmp(&b.1)).map(|(id,_)| id)
     }
 
     fn beam_worth_firing(&self,id:BodyId,target:ContactId)->bool {
-        self.beam_solution(id,target).is_some_and(|s|s.worth_firing && (self.bodies[id.0 as usize].beam_mode==BeamMode::Damage || s.range_km<=weapon_fit::INTERFERENCE_RANGE_LS*crate::units::LIGHT_SECOND))
+        self.beam_worth(id,self.beam_solution(id,target).as_ref())
+    }
+    fn beam_worth(&self,id:BodyId,solution:Option<&BeamSolution>)->bool {
+        solution.is_some_and(|s|s.worth_firing && (self.bodies[id.0 as usize].beam_mode==BeamMode::Damage || s.range_km<=weapon_fit::INTERFERENCE_RANGE_LS*crate::units::LIGHT_SECOND))
     }
 
     /// The spinal footprint is ten times the main-beam spot and ignores the main-beam range taper.
     /// It still has to be predicted to return a useful fraction of its own pulse, or the mount pins the tank.
     fn spinal_worth_firing(&self,id:BodyId,target:ContactId)->bool {
-        let Some(solution)=self.beam_solution(id,target) else {return false};
+        self.spinal_worth(id,self.beam_solution(id,target).as_ref())
+    }
+    fn spinal_worth(&self,id:BodyId,solution:Option<&BeamSolution>)->bool {
+        let Some(solution)=solution else {return false};
         let limit=10.0*SHIP_BEAM_AUTO_RANGE_LS.value*crate::units::LIGHT_SECOND;
         if solution.range_km>limit || solution.spot_km<=0.0 {return false;}
         let broad=solution.spot_km*10.0;
@@ -1461,7 +1524,10 @@ impl World {
         let coherence=self.bodies[id.0 as usize].beam_coherence(t);
         let angle = bearing_of(aim) + SHIP_BEAM_POINTING_RAD.value * self.rng.gaussian();
         let direction = Vec2::new(angle.cos(), angle.sin());
-        let beam = Beam { interference,coherence,missile: id, target: target_body, front: Front { origin, t_emit: t }, direction,
+        // A system group is a small aim point. Past the aimed range the pulse is laid on the hull.
+        let held=self.bodies[id.0 as usize].beam_aim;
+        let aimed=if !held.systems().is_empty() && aim.length()>BEAM_AIMED_RANGE_LS.value*crate::units::LIGHT_SECOND {weapon_fit::BeamAim::Hull} else {held};
+        let beam = Beam { aim:aimed,interference,coherence,missile: id, target: target_body, front: Front { origin, t_emit: t }, direction,
             ship_energy_j: energy,spinal:false };
         self.bodies[id.0 as usize].beam_ready_at = t + SHIP_BEAM_RECHARGE_S.value/effectiveness;
         self.bodies[id.0 as usize].thermal.fire_energy(energy);
@@ -1496,7 +1562,7 @@ impl World {
         b.thermal.fire_energy(energy);
         b.beam_emitted_j+=energy;b.last_beam=Some((t,origin,origin+aim));
         self.record_beam(t,origin,CombatKind::SpinalPulse,id,target_body,faction);
-        self.scheduler.schedule(t+flight.max(0.001),Event::Beam(Beam {interference:false,coherence:self.bodies[id.0 as usize].beam_coherence(t),missile:id,target:target_body,front:Front {origin,t_emit:t},direction:aim.normalized(),ship_energy_j:energy,spinal:true}));
+        self.scheduler.schedule(t+flight.max(0.001),Event::Beam(Beam {aim:weapon_fit::BeamAim::Hull,interference:false,coherence:self.bodies[id.0 as usize].beam_coherence(t),missile:id,target:target_body,front:Front {origin,t_emit:t},direction:aim.normalized(),ship_energy_j:energy,spinal:true}));
         Ok(())
     }
 
@@ -1550,7 +1616,7 @@ impl World {
                 }
                 let coupled = energy * fraction * beam.coherence;
                 if coupled > 0.0 {
-                    self.deliver(beam.target, t_arr, coupled, Payload::Beam, beam.missile);
+                    self.deliver_aimed(beam.target, t_arr, coupled, Payload::Beam, beam.missile, beam.aim);
                 }
             }
         }
@@ -1872,6 +1938,7 @@ impl World {
             self.time = te.max(self.time);
             let seen = self.alerts.len();
             match ev {
+                Event::Scripted(index)=>self.run_scripted(index),
                 Event::JumpDepart(id,at)=>self.jump_depart(id,at),
                 Event::JumpArrive(id,at)=>self.jump_arrive(id,at),
                 Event::InterceptorGuide(id)=>self.guide_interceptor(id),
@@ -1972,6 +2039,13 @@ impl World {
     /// Energy lands on a body: a raised screen stores what it can, the hull takes the
     /// rest, and the ship is lost once the hull has taken too much.
     fn deliver(&mut self, id: BodyId, t: f64, energy_j: f64, payload: Payload, missile: BodyId) {
+        self.deliver_aimed(id,t,energy_j,payload,missile,weapon_fit::BeamAim::Hull);
+    }
+    /// A hit, with the aim its beam was fired on. Missiles and unaimed beams are `Hull`.
+    /// Nothing here passes the screens: an aim changes only what the energy does behind them.
+    fn deliver_aimed(&mut self, id: BodyId, t: f64, energy_j: f64, payload: Payload, missile: BodyId, aim: weapon_fit::BeamAim) {
+        let group=aim.systems();
+        let energy_j=if group.is_empty() {energy_j} else {energy_j*BEAM_AIMED_ENERGY_FRACTION.value};
         self.debug_note("DAMAGE",format!("event_time={t:.6} target={id:?} source={missile:?} payload={payload:?} energy_j={energy_j}"));
         let b = &mut self.bodies[id.0 as usize];
         if !b.alive_at(t) {
@@ -1989,7 +2063,12 @@ impl World {
         b.thermal.absorb(screened_j*screen_heat_multiplier());
         let installed=b.installed_systems();
         let before=b.damage;
-        let mut casualty=b.damage.penetrate(energy_j-screened_j,&installed,&mut self.rng);
+        let through=energy_j-screened_j;
+        let mut casualty=if aim==weapon_fit::BeamAim::Heat {
+            // Laid wide to warm, not to hole: what the screens do not take goes into the heat tank.
+            b.thermal.absorb(through);None
+        } else if group.is_empty() {b.damage.penetrate(through,&installed,&mut self.rng)}
+        else {b.damage.penetrate_aimed(through,&installed,&mut self.rng,group,BEAM_AIMED_SYSTEM_FACTOR.value,BEAM_AIMED_BIAS.value)};
         // A missile's rare screen puncture also shocks one installed component.
         if missile_hit && leak/crate::damage::JOULES_PER_HP>=b.damage.hull_max*crate::damage::CRITICAL_MIN_HULL_FRACTION && casualty.is_none() {casualty=b.damage.hit_system(&installed,&mut self.rng);}
         b.advance_thermal(t); // Clamp charge immediately after a subsystem casualty.
@@ -1999,6 +2078,7 @@ impl World {
         let damage=b.damage;
         let mut parts=vec![];
         if screened_j>0.0 {parts.push(format!("SCREENS ABSORBED {:.2} TJ",screened_j/1e12));}
+        if aim==weapon_fit::BeamAim::Heat && through>0.0 {parts.push(format!("HEAT +{:.2} TJ",through/1e12));}
         if before.armour>damage.armour {parts.push(format!("ARMOUR -{:.2}",before.armour-damage.armour));}
         if before.hull>damage.hull {parts.push(format!("HULL -{:.2}",before.hull-damage.hull));}
         for system in crate::damage::System::ALL {
@@ -2076,7 +2156,8 @@ impl World {
             self.record_combat(t, at, match cause {LossCause::Withdrawn=>CombatKind::Withdrawn,LossCause::Surrendered=>CombatKind::Surrendered,LossCause::Expended=>CombatKind::Expended,_=>CombatKind::Destroyed}, Some(id), Some(faction));
         }
         self.retire_tracked_missile(id,t);
-        if cause != LossCause::Expended {
+        // A decoy lost is a decoy doing its job, not a ship lost.
+        if cause != LossCause::Expended && !self.bodies[id.0 as usize].decoy {
             self.delay_alert(id, t, AlertKind::ShipLost(id));
         }
         if let Some(o) = self.objective.clone() {
@@ -2153,6 +2234,17 @@ impl World {
         b.trajectory.push(t, thrust, g).expect("steps advance in time");
         self.last_step[i] = t;
         self.scheduler.schedule(t + dt, Event::Step(id,self.bodies[i].step_generation));
+    }
+
+    /// The contact a faction files light from `body` under, given when that light left it.
+    /// A ship that released a decoy is a new contact only in light emitted after the release:
+    /// what left it earlier is still on its way to watchers, and still belongs to the track
+    /// the decoy inherited. So the hand-over reaches each watcher at light speed.
+    fn contact_at(&mut self, f: FactionId, body: BodyId, emitted: f64) -> ContactId {
+        let inherited=self.releases.iter().filter(|(ship,_,at)|*ship==body && emitted<*at)
+            .min_by(|a,b|a.2.total_cmp(&b.2)).map(|(_,decoy,_)|*decoy);
+        if let Some(decoy)=inherited && let Some(contact)=self.association.get(&(f,decoy)) {return *contact;}
+        self.contact_id(f,body)
     }
 
     fn contact_id(&mut self, f: FactionId, body: BodyId) -> ContactId {
@@ -2249,7 +2341,7 @@ impl World {
                         Measurement::Bearing {..}=>sensors::DetectionLevel::Bearing,
                     };
                     reports.push(Observation {detection,
-                        contact: self.contact_id(target_faction, ping.emitter),
+                        contact: self.contact_at(target_faction, ping.emitter, ping.front.t_emit),
                         sensor: target,
                         origin: rx,
                         emitted_at: ping.front.t_emit,
@@ -2299,7 +2391,7 @@ impl World {
                     *receiver.operating_effectiveness(crate::damage::System::Active);
                 if echo.out_km.max(back_km)<=reach {sensors::DetectionLevel::Resolved} else {sensors::DetectionLevel::None}
             } else if ship_target {
-                self.detect_ship(echo.emitter,echo.target,echo.front.t_emit,echo.out_km.max(back_km),true)
+                self.through_terrain(self.detect_ship(echo.emitter,echo.target,echo.front.t_emit,echo.out_km.max(back_km),true),echo.emitter,rx,echo.front.origin,t_rx,true)
             } else if sensors::echo_resolvable(snr) {sensors::DetectionLevel::Resolved} else {sensors::DetectionLevel::Bearing};
             let resolved=detection>=sensors::DetectionLevel::Resolved;
             if self.bodies[echo.target.0 as usize].interceptor.is_some() && !resolved {continue;}
@@ -2312,7 +2404,7 @@ impl World {
             let m = sensors::measure_echo(bearing_of(echo.front.origin - rx), back_km, if deterministic {1e12} else {snr}, &mut self.rng);
             if !resolved && detection!=sensors::DetectionLevel::Approximate {
                 reports.push(Observation {detection:crate::sensors::DetectionLevel::Resolved,
-                    contact:self.contact_id(faction,target),sensor:echo.emitter,origin:rx,
+                    contact:self.contact_at(faction,target,echo.front.t_emit),sensor:echo.emitter,origin:rx,
                     emitted_at:echo.front.t_emit,sensor_received_at:t_rx,decider_received_at:f64::NAN,
                     measurement:Measurement::Bearing {bearing:m.bearing,sigma:m.sigma_bearing},snr,source:Source::Echo,
                 });
@@ -2330,7 +2422,7 @@ impl World {
                 }
             }
             reports.push(Observation {detection,
-                contact: self.contact_id(faction, target),
+                contact: self.contact_at(faction, target, echo.front.t_emit),
                 sensor: echo.emitter,
                 origin: rx,
                 emitted_at: echo.front.t_emit,
@@ -2381,6 +2473,7 @@ impl World {
                 let measured=if matches!(b.kind,BodyKind::Ship|BodyKind::Station) {
                     let ef=self.historical_ef(BodyId(ti as u32),t_e);
                     let level=self.detect_ship(BodyId(si as u32),BodyId(ti as u32),t_e,range,false);
+                    let level=self.through_terrain(level,BodyId(si as u32),me.pos,src.pos,t,false);
                     if level==sensors::DetectionLevel::None && !self.reverse_association.values().any(|id|*id==BodyId(ti as u32)) {continue;}
                     Some((sensors::ship_measurement(level,range,bearing_of(src.pos-me.pos),ef),100.0,level))
                 } else {sensors::receive_measurement_scaled(
@@ -2396,7 +2489,7 @@ impl World {
                     probe_ping.push(sensor);
                 }
                 reports.push(Observation {detection,
-                    contact: self.contact_id(faction, BodyId(ti as u32)),
+                    contact: self.contact_at(faction, BodyId(ti as u32), t_e),
                     sensor,
                     origin: me.pos,
                     emitted_at: t_e,
@@ -3535,6 +3628,63 @@ mod tests {
         w.fire_beam(BodyId(0), c).unwrap();
         assert_eq!(w.bodies[0].beam_emitted_j, 2.0 * SHIP_BEAM_ENERGY_J.value);
         assert_eq!(w.bodies[0].magazine, [0; 2]);
+    }
+
+    #[test]
+    fn a_beam_laid_on_a_system_group_lands_half_and_falls_back_to_the_hull_at_range() {
+        use weapon_fit::BeamAim;
+        let fire=|aim:BeamAim,range_ls:f64| {
+            let (mut w,c)=beam_trial();
+            let base=w.state(BodyId(0),0.0).unwrap().pos;
+            w.bodies[1].trajectory=Trajectory::new(0.0,State {pos:base+Vec2::new(range_ls*LIGHT_SECOND,0.0),vel:Vec2::ZERO});
+            // The fixture's one light-second fix would otherwise be averaged into the new range.
+            w.perceptions.get_mut(&FactionId(0)).unwrap().contacts.clear();
+            w.perceptions.get_mut(&FactionId(0)).unwrap().ingest(Observation {detection:crate::sensors::DetectionLevel::Resolved,
+                contact:c,sensor:BodyId(0),origin:base,emitted_at:0.0,sensor_received_at:0.0,decider_received_at:0.0,
+                measurement:Measurement::BearingRange {bearing:0.0,range:range_ls*LIGHT_SECOND,sigma_bearing:1e-10,sigma_range:1e-5},
+                snr:1e9,source:Source::Echo},&w.system);
+            w.set_beam_aim(BodyId(0),aim).unwrap();
+            w.fire_beam(BodyId(0),c).unwrap();
+            w.advance_to(range_ls+2.0);
+            w.hits[0]
+        };
+        let (hull,drive)=(fire(BeamAim::Hull,1.0),fire(BeamAim::Drive,1.0));
+        assert!(hull.hull_damage>0.0);
+        let landed=drive.energy_j/hull.energy_j;
+        assert!((landed-BEAM_AIMED_ENERGY_FRACTION.value).abs()<0.02,"an aimed pulse lands {landed} of an unaimed one");
+        assert!(drive.hull_damage<0.6*hull.hull_damage && drive.hull_damage>0.0);
+        // Past the aimed range the same order is an ordinary shot at the hull.
+        let (far_hull,far_drive)=(fire(BeamAim::Hull,4.0),fire(BeamAim::Drive,4.0));
+        assert!((far_drive.energy_j/far_hull.energy_j-1.0).abs()<0.02);
+        let (mut w,_)=beam_trial();
+        w.bodies[0].ship_class=Some(ShipClass::Picket);
+        assert_eq!(w.set_beam_aim(BodyId(0),BeamAim::Drive),Err(OrderError::Unarmed),"a picket has no main beam to lay");
+    }
+
+    #[test]
+    fn a_heat_beam_warms_the_target_without_holing_it_and_passes_no_screen() {
+        use weapon_fit::BeamAim;
+        let (mut w,c)=beam_trial();
+        w.set_beam_aim(BodyId(0),BeamAim::Heat).unwrap();
+        w.fire_beam(BodyId(0),c).unwrap();
+        w.advance_to(2.0);
+        let hit=w.hits[0];
+        assert!(hit.energy_j>0.0 && hit.screened_j==0.0);
+        assert_eq!((hit.hull_damage,hit.armour_damage,hit.system_hit),(0.0,0.0,None));
+        assert_eq!(w.bodies[1].damage.hull,w.bodies[1].damage.hull_max);
+        // Every joule that arrived is in the tank. Nothing is multiplied and nothing is lost.
+        assert!((w.bodies[1].thermal.captured_j-hit.energy_j).abs()<hit.energy_j*1e-9+1.0,"{} vs {}",w.bodies[1].thermal.captured_j,hit.energy_j);
+        assert!(w.bodies[1].thermal.balance_error().abs()<100.0);
+        // Behind a raised screen a heat beam is an ordinary screened hit: same field loss, same heat.
+        let screened=|aim:BeamAim| {
+            let (mut w,c)=beam_trial();
+            w.bodies[1].screen_up=true;w.bodies[1].controls.screens=controls::Mode::On;w.bodies[1].thermal.field=1.0;
+            w.set_beam_aim(BodyId(0),aim).unwrap();
+            w.fire_beam(BodyId(0),c).unwrap();
+            w.advance_to(2.0);
+            (w.hits[0].screened_j,w.bodies[1].thermal.captured_j,w.bodies[1].damage.hull)
+        };
+        assert_eq!(screened(BeamAim::Heat),screened(BeamAim::Hull));
     }
 
     #[test]
