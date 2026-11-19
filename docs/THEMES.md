@@ -31,6 +31,21 @@ systems, travels at 1 AU/s and preserves velocity. A void torpedo still uses
 the existing LRM flight profile and damage model. No setting-specific capability
 is implied or added by its name.
 
+## Interface palette and frames (18 November 2026)
+
+Each theme now has its own interface colours and its own way of cutting a button or card. The palette lives in `theme.rs`; the plot background stays near black in all four, because the map's light is additive.
+
+| Theme | Surfaces | Accent | Frames |
+| --- | --- | --- | --- |
+| Luminal | Deep blue-black | Cyan | Two opposite corners cut (unchanged) |
+| Grim Dark | Soot brown | Brass | All four corners cut, with an engraved inner rule |
+| Imperium | Navy | Gold, cream type | Square, with ticks at the corners |
+| Culture | Cool slate | Pale cyan, near-white type | Rounded |
+
+Friend, enemy and system-status colours are the same in every theme. Grim Dark's warm tone is a burnt orange, kept away from the red that means hostile or destroyed; a test holds every theme's tones clear of those colours and checks text contrast on every surface.
+
+Not done: fonts. The repository carries no font files, so every theme uses the same two faces. Engraved seals, hex motifs and themed report wording from the list below are also still ideas. A few panel fills inside the weapons and status cards are fixed colours and do not follow the theme yet.
+
 ## Ideas for a later cosmetic pass
 
 - **Grim Dark:** brass rules, dark red alert accents, engraved fleet seals,
@@ -45,8 +60,8 @@ is implied or added by its name.
   names and dry Mind commentary. Retreat could read “I propose we be elsewhere.”
   Put wit in secondary text; leave firing solutions and damage readouts precise.
 
-These are future directions, not implemented palette, audio, lore or mechanic
-changes. Keep the naval recognition-card layout across themes, with themed
+Apart from the palette and frames above, these are future directions, not
+implemented audio, lore or mechanic changes. Keep the naval recognition-card layout across themes, with themed
 silhouettes as a possible later asset pass. Avoid flavor that obscures range,
 fuel, damage or the vulnerable withdrawal window.
 

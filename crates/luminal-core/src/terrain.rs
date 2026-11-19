@@ -69,6 +69,11 @@ fn giant(body: &crate::celestial::Celestial) -> bool {
     body.kind == CelestialKind::Planet && body.radius > GIANT_RADIUS_KM.value
 }
 
+/// Half-angle of the zone a giant of `radius` masks, seen from `distance` away. None from on or inside it.
+pub fn mask_half_angle(radius: f64, distance: f64) -> Option<f64> {
+    (distance > radius).then(|| GIANT_MASK_RADII.value * (radius / distance).asin())
+}
+
 impl World {
     /// The target sits in front of a giant's disc as this sensor sees it: inside a few disc
     /// radii of the planet's direction, with the planet behind it.
@@ -81,7 +86,7 @@ impl World {
             let distance = to_planet.length();
             if distance <= range || distance <= b.radius { return false; }
             let separation = (line.dot(to_planet) / (range * distance)).clamp(-1.0, 1.0).acos();
-            separation < GIANT_MASK_RADII.value * (b.radius / distance).asin()
+            mask_half_angle(b.radius, distance).is_some_and(|half| separation < half)
         })
     }
 

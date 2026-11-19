@@ -26,20 +26,20 @@ impl LuminalApp {
             let footer=150.0;
             egui::ScrollArea::vertical().max_height((ui.available_height()-footer).max(160.0)).show(ui,|ui| {
                 ui.add_space(8.0);
-                ui.label(egui::RichText::new("CHOOSE YOUR SCENARIO").monospace().size(28.0).color(TEXT));
-                ui.label(egui::RichText::new(BUILD_VERSION).monospace().size(12.0).color(TEXT_MUTED)).on_hover_text(build_hover());
+                ui.label(egui::RichText::new("CHOOSE YOUR SCENARIO").monospace().size(28.0).color(pal().text));
+                ui.label(egui::RichText::new(BUILD_VERSION).monospace().size(12.0).color(pal().text_muted)).on_hover_text(build_hover());
                 ui.label(self.chosen_scenario.brief());
                 ui.add_space(16.0);
-                ui.label(egui::RichText::new("01  /  FLEET VOCABULARY").monospace().color(ACCENT));
+                ui.label(egui::RichText::new("01  /  FLEET VOCABULARY").monospace().color(pal().accent));
                 ui.horizontal_wrapped(|ui| {for theme in theme::Theme::ALL {ui.selectable_value(&mut self.theme,theme,theme.name());}});
                 ui.small(self.theme.description());
                 ui.small(format!("{} system · {}",self.theme.star_name(),self.theme.system_description()));
                 ui.small(format!("The other side is the {}.",self.theme.adversary()));
                 ui.small("Distinct planetary layouts; identical ship and weapon specifications.");
                 ui.add_space(12.0);
-                ui.horizontal_wrapped(|ui| {for (label,value) in [("LRM",self.theme.weapon(Payload::Nuclear)),("SRM",self.theme.weapon(Payload::Kinetic)),("BEAM",self.theme.weapon(Payload::Beam)),("JUMP",self.theme.jump()),("SCREENS",self.theme.screens())] {ui.label(egui::RichText::new(format!("{label} → {value}   ")).monospace().size(12.0).color(TEXT_MUTED));}});
+                ui.horizontal_wrapped(|ui| {for (label,value) in [("LRM",self.theme.weapon(Payload::Nuclear)),("SRM",self.theme.weapon(Payload::Kinetic)),("BEAM",self.theme.weapon(Payload::Beam)),("JUMP",self.theme.jump()),("SCREENS",self.theme.screens())] {ui.label(egui::RichText::new(format!("{label} → {value}   ")).monospace().size(12.0).color(pal().text_muted));}});
                 ui.add_space(20.0);
-                ui.label(egui::RichText::new("02  /  SCENARIO").monospace().color(ACCENT));
+                ui.label(egui::RichText::new("02  /  SCENARIO").monospace().color(pal().accent));
                 let columns=((ui.available_width()+10.0)/320.0).floor().clamp(1.0,4.0) as usize;
                 let card_width=(ui.available_width()-(columns-1) as f32*10.0)/columns as f32;
                 egui::Grid::new("scenario_cards").spacing(EVec2::splat(10.0)).show(ui,|ui| {
@@ -47,16 +47,16 @@ impl LuminalApp {
                         let (r,response)=ui.allocate_exact_size(EVec2::new(card_width,268.0),Sense::click());
                         if response.clicked() {self.chosen_scenario=scenario;}
                         let selected=self.chosen_scenario==scenario;
-                        let col=if selected {ACCENT} else {TEXT_MUTED};
+                        let col=if selected {pal().accent} else {pal().text_muted};
                         let p=ui.painter().with_clip_rect(r);
                         p.rect_filled(r,5.0,if selected {Color32::from_rgb(18,39,51)} else {Color32::from_rgb(12,20,29)});
-                        p.rect_stroke(r,5.0,Stroke::new(if selected {2.0} else {1.0},if response.hovered() {TEXT} else {col.gamma_multiply(0.6)}),StrokeKind::Inside);
-                        p.text(r.left_top()+EVec2::new(12.0,12.0),egui::Align2::LEFT_TOP,format!("{:02}  {}",i+1,scenario.name().to_uppercase()),mono(15.0),if selected {ACCENT} else {TEXT});
-                        p.text(r.left_top()+EVec2::new(12.0,38.0),egui::Align2::LEFT_TOP,scenario.forces(),mono(11.0),TEXT_MUTED);
+                        p.rect_stroke(r,5.0,Stroke::new(if selected {2.0} else {1.0},if response.hovered() {pal().text} else {col.gamma_multiply(0.6)}),StrokeKind::Inside);
+                        p.text(r.left_top()+EVec2::new(12.0,12.0),egui::Align2::LEFT_TOP,format!("{:02}  {}",i+1,scenario.name().to_uppercase()),mono(15.0),if selected {pal().accent} else {pal().text});
+                        p.text(r.left_top()+EVec2::new(12.0,38.0),egui::Align2::LEFT_TOP,scenario.forces(),mono(11.0),pal().text_muted);
                         let class=scenario.flagship();
                         self.ship_art.draw(ui.ctx(),&p,Rect::from_min_size(r.min+EVec2::new(12.0,62.0),EVec2::new(card_width-24.0,64.0)),self.theme,class,col);
-                        let detail=p.layout(scenario.detail().to_string(),mono(12.0),TEXT_MUTED,card_width-24.0);
-                        p.galley(r.min+EVec2::new(12.0,136.0),detail,TEXT_MUTED);
+                        let detail=p.layout(scenario.detail().to_string(),mono(12.0),pal().text_muted,card_width-24.0);
+                        p.galley(r.min+EVec2::new(12.0,136.0),detail,pal().text_muted);
                         p.text(r.left_bottom()+EVec2::new(12.0,-12.0),egui::Align2::LEFT_BOTTOM,if selected {"● SELECTED"} else {"SELECT SCENARIO"},mono(12.0),col);
                         response.on_hover_text(format!("{} · your ship is a {}.",scenario.name(),self.theme.class_name(class,false)));
                         if (i+1)%columns==0 {ui.end_row();}
@@ -67,7 +67,7 @@ impl LuminalApp {
             ui.label(self.chosen_scenario.forces());
             ui.label(self.chosen_scenario.detail());
             ui.add_space(8.0);
-            start=tac_button(ui,&format!("DEPLOY {}",self.chosen_scenario.name().to_uppercase()),EVec2::new(ui.available_width(),40.0),ACCENT,true,true).clicked();
+            start=tac_button(ui,&format!("DEPLOY {}",self.chosen_scenario.name().to_uppercase()),EVec2::new(ui.available_width(),40.0),pal().accent,true,true).clicked();
         });
         start
     }

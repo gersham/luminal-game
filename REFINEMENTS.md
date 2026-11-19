@@ -126,3 +126,35 @@ Each mechanic was landed inert first: with no AI use and no scenario content, th
 Totals hide movement in individual seeds. A trace of Armada seed 1 shows the relief destroyer arriving at hour 18 for the side with fewer ships and being flown by doctrine onto a target. A trace of Relief seed 1 shows the frigate arriving at hour 6.6 and waiting with no track. Armada still runs 14 simulated hours in about 24 s, so terrain costs nothing measurable.
 
 None of this has been played by a person. The numbers are placeholders chosen to be noticeable, and the event table in particular changes how hard each scenario is.
+
+
+# Graphics pass two — 18 November 2026
+
+Presentation only. The one core edit is a refactor, and the two doctrine surveys re-run after it (Hide and Seek, Last Ship) match the previous build exactly. A paused frame costs what it did (Escort 0.44 ms before, 0.46 ms after; Armada as spectator 3.43 and 3.47).
+
+## Renderer and bloom
+
+The client now runs on OpenGL so that a bloom pass can read what egui has drawn. `bloom.rs` runs as a paint callback after the plot's symbols and before its labels: it copies the plot, keeps the excess above a luminance knee at quarter size, blurs it and adds it back. Labels, readouts and the command deck are drawn afterward and are untouched.
+
+- Without bloom, OpenGL and the previous wgpu renderer draw the star scene to within 0.4% RMS of each other, two pixels apart beyond a 2% tolerance.
+- `LUMINAL_RENDERER=wgpu` runs the previous renderer, without bloom. If OpenGL fails to start, the game starts itself again that way.
+- `LUMINAL_BLOOM=0`, or the BLOOM button under QUIET DETECTIONS, turns the pass off.
+- The pass lines up with the plot at display scales 1 and 1.5, on Base's Intel graphics only. GPU time is not measured; the frame benchmark runs headless and paused, so it sees neither the pass nor trails being sampled.
+- Orbit names and waypoint numbers are drawn before the pass. They are dim enough not to bloom; the two banners and all labels are drawn after it.
+- The automatic restart on wgpu has not been exercised. Only `LUMINAL_RENDERER=wgpu` has.
+
+Separately from bloom: the command deck is laid out in fixed pixel widths. It is clean at 1600 logical pixels wide and the system-mode labels collide at 1440. That was true before this pass.
+
+## On the plot
+
+- **Sky.** Three star layers that slide slightly with a pan, never with a zoom, over a per-theme nebula.
+- **Planets.** They turn with the game clock (a day for a rocky world, ten hours for a giant; moons keep one face in). The home world shows settlement lights on its night side. Some giants carry rings. The surface tiles do not wrap, so the map is mirrored each half turn and the surface appears to turn back. Cloud shadows are not done: they need art that does not exist.
+- **Trails.** Ships, rounds and contacts leave a fading trail of where they have been drawn, sampled on the wall clock. A contact's trail is the trail of its believed position. Trails break on a jump or a large track correction.
+- **Ping.** The command ship's ping is a front with depth behind it. A contact glints when an echo from it has actually arrived. Overlapping fleet pings share their light.
+- **Flare.** While a flare's light is on the command ship, the plot is washed from the star's side.
+- **Weapons.** Our own latest pulse is drawn as it was laid: wide and amber for heat, a fine white line on a system group. Raised screens shimmer on the command ship, and on the inspected target as of its last echo report.
+- **Terrain.** The zone a giant masks from the command ship's passive sensors is drawn as a faint wedge toward it. Debris fields have a few larger turning rocks, and three specks mark a field too small to draw.
+- **Camera.** A hit that gets through the screens jolts the plot, capped so a burst is one jolt. A jump landing on the plot breathes the scale. Scroll zoom was already eased by egui and is unchanged.
+- **HUD.** Status bars and the thrust gauge ease to new values, a system chip lights when it takes a casualty, and a button's label sinks with the press. Animations are keyed by ship, so a new target snaps to its values.
+
+`LUMINAL_SCALE=<pixels per point>` draws at a given display scale for a screenshot.
