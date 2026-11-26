@@ -279,3 +279,69 @@ In Relief the ally was lost in every game before, four to six hours in, and the 
 - One idle Relief game in six still does not end inside 48 hours.
 - Armada still takes about twenty hours from first shot to the end.
 - The survey gained three columns: first contact, first shot, and an estimate of wall minutes at the client's automatic speed. That estimate is a floor: it has no pauses in it.
+
+
+# Light, truth and glare — 25 November 2026
+
+## Integrity
+
+- **The raider's own orders are off the player's log.** The combat log printed the raider doctrine's decisions as `RAIDER [DEBUG]` lines on the escort's side. No crew could know them. They now show only to the spectator, or with `LUMINAL_BOT_DEBUG` set.
+- **The app tests pass.** Five headless tests dropped a frame's texture changes, which epaint 0.36 asserts against in debug builds. One asserted that surrendering the Escort flagship ends the game, which the escort-continues rule had since changed.
+
+## The debrief
+
+When the game is decided the banner offers **DEBRIEF · SEE WHAT REALLY HAPPENED**.
+
+- The plot replays every platform's true path from T+0, with losses flaring where they happened and withdrawals ringed. Beside each enemy the side held, an amber dashed line is the track it steered by, sampled from its own picture during play, with how far off it was at that moment.
+- The command deck becomes a timeline: ticks for losses, hits, bursts and jumps, and a diamond for when each side first had word of the other. Play, scrub, three speeds, BELIEF on or off, and LIVE PLOT to go back. A list of turning points beside it moves the replay when clicked.
+- A ledger counts both sides from the true record: ships and losses, kills, missiles and hit rate, interceptors, rounds stopped, beam pulses, decoys, first word of the enemy and first firing fix. "You had word of them 2 h 10 min before they had word of you."
+
+The session gives a side its debrief only after the outcome; the spectator may ask at any time. The world gains a write-only record of when each side's command first received word of each platform, and a resolved fix. A test runs a game with and without debriefs and checks nothing moves.
+
+## Commendations and the service record
+
+Each finished game is entered in `~/.local/share/luminal/service-record.tsv` (or under `$XDG_DATA_HOME`), one line per game, with what it earned:
+
+| Commendation | For |
+|---|---|
+| First Sight | Word of the enemy at least a minute before they had word of you |
+| Ghost | A win in which the enemy never held a firing fix on your side |
+| Untouched | A win without losing a ship |
+| Clean Sweep | Every enemy ship destroyed |
+| Marksman | Half or more of at least six missiles hit |
+| The Wall | A dozen or more incoming rounds stopped |
+
+They show on the victory or defeat banner and in the debrief. Scenario cards show games won and played with a star per commendation earned there; the card's tooltip lists all six. Tests and screenshots never write the file.
+
+## The PWO
+
+A line at the foot of the plot gives the Principal Warfare Officer's advice: the most pressing thing, with a reason. In order: heat above 85%, rounds inbound, heat above 60%, nothing on the plot, a bearing with no range, beam range, the sun at our back, a position with no course, SRM reach, LRM reach, and otherwise range and time to LRM reach. It reads the side's own view only. PWO ADVICE in the controls turns it off.
+
+## Light on the plot
+
+- **Light shells.** A ship lost, a nuclear burst, a jump arrival or a heavy hit that the side has seen leaves a shell expanding from where it happened at c, fading over about 1.8 AU. It is made only once the light has reached the side, so it is always at least as far out as the viewer.
+- **Heat.** Hulls glow with stored heat, dull red to orange-white, ringed at the limit and shimmering with radiators open. A contact glows by its last received report.
+- **Glare.** The cone in which the star hides a target from the command ship's passive arrays is drawn toward the star, with its brighter core.
+
+## Clarity
+
+- Four or more labels on one spot fold into one ("The Limits of Courtesy +8 more"); a label with no free place is dropped rather than overprinted. Labels keep clear of the time controls, the combat log and the tracking banner.
+- The opening system view is an establishing shot. When the clock first runs the camera flies down to the command ship and its nearest threat or objective, then tracks the ship. A pan or zoom ends the flight.
+- Orbit names below their parent read upright.
+- The navigation readout grows to fit its lines.
+
+## Cost
+
+Paused frames headless at 1920×1080, release: Escort 0.24 ms, Armada as spectator 1.30 ms, Armada as a faction 0.87 ms, against 0.24, 1.28 and 0.58 before this pass. The faction frame grew most: every contact with a damage report now draws a heat glow, and the PWO line and readout test each track against the star. Glare costs the simulation a few dot products per passive look; its speed was not measured separately.
+
+## Tools
+
+- `LUMINAL_DEBRIEF=<game hours>` plays a scenario to its end, recording the side's picture as live play would, and opens the debrief at `LUMINAL_DEBRIEF_AT` of the way through (default 0.6).
+- `LUMINAL_CAPTURE_AT=<frames>` delays a `LUMINAL_SCREENSHOT` to catch an animation part way.
+- `LUMINAL_DEMO_FX` stages a ship loss as well.
+
+## Known and left alone
+
+- The AI does not seek the sun at its back. Glare applies to it as to the player, but only the player is told where it lies.
+- The debrief's belief line is sampled every 30 game seconds; a track corrected between samples shows as a straight step.
+- Commendations are judged from the side's totals, so in a fleet scenario a Marksman counts every ship's missiles.

@@ -51,6 +51,7 @@ pub(crate) struct DebriefState {
     pub speed: f64,
     pub own: Option<FactionId>,
     pub show_belief: bool,
+    pub honours: Vec<service_record::Honour>,
 }
 
 /// The whole replay takes this long at the opening speed.
@@ -59,7 +60,7 @@ const REPLAY_WALL_S: f64 = 45.0;
 impl DebriefState {
     pub(crate) fn new(data: Debrief, own: Option<FactionId>) -> Self {
         let speed = (data.end / REPLAY_WALL_S).max(1.0);
-        Self { data, playhead: 0.0, playing: true, speed, own, show_belief: true }
+        Self { data, playhead: 0.0, playing: true, speed, own, show_belief: true, honours: vec![] }
     }
 
     pub(crate) fn advance(&mut self, wall_dt: f64) {
@@ -249,7 +250,8 @@ impl DebriefState {
         }
         let head = x(self.playhead);
         p.line_segment([Pos2::new(head, rect.top()), Pos2::new(head, rect.bottom())], Stroke::new(2.0, pal().text_hi));
-        p.text(Pos2::new(head + 4.0, rect.top()), egui::Align2::LEFT_TOP, format!("T+ {}", fmt_time(self.playhead)), mono(9.5), pal().text_hi);
+        let (x, align) = if head > bar.right() - 90.0 { (head - 4.0, egui::Align2::RIGHT_TOP) } else { (head + 4.0, egui::Align2::LEFT_TOP) };
+        p.text(Pos2::new(x, rect.top()), align, format!("T+ {}", fmt_time(self.playhead)), mono(9.5), pal().text_hi);
         if let Some(at) = resp.interact_pointer_pos() && (resp.dragged() || resp.clicked()) {
             self.playhead = f64::from((at.x - bar.left()) / bar.width()).clamp(0.0, 1.0) * end;
             self.playing = false;
@@ -322,6 +324,13 @@ impl DebriefState {
                 ui.end_row();
             }
         });
+        if !self.honours.is_empty() {
+            ui.add_space(8.0);
+            ui.label(egui::RichText::new("COMMENDATIONS").monospace().size(11.0).color(BELIEF));
+            for h in &self.honours {
+                ui.label(egui::RichText::new(format!("★ {} · {}", h.name(), h.citation())).size(11.5).color(BELIEF.gamma_multiply(0.9)));
+            }
+        }
         if let (Some(x), Some(y)) = (a.first_sighting, b.first_sighting) {
             let gap = y - x;
             let line = if gap.abs() < 60.0 { "Both sides had word of each other within the same minute.".to_string() }

@@ -14,6 +14,8 @@ mod startup;
 mod roster;
 mod ship_art;
 mod debrief_view;
+mod service_record;
+mod advice;
 
 const BUILD_VERSION:&str=env!("LUMINAL_VERSION");
 const BUILD_COMMIT:&str=env!("LUMINAL_COMMIT");
@@ -1462,6 +1464,12 @@ struct LuminalApp {
     debrief: Option<debrief_view::DebriefState>,
     /// Frame the debrief's paths on the next plot.
     debrief_fit: bool,
+    /// Finished games kept between runs, shown on the scenario cards.
+    record: service_record::ServiceRecord,
+    /// This game's commendations, once its outcome is in and recorded.
+    earned: Option<Vec<service_record::Honour>>,
+    /// The PWO's one-line advice on the plot.
+    show_advice: bool,
     opening_fit: bool,
     selected: Option<Selection>,
     inspected: Option<Selection>,
@@ -1991,6 +1999,9 @@ Shift + right click: extend route").monospace().size(9.0).color(pal().text_muted
             belief: Default::default(),
             debrief: None,
             debrief_fit: false,
+            record: service_record::ServiceRecord::load(),
+            earned: None,
+            show_advice: true,
             opening_fit: true,
             selected: player.map(Selection::Body),
             inspected,
@@ -2040,12 +2051,13 @@ Shift + right click: extend route").monospace().size(9.0).color(pal().text_muted
         let music_volume=self.audio.music_volume;
         let muted=self.audio.muted;
         let quiet_detections=self.quiet_detections;
+        let show_advice=self.show_advice;
         *self=Self::new_with_scenario(scenario,class,theme);
         self.theme=theme;
         self.selection_pending=pending;
         if !pending {let _=self.session.command(self.role,Command::SetPaused(false));}
         self.audio.volume=volume;self.audio.music_volume=music_volume;self.audio.muted=muted;self.audio.settings_changed();
-        self.quiet_detections=quiet_detections;
+        self.quiet_detections=quiet_detections;self.show_advice=show_advice;
     }
 
     fn with_env_setup(mut self) -> Self {
@@ -2110,8 +2122,11 @@ Shift + right click: extend route").monospace().size(9.0).color(pal().text_muted
                 self.belief.observe(&self.session.view(self.role));
             }
             let _ = self.session.command(Role::Spectator, Command::SetPaused(true));
+            let view = self.session.view(self.role);
+            self.record_outcome(&view);
             if let Some(data) = self.session.debrief(self.role) {
                 let mut debrief = debrief_view::DebriefState::new(data, self.own_faction());
+                debrief.honours = self.earned.clone().unwrap_or_default();
                 debrief.playhead = debrief.data.end * std::env::var("LUMINAL_DEBRIEF_AT").ok().and_then(|v| v.parse::<f64>().ok()).unwrap_or(0.6);
                 debrief.playing = false;
                 self.debrief = Some(debrief);
@@ -2634,6 +2649,7 @@ impl LuminalApp {
         }
         self.dev_effects(&mut view);
         if view.outcome.is_none() {self.belief.observe(&view);}
+        self.record_outcome(&view);
         if let Some(debrief)=&mut self.debrief {
             debrief.advance(dt.min(0.1));
             if debrief.playing {ui.ctx().request_repaint();}
@@ -2750,6 +2766,9 @@ impl LuminalApp {
         if self.bloom.available() && tac_button(ui,if self.bloom.enabled {"BLOOM ON"} else {"BLOOM OFF"},EVec2::new(206.0,23.0),pal().accent,self.bloom.enabled,true)
             .on_hover_text("Bright things on the plot bleed light into what is around them. Labels and readouts are not affected. Off draws the plot exactly as before.")
             .clicked() {self.bloom.enabled=!self.bloom.enabled;}
+        if tac_button(ui,if self.show_advice {"PWO ADVICE ON"} else {"PWO ADVICE OFF"},EVec2::new(206.0,23.0),pal().accent,self.show_advice,true)
+            .on_hover_text("The Principal Warfare Officer's one-line suggestion at the foot of the plot, from your own picture only.")
+            .clicked() {self.show_advice=!self.show_advice;}
         restart
     }
     #[allow(dead_code)] // Legacy detailed inspector retained while the compact deck settles.
@@ -3278,6 +3297,17 @@ impl LuminalApp {
         }
     }
 
+    /// Once a game is decided, enter it in the service record with what it earned. Once only.
+    fn record_outcome(&mut self,view:&View) {
+        if self.earned.is_some() {return;}
+        let (Some(outcome),Role::Faction(own))=(view.outcome.as_ref(),self.role) else {return};
+        let Some(debrief)=self.session.debrief(self.role) else {return};
+        let won=outcome.winner==own;
+        let honours=service_record::honours(&debrief,own,won);
+        self.record.add(service_record::Entry {scenario:self.chosen_scenario.token().into(),won,t:outcome.t,honours:honours.clone()});
+        self.earned=Some(honours);
+    }
+
     /// Fly from the establishing shot to the command ship once the clock first runs.
     fn update_intro(&mut self,view:&View,rect:Rect,wall:f64) {
         let Some(ship)=view.bodies.iter().find(|b|b.controllable && b.kind==BodyKind::Ship && Some(b.faction)==self.own_faction()) else {
@@ -3763,6 +3793,10 @@ impl LuminalApp {
             draw_scale_bar(&painter, &cam, rect);
         }
         self.draw_navigation_readout(&painter, rect, view);
+        if self.show_advice && let Some(ship)=view.bodies.iter().find(|b|b.controllable && b.kind==BodyKind::Ship && Some(b.faction)==self.own_faction())
+            && let Some(a)=advice::pwo_advice(view,ship) {
+            draw_advice(&painter,rect,&a,ui.input(|i|i.time));
+        }
 
         if let Some(o) = view.outcome.as_ref().filter(|_| self.debrief.is_none()) {
             let mine = self.own_faction().map(|f| f == o.winner);
@@ -3780,12 +3814,18 @@ impl LuminalApp {
                 egui::FontId::proportional(14.0),
                 Color32::LIGHT_GRAY,
             );
+            let earned:Vec<&str>=self.earned.iter().flatten().map(|h|h.name()).collect();
+            if !earned.is_empty() {
+                painter.text(at+EVec2::new(0.0,60.0),egui::Align2::CENTER_TOP,format!("★  {}",earned.join("  ·  ")),egui::FontId::proportional(13.0),BELIEF);
+            }
+            let at=if earned.is_empty() {at} else {at+EVec2::new(0.0,18.0)};
             let button=Rect::from_center_size(at+EVec2::new(0.0,82.0),EVec2::new(300.0,30.0));
             let mut child=ui.new_child(egui::UiBuilder::new().id_salt("debrief_open").max_rect(button));
             if tac_button(&mut child,"DEBRIEF · SEE WHAT REALLY HAPPENED",button.size(),BELIEF,true,true)
                 .on_hover_text("Replay the battle as it truly was, against the picture your side fought by").clicked()
                 && let Some(data)=self.session.debrief(self.role) {
-                let debrief=debrief_view::DebriefState::new(data,self.own_faction());
+                let mut debrief=debrief_view::DebriefState::new(data,self.own_faction());
+                debrief.honours=self.earned.clone().unwrap_or_default();
                 if let Some(camera)=debrief.framing(rect) {self.camera=camera;}
                 self.track_player=false;self.intro=Intro::Done;
                 self.debrief=Some(debrief);
@@ -4004,6 +4044,20 @@ fn intro_zoom(view:&View,ship:&BodyView,rect:Rect)->f64 {
     let span=if nearest.is_finite() {2.6*nearest} else {AU/3.0};
     let px=f64::from(rect.width().min(rect.height()).max(100.0));
     (span/px).max(2.0*LIGHT_SECOND/px)
+}
+
+/// The PWO's line, bottom centre of the plot, clear of the readouts in the corners.
+fn draw_advice(painter:&egui::Painter,rect:Rect,advice:&advice::Advice,wall:f64) {
+    let width=(rect.width()-2.0*360.0).clamp(260.0,760.0);
+    let galley=painter.layout(advice.text.clone(),egui::FontId::proportional(12.5),pal().text_hi,width-70.0);
+    let height=galley.size().y+14.0;
+    let panel=Rect::from_min_size(Pos2::new(rect.center().x-width*0.5,rect.bottom()-height-12.0),EVec2::new(width,height));
+    let tone=if advice.urgent {pal().warm} else {pal().accent};
+    let pulse=if advice.urgent {0.75+0.25*((wall*4.0).sin() as f32)} else {1.0};
+    painter.rect_filled(panel,2.0,pal().panel_bg.gamma_multiply(0.88));
+    painter.line_segment([panel.left_top(),panel.left_bottom()],Stroke::new(2.0,tone.gamma_multiply(pulse)));
+    painter.text(panel.left_top()+EVec2::new(10.0,7.0),egui::Align2::LEFT_TOP,"PWO",mono(10.0),tone.gamma_multiply(pulse));
+    painter.galley(panel.left_top()+EVec2::new(52.0,7.0),galley,pal().text_hi);
 }
 
 fn contact_details(ui: &mut egui::Ui, view: &View, c: &ContactView) {

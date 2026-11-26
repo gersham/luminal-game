@@ -58,7 +58,20 @@ impl LuminalApp {
                         let detail=p.layout(scenario.detail().to_string(),mono(12.0),pal().text_muted,card_width-24.0);
                         p.galley(r.min+EVec2::new(12.0,136.0),detail,pal().text_muted);
                         p.text(r.left_bottom()+EVec2::new(12.0,-12.0),egui::Align2::LEFT_BOTTOM,if selected {"● SELECTED"} else {"SELECT SCENARIO"},mono(12.0),col);
-                        response.on_hover_text(format!("{} · your ship is a {}.",scenario.name(),self.theme.class_name(class,false)));
+                        let summary=self.record.summary(scenario.token());
+                        if let Some(s)=&summary {
+                            let stars="★".repeat(s.honours.len());
+                            p.text(r.right_bottom()+EVec2::new(-12.0,-12.0),egui::Align2::RIGHT_BOTTOM,format!("WON {}/{}  {stars}",s.won,s.played),mono(12.0),if s.won>0 {BELIEF} else {pal().text_muted});
+                        }
+                        let mut hover=format!("{} · your ship is a {}.",scenario.name(),self.theme.class_name(class,false));
+                        if let Some(s)=summary {
+                            hover.push_str(&format!("\n\nService record: won {} of {}.",s.won,s.played));
+                            if let Some(t)=s.fastest_win {hover.push_str(&format!(" Fastest win T+ {}.",fmt_time(t)));}
+                            for h in service_record::Honour::ALL {
+                                hover.push_str(&format!("\n{} {} · {}",if s.honours.contains(&h) {"★"} else {"☆"},h.name(),h.citation()));
+                            }
+                        }
+                        response.on_hover_text(hover);
                         if (i+1)%columns==0 {ui.end_row();}
                     }
                 });
