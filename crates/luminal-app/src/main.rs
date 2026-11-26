@@ -2173,6 +2173,7 @@ Shift + right click: extend route").monospace().size(9.0).color(pal().text_muted
         view.combat.push(event(CombatKind::BeamPulse,at,Some(id),0.0,Some(px(330.0,150.0))));
         view.combat.push(event(CombatKind::NuclearBurst,px(-230.0,120.0),None,0.0,None));
         view.combat.push(event(CombatKind::PointDefence,px(-90.0,-130.0),None,0.0,None));
+        view.combat.push(event(CombatKind::Destroyed,px(-320.0,-60.0),None,1.0,None));
         let mut absorbed=event(CombatKind::Impact,px(210.0,-120.0),None,0.1,None);
         absorbed.emitted_at=staged-1.0;
         view.combat.push(absorbed);
@@ -3685,6 +3686,7 @@ impl LuminalApp {
                 });
                 *heading=b.heading;
                 if b.kind==BodyKind::Ship {draw_burn_vector(&painter,p,*heading,b.thrust.length()/G0,1.0);}
+                if b.kind==BodyKind::Ship {heat_glow(&painter,p,b.thermal.heat_fraction(),b.thermal.dumping,ui.input(|i|i.time));}
                 draw_ship(&painter, p, b.vel, *heading, c, selected, (b.kind==BodyKind::Ship).then_some(b.ship_class).flatten());
                 if matches!(b.jump,Some(JumpState::Spooling {..})) && ui.input(|i|i.time).rem_euclid(1.0)<0.6 {
                     let triangle=vec![p+EVec2::new(0.0,-24.0),p+EVec2::new(22.0,17.0),p+EVec2::new(-22.0,17.0)];
@@ -4299,6 +4301,7 @@ fn draw_contact(
                 let heading=if t.vel.length()>0.0 {t.vel.normalized()} else {Vec2::new(0.0,1.0)};
                 let burn=(t.accel-view.system.gravity(t.pos,view.time)).length()/G0;
                 draw_burn_vector(painter,p,heading,burn,if c.stale {0.4} else {1.0});
+                if !c.stale && let Some(report)=&c.damage {heat_glow(painter,p,report.heat_fraction,false,0.0);}
                 draw_contact_marker(painter, p, t.vel, color, selected, c.resolved_class);
             } else if ping.is_some() && ping_opacity>0.0 {
                 painter.circle_filled(p,if selected {7.0} else {5.0},Color32::from_rgb(255,155,45).gamma_multiply(ping_opacity));
@@ -4913,6 +4916,19 @@ fn draw_ship(painter: &egui::Painter, p: Pos2, vel: Vec2, facing: Vec2, color: C
     painter.add(Shape::convex_polygon(pts, color, border));
     // Cut the rank out of the fill so it reads on green, blue and red hulls.
     if let Some(class) = class { draw_class_chevrons(painter, p, forward, class_chevron_count(class), pal().background); }
+}
+
+/// A hull's stored heat as a glow round its marker, dull red when warm to orange-white near
+/// the limit. Own ships show their telemetry; a contact shows its last received report.
+/// Open radiators shimmer.
+fn heat_glow(painter: &egui::Painter, p: Pos2, fraction: f64, dumping: bool, wall: f64) {
+    let f = fraction.clamp(0.0, 1.2) as f32;
+    if f < 0.04 || !painter.clip_rect().expand(40.0).contains(p) { return; }
+    let ramp = |t: f32| fx::mix(Color32::from_rgb(150, 24, 8), Color32::from_rgb(255, 190, 120), t.clamp(0.0, 1.0));
+    let color = ramp(f * 0.9);
+    let flicker = if dumping { 0.8 + 0.2 * ((wall * 9.0).sin() as f32) } else { 1.0 };
+    fx::glow(painter, p, 9.0 + 24.0 * f.min(1.0), color, (0.12 + 0.6 * f.min(1.0)) * flicker);
+    if f >= 0.95 { painter.circle_stroke(p, 13.0, Stroke::new(1.0, color.gamma_multiply(0.6 * flicker))); }
 }
 
 /// A resolved contact: a hollow ship arrow along its estimated velocity, not an

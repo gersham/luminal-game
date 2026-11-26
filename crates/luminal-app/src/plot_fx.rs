@@ -27,6 +27,19 @@ enum Subject {
     Contact(ContactId),
 }
 
+/// The light of a burst or a loss we have seen keeps going at c. A shell is only made once
+/// that light has reached us, so it is always at least as far out as we are: it shows how
+/// far the news has spread by now, never anything we could not know.
+struct LightShell {
+    origin: Vec2,
+    t_emit: f64,
+    color: Color32,
+    strength: f32,
+}
+/// Game seconds a shell is drawn for: about 1.8 AU of travel.
+const SHELL_AGE_S: f64 = 900.0;
+const SHELLS_MAX: usize = 48;
+
 struct Trail {
     color: Color32,
     points: VecDeque<(f64, Vec2)>,
@@ -44,6 +57,7 @@ pub(super) struct PlotFx {
     shake: f32,
     shake_at: f64,
     pulse_at: Option<f64>,
+    shells: VecDeque<LightShell>,
 }
 
 fn key(e: &luminal_core::world::CombatEvent) -> CombatLogKey {
@@ -77,7 +91,20 @@ impl PlotFx {
                 CombatKind::JumpArrival | CombatKind::JumpDeparture if event.pos.is_some_and(&visible) => self.pulse_at = Some(wall),
                 _ => {}
             }
+            let shell = match event.kind {
+                CombatKind::Destroyed if event.subject_kind == Some(BodyKind::Ship) =>
+                    Some((if event.own_body.is_some() { FRIEND } else { ENEMY }, 1.0)),
+                CombatKind::NuclearBurst => Some((Color32::from_rgb(255, 214, 150), 0.75)),
+                CombatKind::JumpArrival => Some((Color32::from_rgb(140, 215, 255), 0.6)),
+                CombatKind::Impact if event.impact_strength >= 0.65 => Some((Color32::WHITE, 0.45)),
+                _ => None,
+            };
+            if let (Some((color, strength)), Some(origin)) = (shell, event.pos) {
+                self.shells.push_back(LightShell { origin, t_emit: event.emitted_at, color, strength });
+                if self.shells.len() > SHELLS_MAX { self.shells.pop_front(); }
+            }
         }
+        self.shells.retain(|s| view.time - s.t_emit < SHELL_AGE_S);
         if self.seen.len() > 4096 {
             self.seen = view.combat.iter().chain(&view.jump_events).map(key).collect();
         }
@@ -124,6 +151,27 @@ impl PlotFx {
         self.trails.retain(|subject, _| present.contains(subject));
     }
 
+    /// Light shells: a bright front with a soft wake inside it, fading as it spreads.
+    fn draw_shells(&self, painter: &egui::Painter, cam: &Camera, rect: Rect, view: &View) {
+        let reach = rect.width().hypot(rect.height());
+        for shell in &self.shells {
+            let age = view.time - shell.t_emit;
+            if age <= 0.0 { continue; }
+            let center = to_screen(cam, rect, shell.origin);
+            let px = (C * age / cam.km_per_px) as f32;
+            // Wholly off the plot: either it has not reached the edge, or it has swept past every corner.
+            let nearest = (center - rect.clamp(center)).length();
+            let farthest = [rect.left_top(), rect.right_top(), rect.left_bottom(), rect.right_bottom()].iter().map(|c| center.distance(*c)).fold(0.0, f32::max);
+            if px < nearest || px > farthest + 4.0 || !px.is_finite() { continue; }
+            let fade = shell.strength * (1.0 - (age / SHELL_AGE_S) as f32).powi(2) * (1.0 - (px / (3.0 * reach)).min(1.0));
+            if fade <= 0.01 { continue; }
+            if px < 20_000.0 {
+                fx::wavefront(painter, center, px, (px * 0.06).clamp(4.0, 20.0), shell.color, 0.42 * fade);
+            }
+            painter.circle_stroke(center, px, Stroke::new(1.0, shell.color.gamma_multiply(0.35 * fade)));
+        }
+    }
+
     /// The camera to draw this frame with: the steady one, moved by a hit and breathed by a jump.
     pub(super) fn camera(&self, steady: Camera, wall: f64) -> Camera {
         let mut cam = steady;
@@ -150,6 +198,7 @@ impl PlotFx {
     /// Under the symbols: the flare wash, the masked zones, and the trails.
     #[allow(clippy::too_many_arguments)]
     pub(super) fn draw_under(&self, painter: &egui::Painter, cam: &Camera, rect: Rect, view: &View, ship: Option<&BodyView>, star_color: Color32, wall: f64) {
+        self.draw_shells(painter, cam, rect, view);
         if view.flare_until.is_some() && let Some(star) = view.celestials.first() {
             // The whole plot is lit from the star's side while the flare is on the command ship.
             let source = to_screen(cam, rect, star.pos);
