@@ -339,7 +339,7 @@ impl Body {
         self.facing=bearing_of(self.heading_at(t));self.facing_at=t;self.turn_target=bearing_of(direction);
     }
     pub fn alive_at(&self, t: f64) -> bool {
-        self.trajectory.end().is_none_or(|end|t<end) && self.trajectory.state_at(t).is_some()
+        self.trajectory.end().is_none_or(|end|t<end) && self.trajectory.exists_at(t)
     }
 
     /// Thermal rating uses class-rated thrust, independent of damage/throttling.
@@ -450,7 +450,8 @@ pub struct Objective {
     pub protect: BodyId,
     /// The flagship. Its loss loses the scenario unless a different `protect` ship is still alive, or a scored withdrawal applies.
     pub player:Option<BodyId>,
-    /// When set, defeating this body (destruction, surrender or withdrawal) wins; transport arrival/loss is not terminal.
+    /// When set, defeating this body (destruction, surrender or withdrawal) wins. A `protect` ship that is
+    /// not the flagship still wins by arriving and loses by being lost.
     pub defeat: Option<BodyId>,
     /// When set, destroying this body wins for the attacker. Arrival is not terminal.
     pub prize: Option<BodyId>,
@@ -596,6 +597,39 @@ struct Relay {
     faction: FactionId,
     front: Front,
     obs: Observation,
+}
+
+/// Where bodies are at the end of the window an arrival search covers, worked out once each.
+/// Valid only while no trajectory changes: `clear` it after anything that can move or end a body.
+pub(crate) struct Present {
+    t: f64,
+    slots: Vec<Option<Option<(f64, State)>>>,
+}
+
+impl Present {
+    pub(crate) fn new(t: f64) -> Self {
+        Self { t, slots: Vec::new() }
+    }
+    pub(crate) fn clear(&mut self) {
+        self.slots.clear();
+    }
+    /// True only where `front.arrival(trajectory, _, t)` returns `None` at its first test: the front
+    /// is still short of a body that never jumped. Anything else is left to the full search.
+    pub(crate) fn short(&mut self, bodies: &[Body], id: BodyId, front: &Front) -> bool {
+        if self.slots.len() < bodies.len() {
+            self.slots.resize(bodies.len(), None);
+        }
+        let t = self.t;
+        let slot = self.slots[id.0 as usize].get_or_insert_with(|| {
+            let traj = &bodies[id.0 as usize].trajectory;
+            if !traj.jump_gaps().is_empty() {
+                return None;
+            }
+            let hi = traj.end().map_or(t, |e| e.min(t));
+            traj.state_at(hi).map(|s| (hi, s))
+        });
+        slot.is_some_and(|(hi, s)| front.short_of(s, hi))
+    }
 }
 
 pub struct World {
@@ -2015,6 +2049,13 @@ impl World {
         if self.outcome.is_some() || self.time<deadline {return;}
         let resumed=self.time;
         self.time=deadline;
+        // A clock with nobody to arrive is a relief force on its way: the defender holds out.
+        if o.defeat.is_none() {
+            let reason=if o.prize_taken {"Relief arrived before the raider withdrew".to_string()} else {format!("Relief arrived: the {} held",o.name)};
+            self.decide(o.defender,reason);
+            self.time=resumed;
+            return;
+        }
         let inside=o.defeat.and_then(|id| self.bodies.get(id.0 as usize))
             .and_then(|b| b.trajectory.state_at(deadline))
             .is_some_and(|s| (s.pos-o.center).length()<o.radius);
@@ -2180,7 +2221,8 @@ impl World {
                     // A completed withdrawal is the quarry's escape. Giving up is not.
                     else if matches!(cause,LossCause::Withdrawn) && o.escape_at_center {Some(o.attacker)}
                     else {Some(o.defender)}
-                } else if o.defeat.is_none() && o.prize.is_none() && !o.prize_taken && o.protect==id {Some(o.attacker)}
+                // The ship being escorted is what the scenario is about: its loss decides, whoever else is still fighting.
+                } else if o.prize.is_none() && !o.prize_taken && o.protect==id {Some(o.attacker)}
                 else if o.wipe && side==o.attacker && !armed(o.attacker) {Some(o.defender)}
                 else if o.wipe && side==o.defender && !armed(o.defender) {Some(o.attacker)}
                 else {None};
@@ -2206,7 +2248,9 @@ impl World {
             return;
         }
         // Extract keeps the player from winning by flying into the prize's radius after it is gone.
-        if o.extract || o.defeat.is_some() || o.prize.is_some() || o.wipe || o.protect != id { return; }
+        // An escorted ship that is not the flagship wins by arriving, even with the hunter still alive.
+        let hunted_flagship=o.defeat.is_some() && o.player==Some(o.protect);
+        if o.extract || hunted_flagship || o.prize.is_some() || o.wipe || o.protect != id { return; }
         if (s.pos - o.center).length() < o.radius {
             let name=self.bodies[id.0 as usize].name.clone();
             self.decide(o.defender, format!("{name} reached the {}", o.name));
@@ -2230,7 +2274,8 @@ impl World {
         let b = &mut self.bodies[i];
         let dt = self.system.step_size(s.pos, t);
         let thrust = b.trajectory.last().thrust;
-        let g = self.system.step_gravity(s, thrust, t, dt);
+        // A station keeps station. Left to fall, the lunar one reached the Moon in a day and a half.
+        let g = if b.kind==BodyKind::Station {Vec2::ZERO} else {self.system.step_gravity(s, thrust, t, dt)};
         b.trajectory.push(t, thrust, g).expect("steps advance in time");
         self.last_step[i] = t;
         self.scheduler.schedule(t + dt, Event::Step(id,self.bodies[i].step_generation));
@@ -2279,6 +2324,7 @@ impl World {
         self.bodies[id.0 as usize].trajectory.state_at(t)
     }
 
+
     /// Look again at light that has already arrived. Construction samples once, before later platform history exists.
     pub(crate) fn sample_arriving_light(&mut self) {
         self.sensor_frame();
@@ -2305,12 +2351,18 @@ impl World {
 
         // Pings in flight reaching bodies: echoes start back, targets may see the ping.
         let mut pings = std::mem::take(&mut self.pings);
+        // Most fronts are still short of most receivers; one state per body settles those.
+        let mut present = Present::new(t);
         for ping in &mut pings {
             let emitter_faction = self.bodies[ping.emitter.0 as usize].faction;
             let mut still = vec![];
             for &target in &ping.pending {
                 let traj = &self.bodies[target.0 as usize].trajectory;
                 if traj.end().is_some_and(|e| e < t_prev) {
+                    continue;
+                }
+                if present.short(&self.bodies, target, &ping.front) {
+                    still.push(target);
                     continue;
                 }
                 let Some(t_hit) = ping.front.arrival(traj, t_prev, t) else {
@@ -2364,6 +2416,12 @@ impl World {
         for echo in echoes {
             let emitter = &self.bodies[echo.emitter.0 as usize];
             if emitter.trajectory.end().is_some_and(|e| e < t_prev) {
+                continue;
+            }
+            if present.short(&self.bodies, echo.emitter, &echo.front) {
+                if echo.front.radius_at(t) < MAX_FRONT_RADIUS_KM {
+                    self.echoes.push(echo);
+                }
                 continue;
             }
             let Some(t_rx) = echo.front.arrival(&emitter.trajectory, t_prev, t) else {
@@ -2523,11 +2581,26 @@ impl World {
         }
         let relays = std::mem::take(&mut self.relays);
         let mut delivered = vec![];
+        // Nothing in this loop moves a ship, so each faction's command ship is found and placed once.
+        let mut command: Vec<(FactionId, Option<BodyId>, Option<State>)> = vec![];
         for mut r in relays {
-            let Some(decider) = self.decider(r.faction, t) else { continue };
+            let known = match command.iter().find(|c| c.0 == r.faction) {
+                Some(c) => (c.1, c.2),
+                None => {
+                    let decider = self.decider(r.faction, t);
+                    let now = decider.map(|d| &self.bodies[d.0 as usize].trajectory).filter(|tr| tr.unbroken()).and_then(|tr| tr.state_at(t));
+                    command.push((r.faction, decider, now));
+                    (decider, now)
+                }
+            };
+            let Some(decider) = known.0 else { continue };
             if decider == r.obs.sensor {
                 r.obs.decider_received_at = r.obs.sensor_received_at;
                 delivered.push(r.obs);
+                continue;
+            }
+            if known.1.is_some_and(|now| r.front.short_of(now, t)) {
+                self.relays.push(r);
                 continue;
             }
             let traj = &self.bodies[decider.0 as usize].trajectory;
@@ -3110,7 +3183,7 @@ mod tests {
         escort.destroy(player,0.0,LossCause::Impact(0));
         assert!(escort.outcome.is_none(),"the escort continues while the transport lives");
         escort.destroy(objective.protect,0.0,LossCause::Impact(0));
-        assert!(escort.outcome.is_none(),"the raider is the defeat condition, so the transport's loss is not the end");
+        assert_eq!(escort.outcome.as_ref().unwrap().winner,objective.attacker,"losing the transport loses the escort");
 
         let mut escort=Scenario::Escort.build(42,home.clone());
         let player=escort.objective.as_ref().unwrap().player.unwrap();
@@ -4451,17 +4524,18 @@ mod tests {
     }
 
     #[test]
-    fn escort_scenario_ends_on_player_or_raider_destruction_only() {
+    fn escort_scenario_ends_with_the_transport_or_the_raider() {
         let mut w=crate::scenario::transport_intercept_debug_seeded(91);
-        w.destroy(BodyId(0),0.0,LossCause::Impact(0));
-        assert!(w.outcome.is_none());
         w.destroy(BodyId(1),0.0,LossCause::Impact(0));
-        assert_eq!(w.outcome.as_ref().unwrap().winner,crate::scenario::RAIDER);
+        assert!(w.outcome.is_none(),"the transport can still get through without its escort");
+        w.destroy(BodyId(0),0.0,LossCause::Impact(0));
+        assert_eq!(w.outcome.as_ref().unwrap().winner,crate::scenario::RAIDER,"the transport lost is the escort lost");
         let mut w=crate::scenario::transport_intercept_debug_seeded(91);
         let goal=w.objective.as_ref().unwrap().center;
         w.bodies[0].trajectory=Trajectory::new(0.0,State {pos:goal,vel:Vec2::ZERO});
         w.check_objective(BodyId(0));
-        assert!(w.outcome.is_none());
+        assert_eq!(w.outcome.as_ref().unwrap().winner,crate::scenario::ESCORT,"arrival wins with the raider still alive");
+        let mut w=crate::scenario::transport_intercept_debug_seeded(91);
         w.destroy(BodyId(2),0.0,LossCause::Impact(0));
         assert_eq!(w.outcome.as_ref().unwrap().winner,crate::scenario::ESCORT);
     }

@@ -161,6 +161,8 @@ fn main() -> eframe::Result {
     bloom::GL_RENDERER.store(opengl, std::sync::atomic::Ordering::Relaxed);
     let options = eframe::NativeOptions {
         renderer: if opengl { eframe::Renderer::Glow } else { eframe::Renderer::Wgpu },
+        // `LUMINAL_FRAME_RATE` measures unthrottled frames, so it runs without vertical sync.
+        glow_options: eframe::egui_glow::GlowConfiguration { vsync: std::env::var_os("LUMINAL_FRAME_RATE").is_none(), ..Default::default() },
         viewport: egui::ViewportBuilder::default().with_inner_size([1400.0, 900.0])
             .with_title(format!("Luminal {BUILD_VERSION}")).with_app_id("luminal").with_fullscreen(true)
             .with_icon(eframe::icon_data::from_png_bytes(include_bytes!("../../../assets/icons/luminal.png"))
@@ -770,7 +772,7 @@ mod tests {
             let rect=Rect::from_min_size(Pos2::ZERO,EVec2::new(1000.0,700.0));
             let cam=Camera {center:c.track.as_ref().unwrap().pos,km_per_px:AU/100.0};
             let seen=BTreeMap::new();
-            draw_contact(&painter,&cam,rect,&view,&c,CONTACT,true,true,&mut Labels::default(),&PingFade {wall_now:0.0,seen:&seen,pings:&view.hostile_pings});
+            draw_contact(&painter,&cam,rect,&view,&c,CONTACT,true,true,&mut Labels::default(),&PingFade {wall_now:0.0,seen:&seen,pings:&view.hostile_pings},&mut Forecast::default());
         });
         output.textures_delta.clear();
         assert!(output.shapes.iter().any(|s|matches!(&s.shape,Shape::Path(p) if p.points.len()==4 && p.fill==CONTACT)),"resolved ship must remain a filled red chevron while pinging");
@@ -851,9 +853,9 @@ mod tests {
         let app=LuminalApp::new_with_scenario(Scenario::HideAndSeek,luminal_core::world::ShipClass::Frigate,theme::Theme::Culture);
         let view=app.session.view(Role::Faction(ESCORT));
         assert!(!view.jumps_enabled);
-        assert_eq!(escape_clock_label(&view).as_deref(),Some("HUNTING GROUND  36:00:00"));
+        assert_eq!(escape_clock_label(&view).as_deref(),Some("HUNTING GROUND  22:00:00"));
         let base="hunting ground (goal: Hunter)";
-        assert_eq!(with_escape_remaining(base.into(),&view),format!("{base} · 36:00:00"));
+        assert_eq!(with_escape_remaining(base.into(),&view),format!("{base} · 22:00:00"));
         let mut later=view.clone();
         later.time=36.0*3600.0+1.0;
         assert_eq!(escape_clock_label(&later).as_deref(),Some("HUNTING GROUND  TIME UP"));
@@ -1027,17 +1029,28 @@ mod tests {
             let mut run=|app:&mut LuminalApp,n:usize| {
                 let started=std::time::Instant::now();
                 let mut vertices=0usize;
+                let mut delay=std::time::Duration::ZERO;
                 for _ in 0..n {
                     time+=1.0/60.0;
                     let output=ctx.run_ui(egui::RawInput {time:Some(time),screen_rect:Some(Rect::from_min_size(Pos2::ZERO,EVec2::new(1920.0,1080.0))),..Default::default()},|ui|app.frame(ui));
+                    // What the frame asks of the display: the delay until the next one.
+                    delay=output.viewport_output.values().map(|v|v.repaint_delay).min().unwrap_or_default();
                     let meshes=ctx.tessellate(output.shapes,output.pixels_per_point);
                     vertices=meshes.iter().map(|m|match &m.primitive {egui::epaint::Primitive::Mesh(mesh)=>mesh.vertices.len(),_=>0}).sum();
                 }
-                (started.elapsed().as_secs_f64()*1000.0/n as f64,vertices)
+                (started.elapsed().as_secs_f64()*1000.0/n as f64,vertices,delay)
             };
+            // `LUMINAL_FRAME_COST_FRAMES=<n>` lengthens the run, for sampling it with a profiler.
+            let frames=std::env::var("LUMINAL_FRAME_COST_FRAMES").ok().and_then(|v|v.parse().ok()).unwrap_or(200);
             run(&mut app,30);
-            let (ms,vertices)=run(&mut app,200);
-            println!("FRAME {name}: {ms:.3} ms/frame, {vertices} vertices");
+            let (ms,vertices,idle)=run(&mut app,frames);
+            println!("FRAME {name}: {ms:.3} ms/frame, {vertices} vertices, next frame in {} ms",idle.as_millis());
+            // The same scene with the clock running: each frame also advances the simulation, up to its 8 ms budget.
+            let _=app.session.command(Role::Spectator,Command::SetPaused(false));
+            let from=app.session.view(Role::Spectator).time;
+            let (ms,_,_)=run(&mut app,frames);
+            let view=app.session.view(Role::Spectator);
+            println!("FRAME {name}, running at warp {:.0}: {ms:.3} ms/frame, {:.1} game seconds per frame",view.warp,(view.time-from)/frames as f64);
         }
     }
 
@@ -1278,42 +1291,69 @@ mod tests {
 const PAUSED_FRAME_MS: u64 = 50;
 const FORECAST_S: f64 = 8.0 * 3600.0;
 const FORECAST_POINTS: usize = 480;
+/// A contact's believed course is drawn with half as many points as a ship's own route.
+const CONTACT_FORECAST_POINTS: usize = 240;
 /// A forecast is redrawn from the ship outward each frame, and integrated again this often.
 const FORECAST_REFRESH_S: f64 = 0.25;
+/// A ship steered by its autopilot retrims its thrust many times a second in a fight. Its route follows
+/// that at this wall interval; the ship the player flies follows every change at once.
+const FORECAST_RETRIM_S: f64 = 0.1;
 
 /// A route forecast kept between frames. Integrating eight hours under gravity every frame
 /// is most of a paused frame; the path only changes with thrust, a jump, or time passing.
 #[derive(Default)]
 struct Forecast {
     points: Vec<Vec2>,
-    impact: bool,
+    /// The surface the path ends on and when, if it ends on one.
+    impact: Option<(usize, f64)>,
     from: f64,
     thrust: Vec2,
     wall: f64,
+    /// Game seconds between stored points.
+    every: f64,
+    /// Where and how fast the mover was when the path was integrated.
+    start: Option<State>,
 }
 
 impl Forecast {
+    /// A ship's own route. Its state never jumps, so an old path is still the right path with its far end
+    /// missing: integrate again only once a fiftieth of the forecast has gone by.
     fn refresh(&mut self, view: &View, b: &BodyView, wall: f64) {
-        let every = FORECAST_S / FORECAST_POINTS as f64;
-        let drift = self.points.first().is_none_or(|first| {
-            // Where the stored path says the ship is now, against where it is.
-            let passed = ((view.time - self.from) / every).floor().max(0.0) as usize;
-            let near = self.points.get(passed).copied().unwrap_or(*first);
-            (near - b.pos).length() > 2.0 * (b.vel.length() * every).max(1.0)
-        });
-        let stale = (wall - self.wall).abs() >= FORECAST_REFRESH_S && view.time != self.from;
-        if !drift && !stale && self.thrust == b.thrust && view.time >= self.from { return; }
-        let forecast = view.system.predict(State { pos: b.pos, vel: b.vel }, b.thrust, view.time, FORECAST_S, FORECAST_POINTS);
-        self.impact = forecast.impact.is_some();
-        self.points = forecast.points;
-        self.from = view.time;
-        self.thrust = b.thrust;
-        self.wall = wall;
+        let retrim = if b.controllable { 0.0 } else { FORECAST_RETRIM_S };
+        self.refresh_from(view, State { pos: b.pos, vel: b.vel }, b.thrust, FORECAST_POINTS, wall, FORECAST_S / 50.0, retrim);
     }
 
-    /// The ship's present position, then the stored points it has not yet passed.
+    /// Keep the stored path unless the mover has left it, changed its acceleration, or the path has aged
+    /// by `FORECAST_REFRESH_S` on the wall clock and `worn` seconds on the game's.
+    /// A change of acceleration alone waits until the path is `retrim` wall seconds old.
+    #[allow(clippy::too_many_arguments)]
+    fn refresh_from(&mut self, view: &View, s: State, thrust: Vec2, count: usize, wall: f64, worn: f64, retrim: f64) {
+        let every = FORECAST_S / count as f64;
+        let drift = self.every != every || self.points.first().is_none_or(|first| {
+            // Where the stored path says the mover is now, against where it is.
+            let passed = ((view.time - self.from) / every).floor().max(0.0) as usize;
+            let near = self.points.get(passed).copied().unwrap_or(*first);
+            (near - s.pos).length() > 2.0 * (s.vel.length() * every).max(1.0)
+        });
+        let stale = (wall - self.wall).abs() >= FORECAST_REFRESH_S && view.time != self.from && view.time - self.from >= worn;
+        let turned = self.thrust != thrust && (wall - self.wall).abs() >= retrim;
+        // On a stopped clock nothing moves, so a different start is a different mover: another picture's
+        // contact under the same number, after a change of role or overlay.
+        let swapped = view.time == self.from && self.start != Some(s);
+        if !drift && !stale && !turned && !swapped && view.time >= self.from { return; }
+        let forecast = view.system.predict(s, thrust, view.time, FORECAST_S, count);
+        self.impact = forecast.impact;
+        self.points = forecast.points;
+        self.from = view.time;
+        self.thrust = thrust;
+        self.wall = wall;
+        self.every = every;
+        self.start = Some(s);
+    }
+
+    /// The mover's present position, then the stored points it has not yet passed.
     fn ahead(&self, now_at: Vec2, now: f64) -> impl Iterator<Item = Vec2> + '_ {
-        let every = FORECAST_S / FORECAST_POINTS as f64;
+        let every = self.every;
         let passed = (((now - self.from) / every).floor().max(0.0) as usize + 1).min(self.points.len());
         std::iter::once(now_at).chain(self.points[passed..].iter().copied())
     }
@@ -1436,6 +1476,8 @@ struct LuminalApp {
     plot_fx:plot_fx::PlotFx,
     bloom:bloom::Bloom,
     forecasts:BTreeMap<BodyId,Forecast>,
+    /// Believed courses of contacts, keyed by whether the contact belongs to the spectator's overlay.
+    contact_forecasts:BTreeMap<(bool,ContactId),Forecast>,
 }
 
 /// Development hooks driven by environment variables, used for visual checks.
@@ -1449,6 +1491,8 @@ struct DevHooks {
     /// Sim time at which `LUMINAL_DEMO_FX` staged its events.
     staged: Option<f64>,
     scale: Option<f32>,
+    /// `LUMINAL_FRAME_RATE=<frames>` with a screenshot: draw that many frames unthrottled first and print their rate.
+    rate: Option<(u32, Option<std::time::Instant>)>,
 }
 
 impl LuminalApp {
@@ -1930,7 +1974,8 @@ Shift + right click: extend route").monospace().size(9.0).color(pal().text_muted
             target_chosen: false,
             last_message: log_error,
             payload: Payload::Kinetic,
-            dev: DevHooks { screenshot: std::env::var_os("LUMINAL_SCREENSHOT").map(Into::into), frames: 0, staged: None, scale: None },
+            dev: DevHooks { screenshot: std::env::var_os("LUMINAL_SCREENSHOT").map(Into::into), frames: 0, staged: None, scale: None,
+                rate: std::env::var("LUMINAL_FRAME_RATE").ok().and_then(|v|v.parse().ok()).map(|frames|(frames,None)) },
             bearing_display: BTreeMap::new(),
             held_bearings: Vec::new(),
             held_pings: Vec::new(),
@@ -1944,7 +1989,7 @@ Shift + right click: extend route").monospace().size(9.0).color(pal().text_muted
             weapon_effects:weapon_effects::WeaponEffects::default(),
             jump_effects:jump_effects::JumpEffects::default(),
             celestial_art:celestial_art::CelestialArt::default(),
-            backdrop:fx::Backdrop::default(),sky_camera:Camera { center: Vec2::ZERO, km_per_px: AU / 500.0 },particles:particles::Particles::default(),plot_fx:plot_fx::PlotFx::default(),bloom:bloom::Bloom::default(),forecasts:BTreeMap::new(),
+            backdrop:fx::Backdrop::default(),sky_camera:Camera { center: Vec2::ZERO, km_per_px: AU / 500.0 },particles:particles::Particles::default(),plot_fx:plot_fx::PlotFx::default(),bloom:bloom::Bloom::default(),forecasts:BTreeMap::new(),contact_forecasts:BTreeMap::new(),
             audio:audio::Audio::default(),
             quiet_detections:false,
             manual_flight:None,manual_send_elapsed:0.0,
@@ -2095,7 +2140,19 @@ Shift + right click: extend route").monospace().size(9.0).color(pal().text_muted
     fn dev_screenshot(&mut self, ui: &egui::Ui) {
         let Some(path) = self.dev.screenshot.clone() else { return };
         self.dev.frames += 1;
-        if self.dev.frames == 20 {
+        let mut capture_at = 20;
+        if let Some((frames, started)) = &mut self.dev.rate {
+            // Vertical sync is off for this run, so the interval is what a frame costs: layout, drawing and the GPU.
+            ui.ctx().request_repaint();
+            capture_at += *frames;
+            if self.dev.frames == 20 { *started = Some(std::time::Instant::now()); }
+            if let (true, Some(started)) = (self.dev.frames == capture_at, *started) {
+                let ms = started.elapsed().as_secs_f64() * 1000.0 / *frames as f64;
+                let [w, h] = ui.ctx().content_rect().size().into();
+                println!("FRAME RATE: {ms:.3} ms/frame ({:.0} fps) at {w:.0}x{h:.0}, bloom {}", 1000.0 / ms, if self.bloom.enabled && self.bloom.available() { "on" } else { "off" });
+            }
+        }
+        if self.dev.frames == capture_at {
             ui.ctx().send_viewport_cmd(egui::ViewportCommand::Screenshot(Default::default()));
         }
         let image = ui.input(|i| {
@@ -2444,7 +2501,9 @@ fn escape_clock_label(view:&View)->Option<String> {
     let deadline=o.escape_by?;
     if view.outcome.is_some() {return None;}
     let left=deadline-view.time;
-    Some(if left>0.0 {format!("{}  {}",o.name.to_uppercase(),fmt_time(left))} else {format!("{}  TIME UP",o.name.to_uppercase())})
+    // A clock with no runner on it counts down to the defender's relief, not to an arrival.
+    let name=if o.defeat.is_none() {"RELIEF ARRIVES".to_string()} else {o.name.to_uppercase()};
+    Some(if left>0.0 {format!("{name}  {}",fmt_time(left))} else {format!("{name}  TIME UP")})
 }
 
 fn with_escape_remaining(label:String,view:&View)->String {
@@ -2485,7 +2544,11 @@ impl LuminalApp {
         if self.selection_pending {
             let start=self.startup(ui);
             if start {self.deploy_selected();}
-            self.dev_screenshot(ui);ui.ctx().request_repaint();return;
+            self.dev_screenshot(ui);
+            // Nothing on this screen moves by itself, and input repaints at once. A screenshot run counts frames.
+            if self.dev.screenshot.is_some() {ui.ctx().request_repaint();}
+            else {ui.ctx().request_repaint_after(std::time::Duration::from_millis(PAUSED_FRAME_MS));}
+            return;
         }
         let dt = ui.input(|i| i.stable_dt) as f64;
         self.session.set_watch(self.own_faction());
@@ -3019,8 +3082,12 @@ impl LuminalApp {
         }
         ui.label(format!("Speed {} (system frame)", fmt_speed(b.vel.length())));
         ui.label(format!("Thrust {:.2} g", b.thrust.length() / G0));
-        let forecast = view.system.predict(State { pos: b.pos, vel: b.vel }, b.thrust, view.time, FORECAST_S, 2);
-        if let Some((i, t)) = forecast.impact {
+        // The plot keeps this ship's route; integrate it here only when that copy is missing or old.
+        let impact = match self.forecasts.get(&b.id).filter(|f| f.thrust == b.thrust && view.time >= f.from && view.time - f.from <= FORECAST_S / 50.0) {
+            Some(kept) => kept.impact,
+            None => view.system.predict(State { pos: b.pos, vel: b.vel }, b.thrust, view.time, FORECAST_S, 2).impact,
+        };
+        if let Some((i, t)) = impact {
             ui.colored_label(DANGER, format!("⚠ On course to hit {} in {}", view.celestials[i].name, fmt_age(t - view.time)));
         }
         if b.avoidance.impossible {
@@ -3407,12 +3474,18 @@ impl LuminalApp {
             if !displayed_pings.iter().any(|p| p.contact==held.sighting.contact) {displayed_pings.push(held.sighting);}
         }
         let ping_fade=PingFade {wall_now,seen:&ping_seen,pings:&displayed_pings};
+        // Forget the courses of contacts that are gone, on either picture.
+        self.contact_forecasts.retain(|(overlaid,id),_| match (*overlaid,overlay) {
+            (false,_)=>view.contacts.iter().any(|c|c.id==*id),
+            (true,Some((ov,_)))=>ov.contacts.iter().any(|c|c.id==*id),
+            (true,None)=>false,
+        });
         for c in &view.contacts {
             let selected = inspected_contact==Some(c.id);
             if let Some(track)=&c.track {
                 draw_hit_bloom(&painter,to_screen(&cam,rect,track.pos),CONTACT,view,None,Some(c.id));
             }
-            draw_contact(&painter, &cam, rect, view, c, CONTACT, selected, !grouped.contains(&c.id) && (!self.quiet_detections || selected), &mut labels, &ping_fade);
+            draw_contact(&painter, &cam, rect, view, c, CONTACT, selected, !grouped.contains(&c.id) && (!self.quiet_detections || selected), &mut labels, &ping_fade, self.contact_forecasts.entry((false,c.id)).or_default());
         }
         // A bearing that has already left the picture. Quiet still hides a live fleet fan; this is the one the simulation dropped.
         let live_contacts:BTreeSet<ContactId>=view.contacts.iter().map(|c| c.id).collect();
@@ -3521,7 +3594,7 @@ impl LuminalApp {
                     forecast.refresh(view,b,wall);
                     let pts: Vec<Pos2> = forecast.ahead(b.pos,view.time).map(|p| to_screen(&cam, rect, p)).collect();
                     painter.extend(fading_path(&pts,c.gamma_multiply(0.3),6.0));
-                    if forecast.impact
+                    if forecast.impact.is_some()
                         && let Some(&end) = pts.last()
                     {
                         draw_cross(&painter, end, DANGER);
@@ -3561,7 +3634,7 @@ impl LuminalApp {
             for c in &ov.contacts {
                 let real = truth.get(&c.id).and_then(|id| view.bodies.iter().find(|b| b.id == *id));
                 let selected=inspected_contact==Some(c.id);
-                draw_contact(&painter, &cam, rect, ov, c, BELIEF, false, !grouped.contains(&c.id) && (!self.quiet_detections || selected), &mut labels, &overlay_fade);
+                draw_contact(&painter, &cam, rect, ov, c, BELIEF, false, !grouped.contains(&c.id) && (!self.quiet_detections || selected), &mut labels, &overlay_fade, self.contact_forecasts.entry((true,c.id)).or_default());
                 if let (Some(t), Some(r)) = (&c.track, real) {
                     let pb = to_screen(&cam, rect, t.pos);
                     let pt = to_screen(&cam, rect, r.pos);
@@ -4061,6 +4134,7 @@ fn draw_contact(
     show_spike: bool,
     labels: &mut Labels,
     fade: &PingFade,
+    forecast: &mut Forecast,
 ) {
     let ping=fade.pings.iter().find(|p|p.contact==c.id);
     let ping_opacity=ping.map(|p| displayed_ping_opacity(p,view.time,fade)).unwrap_or(0.0);
@@ -4086,8 +4160,9 @@ fn draw_contact(
                 return;
             }
             if contact_has_course(c) {
-                let forecast = view.system.predict(State { pos: t.pos, vel: t.vel }, t.accel, view.time, FORECAST_S, 240);
-                let fp: Vec<Pos2> = forecast.points.iter().map(|&p| to_screen(cam, rect, p)).collect();
+                // A new fix can turn a contact's course without moving it far, so its path ages on the wall clock alone.
+                forecast.refresh_from(view, State { pos: t.pos, vel: t.vel }, t.accel, CONTACT_FORECAST_POINTS, fade.wall_now, 0.0, FORECAST_RETRIM_S);
+                let fp: Vec<Pos2> = forecast.ahead(t.pos, view.time).map(|p| to_screen(cam, rect, p)).collect();
                 painter.extend(fading_path(&fp,color.gamma_multiply(0.24),8.0));
             }
             let p = to_screen(cam, rect, t.pos);

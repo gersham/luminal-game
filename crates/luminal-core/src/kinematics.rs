@@ -237,8 +237,23 @@ impl Trajectory {
         if t < self.start() || self.end.is_some_and(|e| t > e) {
             return None;
         }
+        // Nearly every query is for the present, which the newest segment covers.
+        let last = &self.segments[self.segments.len() - 1];
+        if last.t0 <= t {
+            return Some(last);
+        }
         let i = self.segments.partition_point(|s| s.t0 <= t);
         Some(&self.segments[i - 1])
+    }
+
+    /// Whether the body is in normal space at `t`: `state_at(t).is_some()` without the integration.
+    pub fn exists_at(&self, t: f64) -> bool {
+        self.segment_at(t).is_some()
+    }
+
+    /// A body that never jumped and still exists has one unbroken history up to the present.
+    pub fn unbroken(&self) -> bool {
+        self.end.is_none() && self.jump_gaps.is_empty()
     }
 
     /// Exact state at `t`, or `None` before the body existed.
@@ -385,6 +400,32 @@ mod tests {
         let s = traj.state_at(11.0).unwrap();
         assert!((s.vel - Vec2::new(100.0, 1.0)).length() < 1e-6);
         assert!((s.pos - Vec2::new(1100.0, 0.5)).length() < 1e-6);
+    }
+
+    #[test]
+    fn the_newest_segment_shortcut_agrees_with_the_search() {
+        let mut tr = Trajectory::new(0.0, State { pos: Vec2::ZERO, vel: Vec2::new(10.0, 0.0) });
+        tr.push(5.0, Vec2::new(0.1, 0.0), Vec2::ZERO).unwrap();
+        // Two segments may begin at the same instant; the later one governs.
+        tr.push(5.0, Vec2::new(0.0, 0.2), Vec2::ZERO).unwrap();
+        tr.push(9.0, Vec2::ZERO, Vec2::ZERO).unwrap();
+        tr.jump_departure(12.0);
+        tr.jump_arrival(20.0, State { pos: Vec2::new(1e6, 0.0), vel: Vec2::ZERO });
+        tr.push(20.0, Vec2::new(0.3, 0.0), Vec2::ZERO).unwrap();
+        tr.terminate(30.0);
+        let mut t = -1.0;
+        while t < 32.0 {
+            let gap = (12.0..20.0).contains(&t);
+            let want = if gap || t < 0.0 || t > 30.0 { None } else {
+                let i = tr.segments.partition_point(|s| s.t0 <= t);
+                Some(tr.segments[i - 1])
+            };
+            assert_eq!(tr.segment_at(t).copied(), want, "t={t}");
+            assert_eq!(tr.exists_at(t), tr.state_at(t).is_some(), "t={t}");
+            t += 0.25;
+        }
+        assert_eq!(tr.segment_at(5.0).unwrap().thrust, Vec2::new(0.0, 0.2));
+        assert!(!tr.unbroken());
     }
 
     #[test]

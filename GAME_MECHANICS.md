@@ -296,9 +296,9 @@ A scenario may schedule events from its seed. A side learns of one when its ligh
 | Scenario | Event |
 |---|---|
 | Escort | A flare between hours 4 and 9. Two games in five, a drive casualty on the transport between hours 3 and 8. |
-| Raid | A flare between hours 6 and 12. |
-| Hide and Seek | A flare between hours 8 and 16. |
-| Armada | Between hours 18 and 24 a destroyer jumps in for whichever side has fewer armed ships. Level sides get nobody. |
+| Raid | A flare between hours 4 and 9. The station's relief squadron arrives at hour 32. |
+| Hide and Seek | A flare between hours 5 and 11. |
+| Armada | Between hours 12 and 16 a destroyer jumps in for whichever side has fewer armed ships. Level sides get nobody. |
 | Convoy | Seven games in ten, a drive casualty on the second transport between hours 4 and 8. Three in ten, a flare. |
 | Relief | Half the time, an enemy frigate jumps in between hours 6 and 9. |
 | Last Ship | Half the time, an enemy picket jumps in between hours 3 and 5. |

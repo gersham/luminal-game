@@ -158,3 +158,124 @@ Separately from bloom: the command deck is laid out in fixed pixel widths. It is
 - **HUD.** Status bars and the thrust gauge ease to new values, a system chip lights when it takes a casualty, and a button's label sinks with the press. Animations are keyed by ship, so a new target snaps to its values.
 
 `LUMINAL_SCALE=<pixels per point>` draws at a given display scale for a screenshot.
+
+# Speed pass two — 19 November 2026
+
+No rule, number or random draw changed. Eight doctrine surveys (Escort from two seeds, Raid, Hide and Seek, Convoy, Relief, Last Ship, and 60 hours of Armada) give the same CSV as the build before, wall time aside. Timings are from Base, on an idle machine.
+
+| Measure | Before | After |
+| --- | --- | --- |
+| Armada, 56 game hours headless | 268.6 s | 140.9 s |
+| Relief, 22 game hours | 6.8 s | 3.4 s |
+| Raid, 26 game hours | 10.3 s | 8.9 s |
+| Escort, 34 and 42 game hours | 5.6 s, 6.0 s | 5.3 s, 5.6 s |
+| Paused frame, Escort | 0.46 ms | 0.24 ms |
+| Paused frame, Armada as spectator | 3.53 ms | 1.28 ms |
+| Paused frame, Armada as a faction | 2.56 ms | 0.58 ms |
+| Running frame, Armada as spectator | 10.7 ms | 5.1 ms |
+| Running frame, Armada as a faction | 8.9 ms | 4.0 ms |
+
+The running-frame "before" figures were taken after the first two simulation changes below, so the true starting point was slower than shown.
+
+## Simulation
+
+A profile of Armada showed more than half the time re-deriving where a body is. Each change below asks the same question fewer times; none changes an answer.
+
+- **Is it alive.** `Body::alive_at` integrated the body's motion to learn whether it had a state. It now asks `Trajectory::exists_at`.
+- **Newest segment first.** Nearly every position query is for the present, which the newest segment covers, so `segment_at` tries it before searching.
+- **Light-cone solves.** `retarded_state` placed the source at the window's end twice and at the answer twice. It keeps the state it already has.
+- **Has the light arrived yet.** Pings, echoes, relayed reports and orders in flight are tested every frame, and nearly all are still short of their receiver. `Present` places each receiver once a frame and `Front::short_of` settles those cases, leaving the full search for the rest. A relay's command ship is found once per faction instead of once per report.
+- **Has the last light passed.** `missile_departure_seen` only needs yes or no; `Front::reached` answers from the sign at the end of the window instead of locating the instant.
+- **Orders to the dead.** An order still in flight to a body that has ended can never arrive. It is marked once and then only waits for its front to expire, as before.
+- **Point defence.** The uplinked picture was fetched once per incoming missile, each fetch a light-path solve. It is fetched once per cycle.
+- **Track estimates.** `Contact::estimate_slack` searched the evidence three times for one answer.
+- **Path forecasts.** `System::predict` placed every planet and moon five times a step. It needs them at the step's start, middle and end, and the end is the next step's start, so it places them twice. This is the autopilot's collision look-ahead as well as the plot's route lines.
+
+## The plot
+
+- **Contact courses.** Every contact with a course had eight hours of motion under gravity integrated every frame, paused or not. They are now kept between frames like a ship's own route: redrawn from the contact outward each frame, integrated again when the contact leaves the path, changes acceleration, or a quarter of a second passes.
+- **Ships' routes.** A route was integrated again four times a second while the clock ran. A ship's state does not jump, so an old route is the right route with its far end missing; it is now integrated again after a fiftieth of the forecast (about ten game minutes) has gone by, or when thrust changes or the ship leaves the path.
+- **Autopilot retrims.** In a fight an autopilot changes thrust many times a second, and each change integrated the route again. A ship the player does not fly now follows those changes at ten times a second. The player's own ship still follows every change at once.
+- **Collision warning.** The ship panel integrated the route once more each frame for its warning. It reads the plot's copy.
+
+What a player can see of this: another ship's route line, and a contact's course line, can trail a change of thrust by up to a tenth of a second. With the clock stopped nothing changed: captures of the Escort scene at two zooms match the previous build pixel for pixel. The running behaviour has been measured, not watched.
+
+A stored course is kept on a stopped clock only for the same mover at the same place, so a change of role or overlay cannot show one picture's contact on another's path.
+
+- **Selection screen.** It asked for a new frame as fast as the display allowed, with nothing moving. It now idles like a paused plot and still answers input at once.
+
+## Bloom on the GPU
+
+`LUMINAL_FRAME_RATE=<frames>` with `LUMINAL_SCREENSHOT` draws that many frames without vertical sync and prints the rate. On Base's Intel graphics at 1920×1080, paused:
+
+| Scene | Bloom off | Bloom on |
+| --- | --- | --- |
+| Star close-up | 0.73 ms | 1.00 ms |
+| Escort | 0.60 ms | 0.87 ms |
+| Armada as spectator | 0.90 ms | 0.98 ms |
+
+Bloom costs up to 0.3 ms a frame there. The driver may queue work behind an unsynchronised swap, so read these as a comparison between the two columns more than as absolute times. No other machine has been measured.
+
+## Not changed
+
+- A paused plot already idles: the benchmark now prints the delay each paused scene asks for, and all three ask for a frame every 50 ms (33 ms after a 17 ms frame), not every frame.
+- The remaining simulation cost in Armada is spread across beam fire control, the uplinked picture and passive sensing. The picture is solved again for each of a ship's decisions inside one instant; sharing it needs a cache whose invalidation is not yet proven safe, so it was left.
+- Missile evasion planning is the largest single cost in the small scenarios. It is a numerical search whose result decides outcomes, and those scenarios already run a game day in a few seconds.
+
+`LUMINAL_FRAME_COST_FRAMES=<n>` lengthens the `frame_cost` benchmark for a profiler, and the benchmark now also reports each scene with the clock running.
+
+
+# Scenario pass — 19 November 2026
+
+Each scenario was run from twelve seeds with both sides on doctrine, and from six with the player's ship left idle, before and after. Nobody has played these. The figures say how the AI fares against itself and how long things take, not how it feels.
+
+## Rules
+
+- **Escort ends with the transport.** The transport arriving wins, with the raider alive or not. The transport lost loses. Before, with the raider named as the thing to defeat, neither ended the game: four doctrine runs in twelve never finished. Destroying the raider still wins at once.
+- **A relief clock.** A scenario may set a deadline with nobody to arrive by it. When it passes, the defender wins. Raid uses it.
+- **Stations keep station.** The lunar station fell onto the Moon after about 39 hours. A station no longer falls.
+- **A convoy leaves a straggler.** A transport paces itself on the ships following it. When the second transport was crippled the lead one stopped its drive for good and coasted past the exit. A follower giving under 10 g is no longer waited for.
+
+## AI
+
+- **A pack splits.** When raiders hunt a convoy, the heaviest takes on whatever blocks the way and the others go for the transports. Before, both fought the escort and the transports were never touched: Convoy was won twelve times in twelve, and six in six with the player doing nothing.
+- **A raider leaves.** Once the station is destroyed the raiding cruiser withdraws. Before, it stayed.
+
+## Scenarios
+
+| Scenario | Change |
+| --- | --- |
+| Escort | Rules above only. |
+| Raid | The cruiser and station start 5.8 AU apart, not 9. The screen is two frigates and a picket, not a destroyer and two frigates. Relief arrives at hour 32. |
+| Hide and Seek | The frigates start 2.4 to 3.2 AU apart, not 4 to 5.4, and the clock is 22 hours, not 36. |
+| Armada | The fleets start 9 AU apart, not 14. The balancing destroyer arrives between hours 12 and 16. |
+| Convoy | A raider frigate joins the destroyer. They wait off the route on opposite bows, at bearings the seed picks, where before one destroyer sat on the route in the same place every game. |
+| Relief | The cruiser arrives 1.6 AU off the fight, not 4, and its jump drive is recovering for six hours, which the briefing always claimed. The ally and the raiders start 0.6 AU apart, not 0.36. |
+| Last Ship | The pursuer starts 1.4 to 2.2 AU out on a bearing the seed picks, where before it was always 1.8 AU dead ahead. |
+
+## Before and after
+
+Player's side wins out of twelve, both sides on doctrine; median game hours to the end and to the first shot.
+
+| Scenario | Wins before | Wins after | End before | End after | First shot before | First shot after |
+| --- | --- | --- | --- | --- | --- | --- |
+| Escort | 8, and 4 never ended | 12 | 40.2 h | 33.8 h | 7.9 h | 7.7 h |
+| Raid | 0 | 7 | 24.7 h | 29.0 h | 19.5 h | 15.0 h |
+| Hide and Seek | 4 | 3 | 27.4 h | 13.0 h | 26.5 h | 12.3 h |
+| Convoy | 12 | 10 | 16.2 h | 14.8 h | 5.4 h | 4.6 h |
+| Relief | 12 | 11 | 21.8 h | 6.8 h | 0.2 h | 0.2 h |
+| Last Ship | 8 | 10 | 7.8 h | 7.6 h | 2.7 h | 2.6 h |
+| Armada, 2 seeds | 1 | 1 | 51.1 h | 31.0 h | 14.5 h | 10.5 h |
+
+With the player's ship idle, six seeds: Convoy went from six wins to none, Raid from six games that never ended to six lost to the clock, and Escort is four wins and two losses.
+
+In Relief the ally was lost in every game before, four to six hours in, and the cruiser's kill of the last raider came some sixteen hours after that. Now the ally is lost in ten of twelve, usually about six hours in, and the last raider goes within the following half hour.
+
+## Known and left alone
+
+- Escort under doctrine is won twelve times in twelve, in five of them with the player's own destroyer lost. The raider still takes too long to run the transport down.
+- Hide and Seek favours the quarry nine to three under doctrine. The two ships are identical; the hunter's doctrine loses the duel.
+- Raid by doctrine is a fifteen-hour burn before anything happens, because doctrine never jumps. A player can.
+- One idle Relief game in six still does not end inside 48 hours.
+- Armada still takes about twenty hours from first shot to the end.
+- The survey gained three columns: first contact, first shot, and an estimate of wall minutes at the client's automatic speed. That estimate is a floor: it has no pauses in it.

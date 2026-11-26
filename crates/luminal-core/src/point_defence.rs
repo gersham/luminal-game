@@ -63,15 +63,19 @@ impl World {
         let mut candidates=Vec::new();
         // Dedicated local fire control must detect a missile before engaging it.
         // Use light-delayed emission, never its current truth position/velocity.
+        // One picture serves every missile; fetching it solves the uplink's light path each time.
+        let picture=if sensor_effectiveness.iter().any(|v|*v>0.0) {self.received_picture(id)} else {None};
+        // Retained boost tracks and mandatory SRM/terminal resolution are
+        // valid fire-control information, even when a plume is now dark.
+        let tracked:Vec<_>=self.bodies.iter().enumerate().map(|(i,target)| {
+            if target.faction==faction || target.kind!=BodyKind::Missile || !target.alive_at(t) {return None;}
+            picture?.contacts.get(self.association.get(&(faction,BodyId(i as u32)))?)
+                .filter(|c|c.detection(t)>=sensors::DetectionLevel::Resolved)
+                .and_then(|c|c.estimate(t,&self.system))
+        }).collect();
         for (i,target) in self.bodies.iter().enumerate() {
             if target.faction==faction || target.kind!=BodyKind::Missile || !target.alive_at(t) {continue;}
-            // Retained boost tracks and mandatory SRM/terminal resolution are
-            // valid fire-control information, even when a plume is now dark.
-            if sensor_effectiveness.iter().any(|v|*v>0.0)
-                && let Some(contact)=self.association.get(&(faction,BodyId(i as u32)))
-                && let Some(track)=self.received_picture(id).and_then(|p|p.contacts.get(contact))
-                    .filter(|c|c.detection(t)>=sensors::DetectionLevel::Resolved)
-                    .and_then(|c|c.estimate(t,&self.system)) {
+            if let Some(track)=&tracked[i] {
                 let rel=track.pos()-origin;let range=rel.length();
                 if range<=PD_MAX_RANGE_LS.value*LIGHT_SECOND && self.system.occluder(track.pos(),t,origin,t).is_none() {
                     let measurement=Measurement::BearingRange {range,bearing:bearing_of(rel),sigma_range:1.0,sigma_bearing:1e-7};

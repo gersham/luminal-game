@@ -105,7 +105,7 @@ mod tests {
         let station=before.bodies.iter().find(|b|b.kind==BodyKind::Station).unwrap();
         assert_eq!(station.faction,RAIDER);
         let screen:Vec<_>=before.bodies.iter().filter(|b|b.faction==RAIDER && b.kind==BodyKind::Ship).map(|b|b.ship_class.unwrap()).collect();
-        assert_eq!(screen,vec![ShipClass::Destroyer,ShipClass::Frigate,ShipClass::Frigate]);
+        assert_eq!(screen,vec![ShipClass::Frigate,ShipClass::Frigate,ShipClass::Picket]);
         assert_eq!(before.objective.as_ref().unwrap().prize,Some(station.id));
         app.restart_scenario();assert_eq!(app.theme,theme::Theme::Culture);assert_eq!(app.chosen_scenario,Scenario::Raid);
         for theme in theme::Theme::ALL {

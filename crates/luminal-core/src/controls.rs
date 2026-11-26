@@ -166,6 +166,9 @@ impl Body {
         if self.controls.ecm_active {self.controls.ecm_rating*self.operating_effectiveness(crate::damage::System::Ecm)} else {0.0}
     }
 }
+/// A convoy does not slow for a follower whose drive gives less than this.
+const CONVOY_STRAGGLER_G: f64 = 10.0;
+
 impl World {
     pub(super) fn detect_ship(&self,sensor:BodyId,target:BodyId,emitted:f64,range:f64,ping:bool)->sensors::DetectionLevel {
         let b=&self.bodies[sensor.0 as usize];
@@ -232,6 +235,8 @@ impl World {
                     let at=escort.trajectory.state_at(self.time)?;
                     let gap=(at.pos-origin-offset).length();
                     let reserve=if gap>2.0*crate::units::LIGHT_SECOND {0.5} else {0.75};
+                    // A follower that can barely move is left behind. Pacing on it stopped the whole convoy.
+                    if escort.max_accel()<CONVOY_STRAGGLER_G*crate::units::G0 {return None;}
                     Some(escort.max_accel()*reserve)
                 }).reduce(f64::min)
         } else {None};

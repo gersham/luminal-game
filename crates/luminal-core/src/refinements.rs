@@ -68,7 +68,10 @@ fn impact_intensity_distinguishes_absorption_damage_and_severe_hits() {
 }
 struct OrderPacket { front: Front, body: BodyId, cmd: Command,
     /// A flagship's fleet order. On arrival it replaces the standing posture a previous one set.
-    fleet: bool }
+    fleet: bool,
+    /// The receiver ended, without ever jumping, before this order reached it. Its last position is
+    /// fixed, so the order can never arrive; it stays queued until its front expires, as before.
+    undeliverable: bool }
 struct AlertPacket { front: Front, faction: FactionId, kind: AlertKind }
 
 #[derive(Default)]
@@ -251,7 +254,7 @@ impl World {
         let Some(receiver)=self.decider(faction,self.time) else {return false;};
         let Some(segment)=b.trajectory.segments().iter().rev().find(|s|s.t0<=end) else {return false;};
         Front {origin:segment.state_at(end).pos,t_emit:end}
-            .arrival(&self.bodies[receiver.0 as usize].trajectory,end,self.time).is_some()
+            .reached(&self.bodies[receiver.0 as usize].trajectory,end,self.time)
     }
 
     pub fn deploy_probe(&mut self, id: BodyId, direction: Vec2, destination: Vec2) -> Result<BodyId, OrderError> {
@@ -334,7 +337,7 @@ impl World {
         let Some(sender) = self.decider(b.faction, self.time) else { return false };
         if sender == id { return false; }
         let Some(s) = self.state(sender, self.time) else { return false };
-        self.refinement.orders.push(OrderPacket { front: Front { origin: s.pos, t_emit: self.time }, body: id, cmd, fleet: false });
+        self.refinement.orders.push(OrderPacket { front: Front { origin: s.pos, t_emit: self.time }, body: id, cmd, fleet: false, undeliverable: false });
         true
     }
     /// One fleet order to one wingman. One packet, so the count in flight is the count of ships still to hear it.
@@ -878,9 +881,18 @@ impl World {
             }
         }
         for id in expended { self.destroy(id,t,LossCause::Expended); }
-        for packet in std::mem::take(&mut self.refinement.orders) {
+        // Orders in flight are checked every frame; an arriving one may move a ship, so the states are retaken then.
+        let mut present = Present::new(t);
+        for mut packet in std::mem::take(&mut self.refinement.orders) {
+            if packet.undeliverable || present.short(&self.bodies, packet.body, &packet.front) {
+                let receiver = &self.bodies[packet.body.0 as usize].trajectory;
+                packet.undeliverable |= receiver.jump_gaps().is_empty() && receiver.end().is_some_and(|end| end <= t);
+                if t - packet.front.t_emit < MAX_FRONT_RADIUS_KM / crate::units::C { self.refinement.orders.push(packet); }
+                continue;
+            }
             let traj = &self.bodies[packet.body.0 as usize].trajectory;
             if let Some(arrival) = packet.front.arrival(traj, lo.max(packet.front.t_emit), t) {
+                present.clear();
                 let at = traj.state_at(arrival).unwrap().pos;
                 if self.system.occluder(packet.front.origin, packet.front.t_emit, at, arrival).is_none() {
                     if packet.fleet {self.fleet_release(packet.body,&packet.cmd);}

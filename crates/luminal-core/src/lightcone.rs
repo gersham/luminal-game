@@ -49,11 +49,16 @@ pub fn retarded_state(source: &Trajectory, receiver: Vec2, t_receive: f64) -> Op
 
     // A destroyed source emits nothing after its end.
     let hi = source.end().map_or(t_receive, |e| e.min(t_receive));
-    if hi < source.start() || residual(hi) > 0.0 {
+    if hi < source.start() {
+        return None;
+    }
+    let newest = source.state_at(hi).expect("t_e within bracket");
+    let range = (receiver - newest.pos).length();
+    if C * (t_receive - hi) - range > 0.0 {
         return None;
     }
     // Residual ≤ 0 at hi; step back until it becomes ≥ 0.
-    let mut span = (receiver - source.state_at(hi)?.pos).length() / C;
+    let mut span = range / C;
     let mut lo = hi - span;
     loop {
         if lo < source.start() {
@@ -70,13 +75,17 @@ pub fn retarded_state(source: &Trajectory, receiver: Vec2, t_receive: f64) -> Op
         lo = hi - span;
     }
 
+    // The solver usually stops on the instant it sampled last; keep that state rather than integrate it again.
+    let mut sampled=(f64::NAN,newest);
     let t_e=light_root(lo,hi,|at| {
         let s=source.state_at(at)?;
+        sampled=(at,s);
         let rel=receiver-s.pos;
         let range=rel.length();
         let radial=if range>0.0 {rel.dot(s.vel)/range} else {0.0};
         Some((range-C*(t_receive-at),C-radial))
     })?;
+    if sampled.0==t_e {return Some((t_e,sampled.1));}
     Some((t_e, source.state_at(t_e)?))
 }
 
@@ -111,6 +120,23 @@ pub struct Front {
 impl Front {
     pub fn radius_at(&self, t: f64) -> f64 {
         C * (t - self.t_emit)
+    }
+
+    /// Whether the front has yet to reach a receiver whose state at `t` is `at`. For a receiver
+    /// with an unbroken history this is exactly the case in which `arrival(.., t)` finds nothing.
+    pub fn short_of(&self, at: State, t: f64) -> bool {
+        self.radius_at(t) - (at.pos - self.origin).length() < 0.0
+    }
+
+    /// `arrival(traj, lo, hi).is_some()` without locating the instant when the receiver never jumped:
+    /// the gap between front and receiver only closes, so its sign at the end of the window decides.
+    pub fn reached(&self, traj: &Trajectory, lo: f64, hi: f64) -> bool {
+        if !traj.jump_gaps().is_empty() {
+            return self.arrival(traj, lo, hi).is_some();
+        }
+        let end = traj.end().map_or(hi, |e| e.min(hi));
+        // A window that opens after the receiver ended finds nothing, as in `arrival`.
+        traj.state_at(end).is_some_and(|s| !self.short_of(s, end)) && traj.exists_at(lo.max(self.t_emit).max(traj.start()))
     }
 
     /// When this front first reaches a receiver on `traj`, searched within `(lo, hi]`,
@@ -169,6 +195,33 @@ impl Front {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reached_agrees_with_arrival() {
+        let mut movers = vec![at_rest(3.0 * C)];
+        let mut burning = Trajectory::new(0.0, State { pos: Vec2::new(2.0 * C, 1.0 * C), vel: Vec2::new(0.3 * C, 0.0) });
+        burning.push(4.0, Vec2::new(-2.0, 1.0), Vec2::ZERO).unwrap();
+        movers.push(burning);
+        let mut ended = at_rest(6.0 * C);
+        ended.terminate(4.0);
+        movers.push(ended);
+        let mut jumped = at_rest(3.0 * C);
+        jumped.jump_departure(2.0);
+        jumped.jump_arrival(5.0, State { pos: Vec2::new(1.0 * C, 0.0), vel: Vec2::ZERO });
+        movers.push(jumped);
+        for traj in &movers {
+            for emit in [-2.0, 0.0, 1.5, 6.0] {
+                let front = Front { origin: Vec2::new(0.1 * C, -0.2 * C), t_emit: emit };
+                let mut hi = -1.0;
+                while hi < 14.0 {
+                    for lo in [emit, 0.0, hi - 1.0] {
+                        assert_eq!(front.reached(traj, lo, hi), front.arrival(traj, lo, hi).is_some(), "emit={emit} lo={lo} hi={hi}");
+                    }
+                    hi += 0.25;
+                }
+            }
+        }
+    }
 
     #[test]
     fn jump_departure_remains_visible_only_until_its_last_light_arrives() {

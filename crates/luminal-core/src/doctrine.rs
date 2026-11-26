@@ -118,6 +118,11 @@ fn choose_target<'a>(view:&'a View,ship:&BodyView,previous:Option<crate::mind::C
             (a.track.as_ref().unwrap().pos-exit).length().total_cmp(&(b.track.as_ref().unwrap().pos-exit).length())
         }));
     let Some(transport)=transport else {return (nearest(),true);};
+    // A pack splits. Its heaviest ship takes on whatever blocks the way; the others go for the convoy.
+    let senior=view.bodies.iter().filter(|b|b.faction==ship.faction && b.kind==BodyKind::Ship && b.armed && b.controllable)
+        .max_by(|a,b|a.ship_class.map_or(0.0,|c|c.scale()).total_cmp(&b.ship_class.map_or(0.0,|c|c.scale())).then(b.id.0.cmp(&a.id.0)))
+        .map(|b|b.id);
+    if transport.resolved_class==Some(ShipClass::Transport) && senior.is_some_and(|id|id!=ship.id) {return (Some(transport),false);}
     let blocker=contacts.iter().copied().filter(|c|c.id!=transport.id && c.resolved_class!=Some(ShipClass::Transport))
         .filter_map(|escort|blocking_encounter(ship,transport,escort).map(|at|(escort,at)))
         .min_by(|a,b|a.1.total_cmp(&b.1));
@@ -268,6 +273,12 @@ impl Doctrine {
                     out.push(Command::MoveTo {body:b.id,point:b.pos+away*AU});
                     push_heat(&mut out,b,view,false);
                 } else {out.push(Command::Surrender {body:b.id});}
+                continue;
+            }
+            // The raid is done when the prize is gone. What is left is getting out before the relief arrives.
+            if view.objective.as_ref().is_some_and(|o|o.extract && o.prize_taken && o.attacker==b.faction) && class.has_jump_drive() {
+                out.push(Command::Withdraw {body:b.id});
+                push_heat(&mut out,b,view,false);
                 continue;
             }
             let goal=if b.damage.operating_effectiveness(S::Propulsion)==0.0 {RepairGoal::Automatic} else {RepairGoal::Fight};

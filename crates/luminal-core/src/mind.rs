@@ -363,9 +363,12 @@ impl Contact {
     }
     /// Propagate a fix that is still inside the stale window once transit time is restored.
     pub fn estimate_slack(&self,t:f64,sys:&System,slack:f64)->Option<Track> {
-        let mut track=self.usable_track_slack(t,slack)?.at(t,sys);
-        if self.detection_slack(t,slack)==crate::sensors::DetectionLevel::Approximate {
-            let evidence=self.best_evidence_slack(t,slack)?;
+        // One search of the evidence serves the level, the track test and the region below.
+        let best=self.best_evidence_slack(t,slack);
+        let level=best.map_or(crate::sensors::DetectionLevel::None,|o|self.report_level(o,t));
+        let mut track=(level>=crate::sensors::DetectionLevel::Approximate).then_some(self.track.as_ref()).flatten()?.at(t,sys);
+        if level==crate::sensors::DetectionLevel::Approximate {
+            let evidence=best?;
             let age=(t-evidence.emitted_at).max(0.0);
             let movement=crate::sensors::movement_radius(age)+0.5*track.accel().length()*age*age;
             let offset=self.region_offset.unwrap_or_else(||region_offset(self.id,evidence));

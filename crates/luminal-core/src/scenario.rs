@@ -120,9 +120,9 @@ pub fn transport_intercept_in_system(seed:u64,system:System)->World {
     let (frigate_pos, frigate_vel) = parking(PARKING_ORBIT_KM, -20f64.to_radians());
     let moon = system.state(2,0.0);
     let station_radius = 5_000.0;
-    let station_speed = (system.bodies[2].gm/station_radius).sqrt();
     let station_pos=moon.pos+Vec2::new(station_radius,0.0);
-    let station_vel=moon.vel+Vec2::new(0.0,station_speed);
+    // The Moon does not move in this system and the station keeps station over it.
+    let station_vel=moon.vel;
     let transport_pos=station_pos+Vec2::new(1_000.0,0.0)-planet.pos;
     let transport_vel=station_vel-planet.vel;
     let mut layout=crate::rng::Rng::stream(seed,0x4c41594f5554);
@@ -246,17 +246,17 @@ fn last_world(seed:u64,system:System,_:ShipClass)->World {last_ship(seed,system)
 
 static ESCORT_PLAY:Play=Play {
     name:"Escort",token:"escort",brief:"Escort the transport past a destroyer.",forces:"Destroyer versus destroyer",
-    detail:"Both sides field a destroyer. The transport must reach the departure region. Destroying the raider wins at once. The raider escaping does not.",
+    detail:"Both sides field a destroyer. Get the transport to the departure region and you win, whatever happens to your own ship. Lose the transport and you lose. Destroying the raider wins at once.",
     flagship:ShipClass::Destroyer,bots:RAIDER_SIDE,player_class:true,inspect_protect:true,opposed_ship:Some(BodyId(2)),opposed_bots:ESCORT_SIDE,build:escort_world,
 };
 static RAID_PLAY:Play=Play {
-    name:"Raid",token:"raid",brief:"A cruiser raid on a screened station.",forces:"Cruiser versus a station and its escorts",
-    detail:"Use a moon's sensor shadow, send a probe, or jump in blind. Destroy the station, then withdraw. The screen holds until you close.",
+    name:"Raid",token:"raid",brief:"A cruiser raid on a screened station, against the clock.",forces:"Cruiser versus a station, two frigates and a picket",
+    detail:"Use a moon's sensor shadow, send a probe, or jump in blind. Destroy the station, then withdraw. Its relief squadron arrives at hour 32: be gone by then. The screen holds until you close.",
     flagship:ShipClass::Cruiser,bots:RAIDER_SIDE,player_class:false,inspect_protect:false,opposed_ship:None,opposed_bots:NO_SIDE,build:raid_world,
 };
 static HIDE_PLAY:Play=Play {
     name:"Hide and Seek",token:"hide",brief:"Two frigates. Find the other one.",forces:"Frigate versus frigate",
-    detail:"Two frigates, placed at random and out of contact. Neither ship can jump. The hunting ground is closer to you than to the quarry, which has thirty-six hours to reach it. A slow coast will not get there. Destroy it, or it wins on arrival.",
+    detail:"Two frigates, placed at random and out of contact. Neither ship can jump. The hunting ground is closer to you than to the quarry, which has twenty-two hours to reach it. A slow coast will not get there. Destroy it, or it wins on arrival.",
     flagship:ShipClass::Frigate,bots:RAIDER_SIDE,player_class:false,inspect_protect:false,opposed_ship:None,opposed_bots:NO_SIDE,build:hide_world,
 };
 static ARMADA_PLAY:Play=Play {
@@ -265,13 +265,13 @@ static ARMADA_PLAY:Play=Play {
     flagship:ShipClass::Battleship,bots:RAIDER_SIDE,player_class:false,inspect_protect:false,opposed_ship:None,opposed_bots:NO_SIDE,build:armada_world,
 };
 static CONVOY_PLAY:Play=Play {
-    name:"Convoy",token:"convoy",brief:"Several transports, one screen.",forces:"Destroyer and a frigate escorting two transports",
-    detail:"Two transports run for the departure region. Your destroyer is at the back, and a frigate holds formation on you. One raider destroyer is on the route.",
+    name:"Convoy",token:"convoy",brief:"Two transports, two raiders.",forces:"Destroyer and a frigate escorting two transports",
+    detail:"Two transports run for the departure region. Your destroyer is at the back, and a frigate holds formation on you. A raider destroyer and a frigate wait off the route, one on each bow. One will fight you while the other goes for the transports. Lose the lead transport and you lose.",
     flagship:ShipClass::Destroyer,bots:RAIDER_SIDE,player_class:false,inspect_protect:false,opposed_ship:None,opposed_bots:NO_SIDE,build:convoy_world,
 };
 static RELIEF_PLAY:Play=Play {
     name:"Relief",token:"relief",brief:"Jump into a fight already under way.",forces:"A hot cruiser, an ally destroyer, two frigates",
-    detail:"A destroyer is already engaged. You arrive several AU out, hot from the jump, with only the light that has reached you.",
+    detail:"A destroyer is about to be caught by two frigates. You arrive an AU and a half off, hot from the jump and with the jump drive recovering for six hours. Unaided, your ally lasts about that long.",
     flagship:ShipClass::Cruiser,bots:BOTH_SIDES,player_class:false,inspect_protect:false,opposed_ship:None,opposed_bots:NO_SIDE,build:relief_world,
 };
 static LAST_PLAY:Play=Play {
@@ -352,9 +352,9 @@ impl Scenario {
                 let (at,chance)=(hours(3.0,8.0),hours(0.0,1.0)/3_600.0);
                 if chance<0.4 && let Some(id)=transport(None) {events.push(Timed {at,kind:Scripted::Casualty(id)});}
             }
-            "raid"=>events.push(Timed {at:hours(6.0,12.0),kind:Scripted::Flare}),
-            "hide"=>events.push(Timed {at:hours(8.0,16.0),kind:Scripted::Flare}),
-            "armada"=>events.push(Timed {at:hours(18.0,24.0),kind:Scripted::Reinforcement {faction:None,class:ShipClass::Destroyer}}),
+            "raid"=>events.push(Timed {at:hours(4.0,9.0),kind:Scripted::Flare}),
+            "hide"=>events.push(Timed {at:hours(5.0,11.0),kind:Scripted::Flare}),
+            "armada"=>events.push(Timed {at:hours(12.0,16.0),kind:Scripted::Reinforcement {faction:None,class:ShipClass::Destroyer}}),
             "convoy"=>{
                 let (at,chance)=(hours(4.0,8.0),hours(0.0,1.0)/3_600.0);
                 // The second transport, so the one the scenario is scored on keeps its drive.
@@ -380,7 +380,12 @@ const ARMADA_MIX:[ShipClass;10]=[
     ShipClass::Battleship,ShipClass::Cruiser,ShipClass::Destroyer,ShipClass::Destroyer,
     ShipClass::Frigate,ShipClass::Frigate,ShipClass::Frigate,ShipClass::Picket,ShipClass::Picket,ShipClass::Picket,
 ];
-const RAID_SCREEN:[ShipClass;3]=[ShipClass::Destroyer,ShipClass::Frigate,ShipClass::Frigate];
+const RAID_SCREEN:[ShipClass;3]=[ShipClass::Frigate,ShipClass::Frigate,ShipClass::Picket];
+/// The station's relief squadron is this far off. A raider still in the system when it arrives has lost.
+const RAID_RELIEF_S: f64 = 32.0 * 3600.0;
+/// The cruiser and the station start this far either side of the home world.
+const RAID_PLAYER_AU: f64 = 2.6;
+const RAID_STATION_AU: f64 = 3.2;
 
 fn clear_of_celestials(system:&System,pos:Vec2)->bool {
     system.bodies.iter().enumerate().all(|(i,b)|(pos-system.state(i,0.0).pos).length()>b.radius+0.03*AU)
@@ -448,8 +453,8 @@ fn raid(seed:u64,system:System)->World {
     let (player_pos,station_pos)=(0..72).find_map(|step| {
         let angle=base+step as f64*std::f64::consts::TAU/72.0;
         let axis=Vec2::new(angle.cos(),angle.sin());
-        let station=home+axis*(5.0*AU);
-        let player=home-axis*(4.0*AU);
+        let station=home+axis*(RAID_STATION_AU*AU);
+        let player=home-axis*(RAID_PLAYER_AU*AU);
         let screens=screen_offsets().map(|off|station+off);
         (clear_of_celestials(&system,station)&&clear_of_celestials(&system,player)&&screens.iter().all(|p|clear_of_celestials(&system,*p))).then_some((player,station))
     }).unwrap_or((home-Vec2::new(8.0*AU,0.0),home+Vec2::new(8.0*AU,0.0)));
@@ -467,7 +472,7 @@ fn raid(seed:u64,system:System)->World {
     }
     world.objective=Some(Objective {sensor_site:None,name:"enemy station".into(),center:station_pos,radius:0.08*AU,
         protect:BodyId(0),player:Some(BodyId(0)),defeat:None,prize:Some(BodyId(1)),wipe:false,defender:RAIDER,attacker:ESCORT,stance:Stance::Screen,
-        withdrawal_continues:false,extract:true,escape_at_center:false,disengage_wins:false,prize_taken:false,escape_by:None});
+        withdrawal_continues:false,extract:true,escape_at_center:false,disengage_wins:false,prize_taken:false,escape_by:Some(RAID_RELIEF_S)});
     silence_probes(&mut world);
     // The cruiser carries the only probes. The global gate stays off for every other scenario.
     world.probes_enabled=true;
@@ -475,14 +480,14 @@ fn raid(seed:u64,system:System)->World {
     world
 }
 
-/// Thirty-six hours. The quarry's longer leg still fits a burn of under an hour, then a coast. A few km/s does not.
-const HIDE_ESCAPE_S: f64 = 36.0 * 3600.0;
-const HIDE_SEP_MIN_AU: f64 = 4.0;
-const HIDE_SEP_MAX_AU: f64 = 5.4;
+/// Twenty-two hours. The quarry's longer leg still fits a burn of under an hour, then a coast. A few km/s does not.
+const HIDE_ESCAPE_S: f64 = 22.0 * 3600.0;
+const HIDE_SEP_MIN_AU: f64 = 2.4;
+const HIDE_SEP_MAX_AU: f64 = 3.2;
 /// Past the midpoint, toward the hunter, so the pursuer is strictly closer.
-const HIDE_HUNTER_BIAS_AU: f64 = 0.15;
+const HIDE_HUNTER_BIAS_AU: f64 = 0.1;
 /// A fifty-minute burn and a coast still cover this inside the escape clock.
-const HIDE_QUARRY_LEG_AU: f64 = 3.0;
+const HIDE_QUARRY_LEG_AU: f64 = 1.75;
 
 fn placed(rng:&mut Rng,system:&System,home:Vec2,avoid:&[Vec2])->Vec2 {
     for attempt in 0..4000 {
@@ -548,6 +553,8 @@ fn hide_and_seek(seed:u64,system:System)->World {
     world
 }
 
+/// Each fleet starts this far from the home world, on opposite sides of it.
+const ARMADA_REACH_AU: f64 = 4.5;
 fn armada(seed:u64,system:System)->World {
     let home=system.state(1,0.0).pos;
     let mut rng=Rng::stream(seed,0x41524D41);
@@ -555,8 +562,8 @@ fn armada(seed:u64,system:System)->World {
     let (player_slots,enemy_slots)=(0..72).find_map(|step| {
         let angle=base+step as f64*std::f64::consts::TAU/72.0;
         let axis=Vec2::new(angle.cos(),angle.sin());
-        let player=fleet_slots(home-axis*(7.0*AU),axis);
-        let enemy=fleet_slots(home+axis*(7.0*AU),-axis);
+        let player=fleet_slots(home-axis*(ARMADA_REACH_AU*AU),axis);
+        let enemy=fleet_slots(home+axis*(ARMADA_REACH_AU*AU),-axis);
         player.iter().chain(&enemy).all(|p|clear_of_celestials(&system,*p)).then_some((player,enemy))
     }).unwrap_or_else(|| {
         let axis=Vec2::new(1.0,0.0);
@@ -613,13 +620,26 @@ fn convoy(seed:u64,system:System)->World {
     let screen=second-axis*(0.04*AU);
     let player=screen-axis*(0.04*AU);
     let departure=home+axis*(2.2*AU);
-    let raider=home+axis*(3.1*AU);
+    // The raiders wait off the route, not on it, and on opposite bows: a destroyer out past the
+    // departure region and a frigate nearer in. Which side each takes, and how wide, is the seed's.
+    let mut rng=Rng::stream(seed,0x434F_4E56_5241);
+    let side=if rng.uniform()<0.5 {1.0} else {-1.0};
+    let mut bearing=|from:f64,to:f64,reach:f64,sign:f64| {
+        let first=from+(to-from)*rng.uniform();
+        (0..24).map(|step|first+step as f64*2.0).map(|degrees| {
+            let (sin,cos)=(sign*degrees).to_radians().sin_cos();
+            home+Vec2::new(axis.x*cos-axis.y*sin,axis.x*sin+axis.y*cos)*(reach*AU)
+        }).find(|pos|clear_of_celestials(&system,*pos)).unwrap_or(home+axis*(reach*AU))
+    };
+    let raider=bearing(8.0,30.0,3.1,side);
+    let wolf=bearing(25.0,55.0,2.5,-side);
     let specs=vec![
         spec("Destroyer",BodyKind::Ship,ESCORT,player,1),
         spec("Transport",BodyKind::Ship,ESCORT,lead,0),
         spec("Transport 2",BodyKind::Ship,ESCORT,second,0),
         spec("Frigate",BodyKind::Ship,ESCORT,screen,1),
         spec("Raider",BodyKind::Ship,RAIDER,raider,1),
+        spec("Raider 2",BodyKind::Ship,RAIDER,wolf,1),
     ];
     let mut world=World::new(system,specs,0.0,seed);
     fit_combatant(&mut world,BodyId(0),ShipClass::Destroyer,true);
@@ -627,6 +647,7 @@ fn convoy(seed:u64,system:System)->World {
     fit_transport(&mut world,BodyId(2));
     fit_combatant(&mut world,BodyId(3),ShipClass::Frigate,true);
     fit_combatant(&mut world,BodyId(4),ShipClass::Destroyer,true);
+    fit_combatant(&mut world,BodyId(5),ShipClass::Frigate,true);
     world.set_move(BodyId(1),departure).expect("the lead transport can run");
     let limit=25.0*crate::units::G0;
     world.set_follow(BodyId(2),BodyId(1)).expect("the second transport follows");
@@ -644,6 +665,10 @@ fn sight_clear(system:&System,from:Vec2,to:Vec2)->bool {
         system.bodies.iter().enumerate().all(|(k,b)|(p-system.state(k,0.0).pos).length()>b.radius+0.05*AU)
     })
 }
+/// The cruiser arrives this far off the fight's axis. Near enough to reach it while it is still a fight.
+const RELIEF_ARRIVAL_AU: f64 = 1.6;
+/// The ally and the raiders each start this far from the middle of the fight.
+const RELIEF_GAP_AU: f64 = 0.3;
 fn relief(seed:u64,system:System)->World {
     let home=system.state(1,0.0).pos;
     let mut rng=Rng::stream(seed,0x52454C49);
@@ -654,10 +679,10 @@ fn relief(seed:u64,system:System)->World {
         let axis=Vec2::new(angle.cos(),angle.sin());
         let side=Vec2::new(-axis.y,axis.x);
         let fight=home+axis*(2.2*AU);
-        let player=fight+side*(4.0*AU);
-        let ally=fight-axis*(0.16*AU);
-        let raider_a=fight+axis*(0.16*AU)+side*(0.04*AU);
-        let raider_b=fight+axis*(0.2*AU)-side*(0.04*AU);
+        let player=fight+side*(RELIEF_ARRIVAL_AU*AU);
+        let ally=fight-axis*(RELIEF_GAP_AU*AU);
+        let raider_a=fight+axis*(RELIEF_GAP_AU*AU)+side*(0.04*AU);
+        let raider_b=fight+axis*((RELIEF_GAP_AU+0.04)*AU)-side*(0.04*AU);
         let spots=[fight,player,ally,raider_a,raider_b];
         (spots.iter().all(|p|clear_of_celestials(&system,*p)) && sight_clear(&system,player,raider_a) && sight_clear(&system,player,raider_b))
             .then_some((axis,side,fight,player,ally,raider_a,raider_b))
@@ -665,7 +690,7 @@ fn relief(seed:u64,system:System)->World {
         let axis=Vec2::new(1.0,0.0);
         let side=Vec2::new(0.0,1.0);
         let fight=home+axis*(2.2*AU);
-        (axis,side,fight,fight+side*(4.0*AU),fight-axis*(0.16*AU),fight+axis*(0.16*AU)+side*(0.04*AU),fight+axis*(0.2*AU)-side*(0.04*AU))
+        (axis,side,fight,fight+side*(RELIEF_ARRIVAL_AU*AU),fight-axis*(RELIEF_GAP_AU*AU),fight+axis*(RELIEF_GAP_AU*AU)+side*(0.04*AU),fight+axis*((RELIEF_GAP_AU+0.04)*AU)-side*(0.04*AU))
     });
     let burn=40.0*crate::units::G0;
     let mut specs=vec![
@@ -679,6 +704,8 @@ fn relief(seed:u64,system:System)->World {
     specs[3].thrust=-axis*burn;
     let mut world=World::new(system,specs,6000.0,seed);
     fit_combatant(&mut world,BodyId(0),ShipClass::Cruiser,false);
+    // It has just jumped: the drive is recovering as well as the hull being hot.
+    world.bodies[0].jump_ready_at=crate::world::jump::RECOVERY_SECONDS;
     let scale=world.bodies[0].thermal.capacity_scale;
     world.bodies[0].thermal.add_waste_heat(crate::params::SHIP_HEAT_LIMIT_J*scale*crate::world::jump::ARRIVAL_HEAT_FRACTION);
     fit_combatant(&mut world,BodyId(1),ShipClass::Destroyer,true);
@@ -700,7 +727,14 @@ fn last_ship(seed:u64,system:System)->World {
     let home=system.state(1,0.0).pos;
     let axis=open_axis(&system,seed,0x4C415354);
     let player=home+axis*(2.4*AU);
-    let hunter=player+axis*(1.8*AU);
+    // The pursuer is somewhere outward, at a range and on a bearing the seed picks.
+    let mut rng=Rng::stream(seed,0x4C41_5354_5055);
+    let range=1.4+0.8*rng.uniform();
+    let first=(rng.uniform()*2.0-1.0)*50.0;
+    let hunter=(0..24).map(|step|first+step as f64*5.0).map(|degrees:f64| {
+        let (sin,cos)=degrees.to_radians().sin_cos();
+        player+Vec2::new(axis.x*cos-axis.y*sin,axis.x*sin+axis.y*cos)*(range*AU)
+    }).find(|pos|clear_of_celestials(&system,*pos)).unwrap_or(player+axis*(range*AU));
     let mut world=World::new(system,vec![
         spec("Cruiser",BodyKind::Ship,ESCORT,player,1),
         spec("Pursuer",BodyKind::Ship,RAIDER,hunter,1),
@@ -883,9 +917,10 @@ mod tests {
         assert_eq!(world.bodies[3].baseline_emission_factor,2.0);
         assert!(world.bodies[0].autopilot.is_some());
         world.advance_to(7.0*DAY);
-        assert!(world.outcome.is_none(),"transport arrival does not end the raider scenario");
+        let outcome=world.outcome.clone().expect("the transport arriving wins the escort, raider or no raider");
+        assert_eq!(outcome.winner,ESCORT);
         let goal=world.objective.as_ref().unwrap();
-        assert!((world.bodies[0].trajectory.state_at(world.time()).unwrap().pos-goal.center).length()<goal.radius);
+        assert!((world.bodies[0].trajectory.state_at(outcome.t).unwrap().pos-goal.center).length()<goal.radius);
         assert!(!world.losses.iter().any(|l| l.body == BodyId(0)));
     }
 
@@ -916,7 +951,8 @@ mod tests {
         assert_eq!((o.prize,o.player,o.attacker,o.defender,o.stance),(Some(BodyId(1)),Some(BodyId(0)),ESCORT,RAIDER,Stance::Screen));
         let player=w.bodies[0].trajectory.state_at(0.0).unwrap().pos;
         let station=w.bodies[1].trajectory.state_at(0.0).unwrap().pos;
-        assert!((player-station).length()>6.0*AU);
+        assert!((player-station).length()>5.0*AU);
+        assert_eq!(o.escape_by,Some(RAID_RELIEF_S));
         assert_eq!(player,Scenario::Raid.build(42,home_system()).bodies[0].trajectory.state_at(0.0).unwrap().pos);
     }
 
@@ -997,7 +1033,7 @@ mod tests {
         assert!(w.bodies[11..].iter().all(|b|matches!(b.autopilot.map(|a|a.order),Some(crate::world::Order::Follow {target:BodyId(10),..}))));
         let player=w.bodies[0].trajectory.state_at(0.0).unwrap().pos;
         let enemy=w.bodies[10].trajectory.state_at(0.0).unwrap().pos;
-        assert!((player-enemy).length()>10.0*AU);
+        assert!((player-enemy).length()>8.0*AU);
         let axis=(enemy-player).normalized();
         let ahead=|id:usize|(w.bodies[id].trajectory.state_at(0.0).unwrap().pos-player).dot(axis);
         assert!(w.bodies[1..10].iter().enumerate().all(|(i,_)|ahead(i+1)>0.02*AU),"lighter ships should be ahead of the battleship");
@@ -1128,7 +1164,7 @@ mod tests {
         let relief=Scenario::Relief.build(42,home_system());
         let player=relief.bodies[0].trajectory.state_at(0.0).unwrap().pos;
         let ally=relief.bodies[1].trajectory.state_at(0.0).unwrap().pos;
-        assert!((player-ally).length()>3.0*AU);
+        assert!((player-ally).length()>1.0*AU);
         assert!(!relief.bodies[0].screen_up);
         assert!(relief.bodies[0].thermal.heat_fraction()>=0.9);
         let o=relief.objective.as_ref().unwrap();

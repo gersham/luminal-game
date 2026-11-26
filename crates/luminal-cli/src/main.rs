@@ -233,7 +233,7 @@ fn main() {
 fn scenario_survey(seeds:u64,hours:f64,first_seed:u64,only:&str,only_mode:&str) {
     use luminal_core::scenario::Scenario;
     use luminal_core::world::{BodyKind,FactionId};
-    println!("scenario,mode,seed,sim_h,wall_s,winner,reason,prize_taken,player_alive,player_hull,player_drive,start_sep_au,end_sep_au,ships,losses");
+    println!("scenario,mode,seed,sim_h,wall_s,winner,reason,prize_taken,player_alive,player_hull,player_drive,start_sep_au,end_sep_au,ships,losses,first_contact_h,first_fire_h,play_min");
     let cap=hours*3600.0;
     for scenario in Scenario::ALL {
         if only!="all" && !scenario.name().eq_ignore_ascii_case(only) && !scenario.token().eq_ignore_ascii_case(only) {continue;}
@@ -260,10 +260,22 @@ fn scenario_survey(seeds:u64,hours:f64,first_seed:u64,only:&str,only_mode:&str) 
                 }
                 session.command(Role::Spectator,Command::SetPaused(false)).unwrap();
                 let mut t=0.0;
+                // Pacing as the player meets it: when their side first holds a contact, when the first round
+                // flies or the first hull is marked, and the wall time the client's automatic speed would take.
+                let (mut first_contact,mut first_fire,mut play_s)=(None,None,0.0);
                 while t<cap {
                     session.tick(600.0);
                     t+=600.0;
-                    if session.view(Role::Spectator).outcome.is_some() {break;}
+                    let truth=session.view(Role::Spectator);
+                    if let Some(faction)=player_faction {
+                        let mine=session.view(Role::Faction(faction));
+                        if first_contact.is_none() && !mine.contacts.is_empty() {first_contact=Some(truth.time);}
+                        let own=player.and_then(|id|mine.bodies.iter().find(|b|b.id==id));
+                        let nearest=own.and_then(|own|mine.contacts.iter().filter_map(|c|c.track.as_ref()).map(|tr|(tr.pos-own.pos).length()).min_by(f64::total_cmp));
+                        play_s+=600.0/nearest.map_or(if mine.contacts.is_empty() {1000.0} else {100.0},auto_warp);
+                    }
+                    if first_fire.is_none() && (truth.bodies.iter().any(|b|b.kind==BodyKind::Missile || (b.kind==BodyKind::Ship && b.damage.damage.hull<b.damage.damage.hull_max)) || !truth.losses.is_empty()) {first_fire=Some(truth.time);}
+                    if truth.outcome.is_some() {break;}
                 }
                 let truth=session.view(Role::Spectator);
                 let (winner,reason)=match &truth.outcome {
@@ -283,12 +295,28 @@ fn scenario_survey(seeds:u64,hours:f64,first_seed:u64,only:&str,only_mode:&str) 
                 }).collect::<Vec<_>>().join("|");
                 let losses=truth.losses.iter().filter(|l|roster.iter().any(|n|n==&l.name))
                     .map(|l|format!("{}@{:.0}m:{}",l.name,l.t/60.0,l.cause.replace(',',";"))).collect::<Vec<_>>().join("|");
-                println!("{scenario:?},{mode},{seed},{:.2},{:.1},{winner},{reason},{},{player_alive},{player_hull:.3},{player_drive},{start_sep:.2},{end_sep:.2},{ships},{losses}",
-                    truth.time/3600.0,started.elapsed().as_secs_f64(),truth.objective.as_ref().is_some_and(|o|o.prize_taken));
+                println!("{scenario:?},{mode},{seed},{:.2},{:.1},{winner},{reason},{},{player_alive},{player_hull:.3},{player_drive},{start_sep:.2},{end_sep:.2},{ships},{losses},{},{},{:.1}",
+                    truth.time/3600.0,started.elapsed().as_secs_f64(),truth.objective.as_ref().is_some_and(|o|o.prize_taken),
+                    first_contact.map_or("-".into(),|t:f64|format!("{:.1}",t/3600.0)),first_fire.map_or("-".into(),|t:f64|format!("{:.1}",t/3600.0)),play_s/60.0);
                 eprintln!("done {scenario:?} {mode} seed {seed} {winner} {:.2}h in {:.1}s",truth.time/3600.0,started.elapsed().as_secs_f64());
             }
         }
     }
+}
+
+/// The client's automatic game speed for a nearest contact at `range` km (`range_warp` in the app).
+fn auto_warp(range:f64)->f64 {
+    use luminal_core::units::{AU,LIGHT_SECOND};
+    let anchors:[(f64,f64);5]=[(LIGHT_SECOND,5.0),(10.0*LIGHT_SECOND,10.0),(0.1*AU,50.0),(AU,300.0),(2.0*AU,1000.0)];
+    if range<=anchors[0].0 {return 5.0;}
+    for pair in anchors.windows(2) {
+        let [(a,x),(b,y)]=[pair[0],pair[1]];
+        if range<=b {
+            let f=(range/a).ln()/(b/a).ln();
+            return (x.ln()+(y.ln()-x.ln())*f).exp().clamp(5.0,1000.0);
+        }
+    }
+    1000.0
 }
 
 fn separation(view:&luminal_core::session::View,player:Option<luminal_core::world::BodyId>,player_faction:Option<luminal_core::world::FactionId>)->f64 {

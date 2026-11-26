@@ -92,7 +92,7 @@ impl System {
     /// A moon otherwise recomputes its planet, and gravity is summed many times a frame.
     #[inline]
     fn each_state(&self, t: f64, mut visit: impl FnMut(&Celestial, State)) {
-        const INLINE: usize = 32;
+        const INLINE: usize = System::INLINE;
         if self.bodies.len() > INLINE {
             for (i, b) in self.bodies.iter().enumerate() { visit(b, self.state(i, t)); }
             return;
@@ -113,6 +113,41 @@ impl System {
             states[i] = state;
             visit(b, state);
         }
+    }
+
+    /// Systems up to this size keep a step's body states on the stack.
+    const INLINE: usize = 32;
+
+    /// Every body's state at `t`, by the arithmetic of `state`, for a forecast that needs them more than once.
+    fn states_at(&self, t: f64) -> [State; Self::INLINE] {
+        let mut states = [State { pos: Vec2::ZERO, vel: Vec2::ZERO }; Self::INLINE];
+        let mut i = 0;
+        self.each_state(t, |_, state| {
+            states[i] = state;
+            i += 1;
+        });
+        states
+    }
+
+    /// `gravity` with the bodies already placed.
+    fn gravity_among(&self, states: &[State], pos: Vec2) -> Vec2 {
+        let mut g = Vec2::ZERO;
+        for (b, state) in self.bodies.iter().zip(states) {
+            let d = state.pos - pos;
+            let r = d.length().max(b.radius);
+            g = g + d * (b.gm / (r * r * r));
+        }
+        g
+    }
+
+    /// `step_size` with the bodies already placed.
+    fn step_size_among(&self, states: &[State], pos: Vec2) -> f64 {
+        let mut tau = f64::INFINITY;
+        for (b, state) in self.bodies.iter().zip(states) {
+            let r = (state.pos - pos).length().max(b.radius);
+            tau = f64::min(tau, (r * r * r / b.gm).sqrt());
+        }
+        (STEP_FRACTION * tau).clamp(MIN_STEP_S, MAX_STEP_S)
     }
 
     pub fn gravity(&self, pos: Vec2, t: f64) -> Vec2 {
@@ -146,10 +181,15 @@ impl System {
     /// First contact with any surface between states `a` at `t0` and `b` at `t1`,
     /// assuming straight-line motion relative to each body over the (short) step.
     pub fn impact(&self, a: Vec2, b: Vec2, t0: f64, t1: f64) -> Option<(usize, f64)> {
+        self.impact_among(a, b, t0, t1, |i| self.state(i, t0).pos, |i| self.state(i, t1).pos)
+    }
+
+    /// `impact` given where each body is at `t0` and at `t1`.
+    fn impact_among(&self, a: Vec2, b: Vec2, t0: f64, t1: f64, at0: impl Fn(usize) -> Vec2, at1: impl Fn(usize) -> Vec2) -> Option<(usize, f64)> {
         let mut best: Option<(usize, f64)> = None;
         for (i, body) in self.bodies.iter().enumerate() {
-            let r0 = a - self.state(i, t0).pos;
-            let r1 = b - self.state(i, t1).pos;
+            let r0 = a - at0(i);
+            let r1 = b - at1(i);
             let d = r1 - r0;
             // Solve |r0 + d u| = R for the first u in [0, 1].
             let (qa, qb, qc) = (d.dot(d), 2.0 * r0.dot(d), r0.dot(r0) - body.radius * body.radius);
@@ -225,7 +265,46 @@ impl System {
 
     /// Display-only forecast of a free body under constant thrust plus gravity.
     /// Stops at the first surface contact.
-    pub fn predict(&self, mut s: State, thrust: Vec2, t0: f64, duration: f64, max_points: usize) -> Prediction {
+    pub fn predict(&self, s: State, thrust: Vec2, t0: f64, duration: f64, max_points: usize) -> Prediction {
+        if self.bodies.len() > Self::INLINE {
+            return self.predict_plainly(s, thrust, t0, duration, max_points);
+        }
+        // A step needs the bodies at its start, middle and end, and its end is the next step's start:
+        // place them twice a step instead of five times. The arithmetic is that of `predict_plainly`.
+        let mut s = s;
+        let mut t = t0;
+        let mut points = vec![s.pos];
+        let every = (duration / max_points as f64).max(MIN_STEP_S);
+        let mut next_point = t0 + every;
+        let n_bodies = self.bodies.len();
+        let mut here = self.states_at(t);
+        while t < t0 + duration {
+            let dt = self.step_size_among(&here[..n_bodies], s.pos).min(t0 + duration - t).max(1e-3);
+            let g0 = self.gravity_among(&here[..n_bodies], s.pos);
+            let h = 0.5 * dt;
+            let mid = s.pos + s.vel * h + (thrust + g0) * (0.5 * h * h);
+            let a = thrust + self.gravity_among(&self.states_at(t + h)[..n_bodies], mid);
+            let n = crate::kinematics::advance(s, a, dt);
+            let there = self.states_at(t + dt);
+            if let Some((body, ti)) = self.impact_among(s.pos, n.pos, t, t + dt, |i| here[i].pos, |i| there[i].pos) {
+                let u = (ti - t) / dt;
+                points.push(s.pos + (n.pos - s.pos) * u);
+                return Prediction { points, impact: Some((body, ti)) };
+            }
+            s = n;
+            t += dt;
+            here = there;
+            if t >= next_point {
+                points.push(s.pos);
+                next_point += every;
+            }
+        }
+        points.push(s.pos);
+        Prediction { points, impact: None }
+    }
+
+    /// The forecast with every body placed afresh wherever it is needed.
+    fn predict_plainly(&self, mut s: State, thrust: Vec2, t0: f64, duration: f64, max_points: usize) -> Prediction {
         let mut t = t0;
         let mut points = vec![s.pos];
         let every = (duration / max_points as f64).max(MIN_STEP_S);
@@ -271,6 +350,31 @@ mod tests {
                 orbit: Orbit::Fixed(Vec2::ZERO),
             }],
         }
+    }
+
+    #[test]
+    fn the_shared_body_states_change_no_forecast() {
+        let sys = crate::sol::system(1);
+        let earth = sys.state(3.min(sys.bodies.len() - 1), 5_000.0);
+        let starts = [
+            State { pos: Vec2::new(0.4 * AU, 0.1 * AU), vel: Vec2::new(-20.0, 35.0) },
+            State { pos: Vec2::new(0.02 * AU, 0.0), vel: Vec2::new(-300.0, 0.0) },
+            State { pos: earth.pos + Vec2::new(40_000.0, 0.0), vel: earth.vel + Vec2::new(0.0, 3.0) },
+            State { pos: earth.pos + Vec2::new(90_000.0, 20_000.0), vel: earth.vel + Vec2::new(-12.0, 0.0) },
+        ];
+        let mut impacts = 0;
+        for s in starts {
+            for thrust in [Vec2::ZERO, Vec2::new(0.02, -0.01)] {
+                for (duration, points) in [(1_800.0, 2), (8.0 * 3_600.0, 240)] {
+                    let fast = sys.predict(s, thrust, 5_000.0, duration, points);
+                    let plain = sys.predict_plainly(s, thrust, 5_000.0, duration, points);
+                    assert_eq!(fast.points, plain.points);
+                    assert_eq!(fast.impact, plain.impact);
+                    impacts += fast.impact.is_some() as usize;
+                }
+            }
+        }
+        assert!(impacts > 0, "no forecast in the set ends on a surface");
     }
 
     #[test]
