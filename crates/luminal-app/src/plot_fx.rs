@@ -245,6 +245,37 @@ impl PlotFx {
                 }
             }
         }
+        // The star's glare from the command ship: anything sunward inside this cone is hidden
+        // from our passive arrays, lost outright in the brighter core.
+        if let Some(ship) = ship && let Some(star) = view.celestials.iter().find(|c| c.kind == CelestialKind::Star) {
+            let to_star = star.pos - ship.pos;
+            let distance = to_star.length();
+            if let Some(half) = terrain::glare_half_angle(star.radius, distance) {
+                let source = to_screen(cam, rect, star.pos);
+                let apex = to_screen(cam, rect, ship.pos);
+                let width_px = (distance * half.tan() / cam.km_per_px) as f32;
+                let disc_px = (star.radius / cam.km_per_px) as f32;
+                // Drawn when it has some width, whether or not the star itself is on the plot.
+                if width_px >= 6.0 && disc_px < 60.0 && rect.contains(apex) {
+                    let along = source - apex;
+                    let across = { let d = along.normalized(); EVec2::new(-d.y, d.x) * width_px };
+                    let core = params::SOLAR_GLARE_CORE_RADII.value as f32 / params::SOLAR_GLARE_HALO_RADII.value as f32;
+                    let dark = Color32::from_rgba_premultiplied(0, 0, 0, 0);
+                    for (spread, level) in [(1.0, 0.10), (core, 0.12)] {
+                        let mut zone = Mesh::default();
+                        zone.colored_vertex(apex, dark);
+                        zone.colored_vertex(source + across * spread, dark);
+                        zone.colored_vertex(source, fx::light(star_color, level));
+                        zone.colored_vertex(source - across * spread, dark);
+                        for (a, b, c) in [(0, 1, 2), (0, 2, 3)] { zone.add_triangle(a, b, c); }
+                        painter.add(Shape::mesh(zone));
+                    }
+                    for edge in [source + across, source - across] {
+                        painter.extend(Shape::dashed_line(&[apex, edge], Stroke::new(1.0, star_color.gamma_multiply(0.2)), 2.0, 9.0));
+                    }
+                }
+            }
+        }
         // Trails: one mesh, each segment a thin strip that fades with age.
         let mut mesh = Mesh::default();
         for trail in self.trails.values() {

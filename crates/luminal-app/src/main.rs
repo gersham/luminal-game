@@ -3249,15 +3249,25 @@ impl LuminalApp {
                 } else {"CLOSURE UNKNOWN · BEARING / POSITION ONLY".into()});
             } else { lines.push("RANGE / CLOSURE UNKNOWN · BEARING ONLY".into()); }
         } else { lines.push("NO TARGET DESIGNATED".into()); }
-        let panel = Rect::from_min_size(Pos2::new(rect.left()+10.0, rect.bottom()-85.0), EVec2::new(310.0,75.0));
-        painter.rect_filled(panel,0.0,pal().panel_bg.gamma_multiply(0.9));
-        painter.line_segment([panel.left_top(),panel.left_bottom()],Stroke::new(2.0,pal().accent));
+        // From where we believe each enemy is: are we against the star? Our own estimates only.
+        let hidden:Vec<String>=view.contacts.iter().filter(|c|!c.stale && !c.resolved_missile && c.resolved_kind!=Some(BodyKind::Missile))
+            .filter_map(|c|c.track.as_ref().map(|t|(c,t.pos)))
+            .filter(|(_,from)|luminal_core::world::terrain::star_separation(&view.system,*from,ship.pos,view.time)
+                .is_some_and(|radii|radii<params::SOLAR_GLARE_HALO_RADII.value))
+            .map(|(c,_)|contact_label(c)).collect();
+        if !hidden.is_empty() && lines.len()<4 {
+            lines.push(format!("SUN AT OUR BACK · IN GLARE TO {}",hidden.join(", ")));
+        }
         if let Some(jump)=ship.jump {
             lines=match jump {
                 JumpState::Spooling {depart_at,..}=>vec![format!("Spooling for jump · {}",fmt_time((depart_at-view.time).max(0.0))),"THRUST / SCREENS / LASERS OFFLINE".into(),"Cancel jump in helm controls".into()],
                 JumpState::Transit {arrive_at,..}=>vec![format!("JUMP TRANSIT · {:.1}s to arrival",(arrive_at-view.time).max(0.0)),"1 AU/s · normal-space velocity preserved".into()],
             };
         }
+        let height=30.0+15.0*lines.len().max(3) as f32;
+        let panel = Rect::from_min_size(Pos2::new(rect.left()+10.0, rect.bottom()-height-10.0), EVec2::new(330.0,height));
+        painter.rect_filled(panel,0.0,pal().panel_bg.gamma_multiply(0.9));
+        painter.line_segment([panel.left_top(),panel.left_bottom()],Stroke::new(2.0,pal().accent));
         let heading=self.manual_flight.filter(|m|m.body==ship.id && ship.autopilot.is_none())
             .map_or("NAVIGATION / FIRING SOLUTION".into(),|m|format!("FREE FLIGHT · {:.0}% · ← → TURN / ↑ ↓ THROTTLE",m.throttle*100.0));
         painter.text(panel.min+EVec2::new(10.0,7.0),egui::Align2::LEFT_TOP,heading,egui::FontId::monospace(9.0),pal().accent);

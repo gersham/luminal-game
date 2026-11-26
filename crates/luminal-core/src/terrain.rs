@@ -1,5 +1,6 @@
 //! Places in a system that change what sensors can do: a giant planet's disc behind a
-//! target, a debris field around it, and a stellar flare washing over the sensor.
+//! target, the star's glare behind it, a debris field around it, and a stellar flare
+//! washing over the sensor.
 //!
 //! None of it is an extra detection roll. Each lowers the level an existing look
 //! returns, from geometry the sensing ship could work out for itself.
@@ -74,7 +75,45 @@ pub fn mask_half_angle(radius: f64, distance: f64) -> Option<f64> {
     (distance > radius).then(|| GIANT_MASK_RADII.value * (radius / distance).asin())
 }
 
+/// How a passive look at a target against the star fares: lost in the glare, or dimmed by
+/// scattered light. Separation is in apparent stellar radii as the sensor sees the star.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Glare { Lost, Dimmed }
+
+pub fn glare_for(separation_radii: f64) -> Option<Glare> {
+    if separation_radii < SOLAR_GLARE_CORE_RADII.value { Some(Glare::Lost) }
+    else if separation_radii < SOLAR_GLARE_HALO_RADII.value { Some(Glare::Dimmed) }
+    else { None }
+}
+
+/// Separation of `target` from the star's direction as seen from `sensor`, in apparent stellar
+/// radii, when the star lies behind the target. Pure geometry: a side can run it on its own
+/// estimates, to ask whether it is hidden against the star from where it thinks an enemy is.
+pub fn star_separation(system: &System, sensor: Vec2, target: Vec2, t: f64) -> Option<f64> {
+    let line = target - sensor;
+    let range = line.length();
+    if range <= 0.0 { return None; }
+    system.bodies.iter().enumerate().filter(|(_, b)| b.kind == CelestialKind::Star).filter_map(|(i, b)| {
+        let to_star = system.state(i, t).pos - sensor;
+        let distance = to_star.length();
+        if distance <= range || distance <= b.radius { return None; }
+        let separation = (line.dot(to_star) / (range * distance)).clamp(-1.0, 1.0).acos();
+        Some(separation / (b.radius / distance).asin())
+    }).reduce(f64::min)
+}
+
+/// Half-angle of the glare zone, radians, for a star of `radius` seen from `distance`.
+pub fn glare_half_angle(radius: f64, distance: f64) -> Option<f64> {
+    (distance > radius).then(|| (SOLAR_GLARE_HALO_RADII.value * (radius / distance).asin()).min(std::f64::consts::FRAC_PI_2))
+}
+
 impl World {
+    /// The target sits against the star as this sensor sees it, with the star behind it:
+    /// its separation from the star's direction, in apparent stellar radii.
+    pub fn against_star(&self, sensor: Vec2, target: Vec2, t: f64) -> Option<f64> {
+        star_separation(&self.system, sensor, target, t)
+    }
+
     /// The target sits in front of a giant's disc as this sensor sees it: inside a few disc
     /// radii of the planet's direction, with the planet behind it.
     pub fn against_giant(&self, sensor: Vec2, target: Vec2, t: f64) -> bool {
@@ -108,8 +147,9 @@ impl World {
 
     /// What terrain leaves of a look that would otherwise return `level`.
     ///
-    /// Passive: a target against a giant's disc gives a bearing at best, and a flared array
-    /// loses one level on everything. Active: a target inside debris gives an approximate
+    /// Passive: a target against a giant's disc gives a bearing at best; one against the star
+    /// is lost in its glare close in and loses a level in the halo; and a flared array loses
+    /// one level on everything. Active: a target inside debris gives an approximate
     /// position at best. A missile seeker is too close to its target for any of it.
     pub(super) fn through_terrain(&self, level: DetectionLevel, sensor: BodyId, sensor_pos: Vec2, target_pos: Vec2, t: f64, ping: bool) -> DetectionLevel {
         if level == DetectionLevel::None || self.bodies[sensor.0 as usize].missile.is_some() { return level; }
@@ -118,6 +158,11 @@ impl World {
         }
         let mut level = level;
         if self.against_giant(sensor_pos, target_pos, t) { level = level.min(DetectionLevel::Bearing); }
+        match self.against_star(sensor_pos, target_pos, t).and_then(glare_for) {
+            Some(Glare::Lost) => return DetectionLevel::None,
+            Some(Glare::Dimmed) => level = degrade(level),
+            None => {}
+        }
         if self.flared(sensor_pos, t).is_some() { level = degrade(level); }
         level
     }
@@ -178,6 +223,32 @@ mod tests {
         assert_eq!(w.through_terrain(D::Identity, BodyId(0), sensor, hidden, 0.0, false), D::Bearing);
         assert_eq!(w.through_terrain(D::Identity, BodyId(0), sensor, hidden, 0.0, true), D::Identity, "an active return is not masked by warmth");
         assert_eq!(w.through_terrain(D::None, BodyId(0), sensor, hidden, 0.0, false), D::None);
+    }
+
+    #[test]
+    fn the_star_behind_a_target_hides_it_close_in_and_dims_it_in_the_halo() {
+        let (w, _, _) = giant_world();
+        let star = w.system.state(0, 0.0).pos;
+        let radius = w.system.bodies[0].radius;
+        let sensor = star + Vec2::new(-1.0 * AU, 0.0);
+        let to_star = (star - sensor).normalized();
+        let across = Vec2::new(-to_star.y, to_star.x);
+        let apparent = (radius / AU).asin();
+        // A target 0.3 AU sunward of the sensor, offset sideways to a chosen separation.
+        let at = |radii: f64| sensor + to_star * (0.3 * AU) + across * (0.3 * AU * (radii * apparent).tan());
+        use DetectionLevel as D;
+        assert_eq!(w.through_terrain(D::Identity, BodyId(0), sensor, at(2.0), 0.0, false), D::None, "lost in the glare");
+        assert_eq!(w.through_terrain(D::Identity, BodyId(0), sensor, at(10.0), 0.0, false), D::Resolved, "dimmed in the halo");
+        assert_eq!(w.through_terrain(D::Identity, BodyId(0), sensor, at(30.0), 0.0, false), D::Identity, "clear of it");
+        assert_eq!(w.through_terrain(D::Identity, BodyId(0), sensor, at(2.0), 0.0, true), D::Identity, "a ping is not blinded by starlight");
+        // The same direction, but the target is beyond the star: the star is not behind it.
+        assert_eq!(w.against_star(sensor, star + to_star * (0.5 * AU), 0.0), None);
+        // Looking away from the star.
+        assert_eq!(w.through_terrain(D::Identity, BodyId(0), sensor, sensor - to_star * (0.3 * AU), 0.0, false), D::Identity);
+        // Farther out the star is smaller, so the same angle is more radii and the zone narrower.
+        let far = star + Vec2::new(-5.0 * AU, 0.0);
+        assert!(glare_half_angle(radius, 5.0 * AU).unwrap() < glare_half_angle(radius, AU).unwrap());
+        assert!(w.against_star(far, far + to_star * (0.3 * AU) + across * (0.3 * AU * (10.0 * apparent).tan()), 0.0).unwrap() > 18.0);
     }
 
     #[test]

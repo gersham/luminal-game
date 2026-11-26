@@ -281,13 +281,14 @@ Nothing passes the screens and nothing is multiplied. An aim changes only what t
 
 ### Terrain
 
-Three things lower what a look returns. None is an extra detection roll.
+Four things lower what a look returns. None is an extra detection roll.
 
 - **A giant behind the target.** A passive look at a target within four disc radii of a giant planet's direction, with the planet behind it, returns a bearing at best. Active returns are unaffected.
+- **The star behind the target.** A passive look at a target within 6 apparent stellar radii of the star's direction, with the star behind it, returns nothing: the target is lost in the glare. Out to 18 apparent radii it loses one level. Apparent radii shrink with distance from the star, so the glare is wide in the inner system and narrow far out. Active returns are unaffected. A side can work out from its own estimates whether it is against the star from where it believes an enemy to be, and the navigation readout says so.
 - **Debris.** Two fields sit in gaps between planetary orbits, placed by the scenario seed. An active return from a target inside one is an approximate position at best. Passive looks are unaffected.
 - **Stellar flare.** While a flare's light is on a sensor, every passive look loses one level. The front travels at c, so each ship is dazzled at its own time, and a ship in a planet's shadow is not dazzled at all.
 
-Missile seekers ignore all three.
+Missile seekers ignore all four.
 
 ### Arranged events
 

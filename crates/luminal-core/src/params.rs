@@ -428,7 +428,7 @@ pub const MISSILE_SEEKER_ANGLE_FLOOR: Param = Param {
 
 pub const ALL: &[Param] = &[
     REINFORCEMENT_OFFSET_AU,
-    GIANT_RADIUS_KM, GIANT_MASK_RADII, DEBRIS_FIELDS, DEBRIS_RADIUS_AU, DEBRIS_MIN_GAP_AU, FLARE_DURATION_S,
+    GIANT_RADIUS_KM, GIANT_MASK_RADII, SOLAR_GLARE_CORE_RADII, SOLAR_GLARE_HALO_RADII, DEBRIS_FIELDS, DEBRIS_RADIUS_AU, DEBRIS_MIN_GAP_AU, FLARE_DURATION_S,
     DECOY_INVENTORY, DECOY_BURN_S, DECOY_MIN_G, DECOY_HULL_HP,
     PROBE_INVENTORY, PROBE_BURN_S, PROBE_SENSOR_FACTOR, PROBE_PING_INTERVAL_S,
     PASSIVE_SYSTEMATIC_FRACTION, ACTIVE_SYSTEMATIC_FRACTION, DIRECTION_SYSTEMATIC_RAD,
@@ -518,6 +518,8 @@ pub const PROBE_INVENTORY: Param = Param {key:"probe.inventory",value:3.0,unit:"
 pub const REINFORCEMENT_OFFSET_AU:Param=Param {key:"events.reinforcement_offset",value:0.3,unit:"AU",commitment:Placeholder,note:"A ship jumping in mid-mission arrives this far from its side's senior ship, moving with it."};
 pub const GIANT_RADIUS_KM:Param=Param {key:"terrain.giant_radius",value:20_000.0,unit:"km",commitment:Placeholder,note:"A planet larger than this is warm and broad enough to hide a drive against."};
 pub const GIANT_MASK_RADII:Param=Param {key:"terrain.giant_mask",value:4.0,unit:"disc radii",commitment:Placeholder,note:"A target within this many disc radii of a giant's direction, with the giant behind it, gives passive sensors a bearing at best."};
+pub const SOLAR_GLARE_CORE_RADII:Param=Param {key:"terrain.solar_glare_core",value:6.0,unit:"apparent stellar radii",commitment:Placeholder,note:"A target within this many apparent radii of the star's direction, with the star behind it, is lost to passive sensors in the glare. Measured in apparent radii, so the zone narrows with distance from the star."};
+pub const SOLAR_GLARE_HALO_RADII:Param=Param {key:"terrain.solar_glare_halo",value:18.0,unit:"apparent stellar radii",commitment:Placeholder,note:"Within this many apparent radii of the star's direction, with the star behind the target, a passive look loses one level to scattered starlight."};
 pub const DEBRIS_FIELDS:Param=Param {key:"terrain.debris_fields",value:2.0,unit:"count",commitment:Placeholder,note:"Debris fields placed in the gaps between planetary orbits."};
 pub const DEBRIS_RADIUS_AU:Param=Param {key:"terrain.debris_radius",value:0.25,unit:"AU",commitment:Placeholder,note:"Largest debris field radius. An active return from a target inside is an approximate position at best."};
 pub const DEBRIS_MIN_GAP_AU:Param=Param {key:"terrain.debris_min_gap",value:0.4,unit:"AU",commitment:Placeholder,note:"Narrowest gap between two orbits that can hold a debris field."};
