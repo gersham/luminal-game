@@ -4559,7 +4559,9 @@ fn draw_orbit_label(painter:&egui::Painter,cam:&Camera,rect:Rect,view:&View,inde
     let height=glyphs.iter().map(|g|g.size().y).fold(0.0_f32,f32::max);
     let text_radius=orbit_px+body_px+4.0+height*0.5;
     if !text_radius.is_finite() || width>text_radius*std::f32::consts::PI {return false;}
-    paint_arc(painter,center,text_radius,rel.y.atan2(rel.x),&glyphs,label_color,true);
+    // Below the parent the outward winding would stand the name on its head; wind it the
+    // other way there so it always reads upright, left to right.
+    paint_arc(painter,center,text_radius,rel.y.atan2(rel.x),&glyphs,label_color,rel.y<=0.0);
     true
 }
 
