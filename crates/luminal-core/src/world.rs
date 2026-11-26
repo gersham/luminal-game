@@ -40,6 +40,8 @@ pub mod jump;
 pub mod terrain;
 #[path = "events.rs"]
 pub mod events;
+#[path = "debrief.rs"]
+pub mod debrief;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct FactionId(pub u8);
@@ -676,6 +678,10 @@ pub struct World {
     /// Position and velocity remain uncertain; association does not expose truth.
     association: BTreeMap<(FactionId, BodyId), ContactId>,
     reverse_association:BTreeMap<(FactionId,ContactId),BodyId>,
+    /// Debrief bookkeeping, never read by the simulation: when each side's command first
+    /// received any report of a platform, and a resolved one.
+    sightings: BTreeMap<(FactionId, BodyId), f64>,
+    fixes: BTreeMap<(FactionId, BodyId), f64>,
     rng: Rng,
 }
 
@@ -820,6 +826,8 @@ impl World {
             local_pictures: BTreeMap::new(),
             association: BTreeMap::new(),
             reverse_association:BTreeMap::new(),
+            sightings: BTreeMap::new(),
+            fixes: BTreeMap::new(),
             rng: Rng::stream(seed, 1),
         };
         world.advance_to(0.0);
@@ -2623,6 +2631,7 @@ impl World {
             let faction = self.bodies[obs.sensor.0 as usize].faction;
             if self.decider(faction,t).is_none_or(|id|self.bodies[id.0 as usize].operating_effectiveness(crate::damage::System::Mind)==0.0) {continue;}
             self.observe_damage(&obs);
+            if obs.detection > crate::sensors::DetectionLevel::None {self.note_sighting(faction, obs.contact, obs.decider_received_at, obs.detection);}
             let sys = &self.system;
             if let Some(p) = self.perceptions.get_mut(&faction) {
                 let new = !p.contacts.contains_key(&obs.contact);

@@ -13,6 +13,7 @@ mod celestial_art;
 mod startup;
 mod roster;
 mod ship_art;
+mod debrief_view;
 
 const BUILD_VERSION:&str=env!("LUMINAL_VERSION");
 const BUILD_COMMIT:&str=env!("LUMINAL_COMMIT");
@@ -1453,6 +1454,12 @@ struct LuminalApp {
     /// Frame the scene on the next map draw.
     fit_pending: bool,
     intro: Intro,
+    /// The side's own picture over time, for the debrief.
+    belief: debrief_view::BeliefLog,
+    /// Open once the game is decided and the player asks for the truth.
+    debrief: Option<debrief_view::DebriefState>,
+    /// Frame the debrief's paths on the next plot.
+    debrief_fit: bool,
     opening_fit: bool,
     selected: Option<Selection>,
     inspected: Option<Selection>,
@@ -1979,6 +1986,9 @@ Shift + right click: extend route").monospace().size(9.0).color(pal().text_muted
             manual_ping_zoom_until:0.0,
             fit_pending: true,
             intro: Intro::Done,
+            belief: Default::default(),
+            debrief: None,
+            debrief_fit: false,
             opening_fit: true,
             selected: player.map(Selection::Body),
             inspected,
@@ -2087,6 +2097,24 @@ Shift + right click: extend route").monospace().size(9.0).color(pal().text_muted
             let _ = self.session.command(Role::Spectator, Command::SetPaused(false));
             self.session.tick(t);
             let _ = self.session.command(Role::Spectator, Command::SetPaused(true));
+        }
+        // `LUMINAL_DEBRIEF=<game hours>` plays to the end (or the limit) recording the side's
+        // picture as a live game would, then opens the debrief part way through the replay.
+        if let Some(hours) = std::env::var("LUMINAL_DEBRIEF").ok().and_then(|v| v.parse::<f64>().ok()) {
+            let _ = self.session.command(Role::Spectator, Command::SetPaused(false));
+            let warp = self.session.view(self.role).warp.max(1.0);
+            while self.session.view(self.role).outcome.is_none() && self.session.view(self.role).time < hours * 3600.0 {
+                self.session.tick(30.0 / warp);
+                self.belief.observe(&self.session.view(self.role));
+            }
+            let _ = self.session.command(Role::Spectator, Command::SetPaused(true));
+            if let Some(data) = self.session.debrief(self.role) {
+                let mut debrief = debrief_view::DebriefState::new(data, self.own_faction());
+                debrief.playhead = debrief.data.end * std::env::var("LUMINAL_DEBRIEF_AT").ok().and_then(|v| v.parse::<f64>().ok()).unwrap_or(0.6);
+                debrief.playing = false;
+                self.debrief = Some(debrief);
+                self.debrief_fit = true;
+            }
         }
         match std::env::var("LUMINAL_ROLE").as_deref() {
             Ok("spectator") => self.role = Role::Spectator,
@@ -2602,6 +2630,11 @@ impl LuminalApp {
             self.selected = view.bodies.iter().find(|b| b.controllable && b.kind == BodyKind::Ship).map(|b| Selection::Body(b.id));
         }
         self.dev_effects(&mut view);
+        if view.outcome.is_none() {self.belief.observe(&view);}
+        if let Some(debrief)=&mut self.debrief {
+            debrief.advance(dt.min(0.1));
+            if debrief.playing {ui.ctx().request_repaint();}
+        }
         self.acquire_first_target(&view);
         self.smooth_bearings(&mut view,dt);
         self.remember_indicators(&view,ui.input(|i| i.time));
@@ -2626,7 +2659,9 @@ impl LuminalApp {
         egui::Panel::bottom("command_deck").exact_size(deck_height).resizable(false).frame(frame).show(ui, |ui| {
             panel_style(ui);
             ui.spacing_mut().item_spacing=EVec2::new(4.0,3.0);
-            self.command_deck(ui,&view);
+            if let Some(debrief)=&mut self.debrief {
+                if debrief.deck(ui,view.outcome.as_ref()) {self.debrief=None;self.fit_pending=true;}
+            } else {self.command_deck(ui,&view);}
         });
         let map=egui::CentralPanel::default().frame(egui::Frame::NONE).show(ui, |ui| self.map(ui, &view, overlay.as_ref())).response.rect;
         let area=egui::Area::new(egui::Id::new("tactical_controls")).fixed_pos(map.left_top()+EVec2::splat(10.0)).movable(false).order(egui::Order::Foreground).show(ui.ctx(),|ui| {
@@ -3715,7 +3750,7 @@ impl LuminalApp {
         }
         self.draw_navigation_readout(&painter, rect, view);
 
-        if let Some(o) = &view.outcome {
+        if let Some(o) = view.outcome.as_ref().filter(|_| self.debrief.is_none()) {
             let mine = self.own_faction().map(|f| f == o.winner);
             let (title, col) = match mine {
                 Some(true) => ("VICTORY", Color32::from_rgb(120, 220, 140)),
@@ -3731,6 +3766,17 @@ impl LuminalApp {
                 egui::FontId::proportional(14.0),
                 Color32::LIGHT_GRAY,
             );
+            let button=Rect::from_center_size(at+EVec2::new(0.0,82.0),EVec2::new(300.0,30.0));
+            let mut child=ui.new_child(egui::UiBuilder::new().id_salt("debrief_open").max_rect(button));
+            if tac_button(&mut child,"DEBRIEF · SEE WHAT REALLY HAPPENED",button.size(),BELIEF,true,true)
+                .on_hover_text("Replay the battle as it truly was, against the picture your side fought by").clicked()
+                && let Some(data)=self.session.debrief(self.role) {
+                let debrief=debrief_view::DebriefState::new(data,self.own_faction());
+                if let Some(camera)=debrief.framing(rect) {self.camera=camera;}
+                self.track_player=false;self.intro=Intro::Done;
+                self.debrief=Some(debrief);
+            }
+            let at=at+EVec2::new(0.0,44.0);
             if let Role::Faction(_) = self.role {
                 let mut lines:Vec<String>=view.contacts.iter().take(5).map(|c| {
                     let kind=match c.last_source {Source::Ping=>"ping",Source::Echo=>"echo",Source::Emission=>"emission"};
@@ -3762,6 +3808,11 @@ impl LuminalApp {
                 self.combat_overlay(ui,view,rect);
                 return;
             }
+        }
+        if let Some(debrief)=&self.debrief {
+            if std::mem::take(&mut self.debrief_fit) && let Some(camera)=debrief.framing(rect) {self.camera=camera;self.track_player=false;}
+            debrief.paint(&painter,&cam,rect,&self.belief,ui.input(|i|i.time));
+            return;
         }
         // Orders. Right-click a ship or contact to intercept it, a celestial body to
         // orbit it, or empty space to fly there and stop.

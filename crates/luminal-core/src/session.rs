@@ -393,6 +393,15 @@ impl LocalSession {
     }
 
     /// Explicit omniscient local debug feed, separate from faction sensor views.
+    /// The true account of the game. A side sees it only once the game is decided; the
+    /// spectator sees it at any time.
+    pub fn debrief(&self, role: Role) -> Option<crate::world::debrief::Debrief> {
+        match role {
+            Role::Spectator => Some(self.world.debrief(None)),
+            Role::Faction(f) => self.world.outcome.is_some().then(|| self.world.debrief(Some(f))),
+        }
+    }
+
     pub fn bot_debug(&self, faction: FactionId) -> impl Iterator<Item = &(f64, FactionId, String)> {
         self.bot_debug.iter().filter(move |(_, f, _)| *f == faction)
     }
