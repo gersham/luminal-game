@@ -1095,6 +1095,8 @@ mod tests {
             let body_angle=(body-center).y.atan2((body-center).x);
             let delta=|angle:f32| {let mut d=angle-body_angle;while d>std::f32::consts::PI {d-=std::f32::consts::TAU;}while d<=-std::f32::consts::PI {d+=std::f32::consts::TAU;}d};
             glyphs.sort_by(|a,b|delta(a.0).total_cmp(&delta(b.0)));
+            // Below the parent the name winds the other way so it reads upright, left to right.
+            if body.y>center.y {glyphs.reverse();}
             glyphs.into_iter().map(|(_,s)|s).collect()
         }
         fn straddles_body(output:&egui::FullOutput,center:Pos2,body:Pos2,min_r:f32,max_r:f32,color:Color32)->bool {
