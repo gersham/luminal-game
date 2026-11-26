@@ -1381,7 +1381,13 @@ const CONTACT: Color32 = ENEMY;
 const BELIEF: Color32 = Color32::from_rgb(255, 220, 90);
 const DANGER: Color32 = Color32::from_rgb(255, 70, 70);
 
-#[derive(Clone, Copy)]
+/// The opening establishing shot: the whole system while paused, then a flight down to the
+/// command ship when the clock first runs. Any pan or zoom by the player ends it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Intro {Waiting, Flying {started: f64, from: Camera}, Done}
+const INTRO_FLIGHT_S: f64 = 2.6;
+
+#[derive(Clone, Copy, Debug, PartialEq)]
 struct Camera {
     /// World km at the screen centre.
     center: Vec2,
@@ -1433,6 +1439,8 @@ struct LuminalApp {
     /// One fan, one notice and one tone for a fleet. Also hides that fan, the notice and routine beam noise.
     quiet_detections:bool,
     auto_speed:bool,
+    /// Where the floating time controls were drawn last frame, so map labels keep clear of them.
+    time_bar_rect:Rect,
     auto_speed_elapsed:f64,
     session: LocalSession,
     role: Role,
@@ -1444,6 +1452,7 @@ struct LuminalApp {
     manual_ping_zoom_until:f64,
     /// Frame the scene on the next map draw.
     fit_pending: bool,
+    intro: Intro,
     opening_fit: bool,
     selected: Option<Selection>,
     inspected: Option<Selection>,
@@ -1486,7 +1495,7 @@ struct LuminalApp {
 /// Development hooks driven by environment variables, used for visual checks.
 /// `LUMINAL_ADVANCE=<sim seconds>` pre-runs the scenario; `LUMINAL_ROLE=spectator|raider`
 /// picks the starting view; `LUMINAL_SCENARIO=<name or token>` picks the situation;
-/// `LUMINAL_SCREENSHOT=<file.ppm>` saves a frame and exits.
+/// `LUMINAL_SCREENSHOT=<file.ppm>` saves a frame and exits; `LUMINAL_CAPTURE_AT=<frames>` picks the frame.
 #[derive(Default)]
 struct DevHooks {
     screenshot: Option<std::path::PathBuf>,
@@ -1960,7 +1969,7 @@ Shift + right click: extend route").monospace().size(9.0).color(pal().text_muted
                 .map(|e|format!("Debug logfile unavailable: {e}"))
         };
         let mut app = Self {
-            auto_speed:true,auto_speed_elapsed:0.0,
+            auto_speed:true,auto_speed_elapsed:0.0,time_bar_rect:Rect::NOTHING,
             session,
             role: Role::Faction(ESCORT),
             overlay: Some(ESCORT),
@@ -1969,6 +1978,7 @@ Shift + right click: extend route").monospace().size(9.0).color(pal().text_muted
             tracking_zoom_hold:0.0,
             manual_ping_zoom_until:0.0,
             fit_pending: true,
+            intro: Intro::Done,
             opening_fit: true,
             selected: player.map(Selection::Body),
             inspected,
@@ -2143,7 +2153,8 @@ Shift + right click: extend route").monospace().size(9.0).color(pal().text_muted
     fn dev_screenshot(&mut self, ui: &egui::Ui) {
         let Some(path) = self.dev.screenshot.clone() else { return };
         self.dev.frames += 1;
-        let mut capture_at = 20;
+        // `LUMINAL_CAPTURE_AT=<frames>` waits longer, to catch an animation part way.
+        let mut capture_at = std::env::var("LUMINAL_CAPTURE_AT").ok().and_then(|v| v.parse().ok()).unwrap_or(20);
         if let Some((frames, started)) = &mut self.dev.rate {
             // Vertical sync is off for this run, so the interval is what a frame costs: layout, drawing and the GPU.
             ui.ctx().request_repaint();
@@ -2618,10 +2629,12 @@ impl LuminalApp {
             self.command_deck(ui,&view);
         });
         let map=egui::CentralPanel::default().frame(egui::Frame::NONE).show(ui, |ui| self.map(ui, &view, overlay.as_ref())).response.rect;
-        let restart=egui::Area::new(egui::Id::new("tactical_controls")).fixed_pos(map.left_top()+EVec2::splat(10.0)).movable(false).order(egui::Order::Foreground).show(ui.ctx(),|ui| {
+        let area=egui::Area::new(egui::Id::new("tactical_controls")).fixed_pos(map.left_top()+EVec2::splat(10.0)).movable(false).order(egui::Order::Foreground).show(ui.ctx(),|ui| {
             egui::Frame::new().fill(pal().panel_bg.gamma_multiply(0.94)).stroke(Stroke::new(1.0,pal().edge)).inner_margin(8.0)
                 .show(ui,|ui|self.time_bar(ui,&view)).inner
-        }).inner;
+        });
+        self.time_bar_rect=area.response.rect;
+        let restart=area.inner;
         if restart {self.restart_scenario();ui.ctx().request_repaint();return;}
         self.dev_screenshot(ui);
     }
@@ -3217,6 +3230,29 @@ impl LuminalApp {
         }
     }
 
+    /// Fly from the establishing shot to the command ship once the clock first runs.
+    fn update_intro(&mut self,view:&View,rect:Rect,wall:f64) {
+        let Some(ship)=view.bodies.iter().find(|b|b.controllable && b.kind==BodyKind::Ship && Some(b.faction)==self.own_faction()) else {
+            if self.intro!=Intro::Waiting {self.intro=Intro::Done;}
+            return;
+        };
+        match self.intro {
+            Intro::Done=>{}
+            Intro::Waiting=>if !view.paused && !self.fit_pending {self.intro=Intro::Flying {started:wall,from:self.camera};},
+            Intro::Flying {started,from}=>{
+                let u=((wall-started)/INTRO_FLIGHT_S).clamp(0.0,1.0);
+                // The ship comes to the centre first, so it never leaves the frame while the
+                // scale falls; the zoom follows on a log scale and settles gently.
+                let e=1.0-(1.0-u).powi(4);
+                let to=intro_zoom(view,ship,rect);
+                self.camera.center=from.center+(ship.pos-from.center)*e;
+                let z=u*u*(3.0-2.0*u);
+                self.camera.km_per_px=(from.km_per_px.ln()+(to.ln()-from.km_per_px.ln())*z).exp();
+                if u>=1.0 {self.intro=Intro::Done;self.track_player=true;self.tracking_zoom_hold=0.0;}
+            }
+        }
+    }
+
     fn update_player_tracking(&mut self,view:&View) {
         if self.track_player && let Some(ship)=view.bodies.iter().find(|b|b.controllable && b.kind==BodyKind::Ship) {
             self.camera.center=ship.pos;
@@ -3263,6 +3299,8 @@ impl LuminalApp {
         if self.fit_pending {
             self.track_player=false;
             let safe = Rect::from_min_max(rect.min + EVec2::new(0.0, 150.0_f32.min(rect.height()*0.25)), rect.max - EVec2::new(0.0, 85.0));
+            // Only the establishing shot leads into the opening flight.
+            if self.opening_fit {self.intro=Intro::Waiting;}
             self.fit(view, safe);
             self.camera.center.y += (safe.center().y-rect.center().y) as f64*self.camera.km_per_px;
             self.fit_pending = false;
@@ -3286,12 +3324,15 @@ impl LuminalApp {
             }
         }
 
-        if !self.track_player && !resp.dragged() {
+        let touched=resp.dragged() || (resp.hovered() && ui.input(|i|i.smooth_scroll_delta.y)!=0.0);
+        if touched && self.intro!=Intro::Done {self.intro=Intro::Done;}
+        if !self.track_player && !resp.dragged() && !matches!(self.intro,Intro::Flying {..}) {
             if let Some(pointer)=resp.hover_pos() {
                 let delta=edge_pan_delta(rect,pointer,ui.input(|i|i.stable_dt) as f64);
                 self.camera.center=self.camera.center+delta*self.camera.km_per_px;
             }
         }
+        self.update_intro(view,rect,ui.input(|i|i.time));
         self.update_player_tracking(view);
         self.update_tracking_zoom(view,rect,ui.input(|i|i.stable_dt) as f64);
         // The drawn camera reacts to hits and jumps. What is clicked is what is drawn.
@@ -3303,7 +3344,8 @@ impl LuminalApp {
         if self.plot_fx.animating(wall_fx) { ui.ctx().request_repaint(); }
         // An edge pan or a zoom ease is motion with the pointer still. Keep it at full rate while paused.
         if (cam.center-entered.center).length()>0.0 || cam.km_per_px!=entered.km_per_px {ui.ctx().request_repaint();}
-        let mut labels = Labels::default();
+        let tracking_banner=Rect::from_center_size(rect.center_top()+EVec2::new(0.0,18.0),EVec2::new(190.0,18.0));
+        let mut labels = Labels {reserved:vec![self.time_bar_rect.expand(4.0),self.combat_log_rect(rect).expand(4.0),tracking_banner],..Default::default()};
         // The two banners are painted after the bloom pass, with the labels.
         draw_point_grid(&painter, &cam, rect);
         draw_orbits(&painter, &cam, rect, view);
@@ -3769,7 +3811,10 @@ impl LuminalApp {
             self.audio.play(audio::Cue::Alert);
         }
         self.tactical_log.notices=view.notices.len();
-        let actions:Vec<_>=self.session.bot_debug(RAIDER).filter(|(at,_,_)|*at>self.tactical_log.raider_at).cloned().collect();
+        // The raider's own decisions are truth the escort's crew could never know. They are for
+        // the omniscient spectator, or an explicit debugging session, never a faction's log.
+        let bot_notes=self.role==Role::Spectator || std::env::var_os("LUMINAL_BOT_DEBUG").is_some();
+        let actions:Vec<_>=if bot_notes {self.session.bot_debug(RAIDER).filter(|(at,_,_)|*at>self.tactical_log.raider_at).cloned().collect()} else {vec![]};
         for (at,_,note) in actions {
             self.tactical_log.raider_at=self.tactical_log.raider_at.max(at);
             if note.to_ascii_lowercase().contains("ping") {continue;}
@@ -3777,10 +3822,16 @@ impl LuminalApp {
         }
     }
 
-    fn combat_overlay(&self,ui:&egui::Ui,_view:&View,map:Rect) {
+    fn combat_log_lines(&self)->Vec<&LogLine> {
+        self.tactical_log.lines.iter().filter(|l|TacticalLog::opacity(self.tactical_log.now-l.at)>0.0).take(8).collect()
+    }
+    fn combat_log_rect(&self,map:Rect)->Rect {
         let width=(map.width()*0.31).clamp(230.0,360.0);
-        let lines:Vec<_>=self.tactical_log.lines.iter().filter(|l|TacticalLog::opacity(self.tactical_log.now-l.at)>0.0).take(8).collect();
-        let rect=Rect::from_min_size(Pos2::new(map.right()-width-4.0,map.top()+10.0),EVec2::new(width,27.0+lines.len().max(1) as f32*16.0));
+        Rect::from_min_size(Pos2::new(map.right()-width-4.0,map.top()+10.0),EVec2::new(width,27.0+self.combat_log_lines().len().max(1) as f32*16.0))
+    }
+    fn combat_overlay(&self,ui:&egui::Ui,_view:&View,map:Rect) {
+        let lines=self.combat_log_lines();
+        let rect=self.combat_log_rect(map);let width=rect.width();
         let p=ui.painter();
         p.rect_filled(rect,2.0,Color32::from_rgba_unmultiplied(6,12,22,85));
         p.line_segment([rect.right_top(),rect.right_top()+EVec2::new(0.0,17.0)],Stroke::new(2.0,pal().accent));
@@ -3877,6 +3928,17 @@ impl LuminalApp {
         let km_per_px = (size.x / rect.width() as f64).max(size.y / rect.height() as f64) * 1.3;
         self.camera = Camera { center: (lo + hi) * 0.5, km_per_px: km_per_px.max(2.0 * LIGHT_SECOND / rect.width() as f64) };
     }
+}
+
+/// Scale for the end of the opening flight: the command ship with its nearest known
+/// threat or objective in frame, or a third of an astronomical unit around it.
+fn intro_zoom(view:&View,ship:&BodyView,rect:Rect)->f64 {
+    let threats=view.contacts.iter().filter(|c|!c.stale && !c.resolved_missile).filter_map(|c|c.track.as_ref().map(|t|t.pos));
+    let goal=view.objective.as_ref().map(|o|o.center);
+    let nearest=threats.chain(goal).map(|p|(p-ship.pos).length()).filter(|d|*d>1.0 && *d<3.0*AU).fold(f64::INFINITY,f64::min);
+    let span=if nearest.is_finite() {2.6*nearest} else {AU/3.0};
+    let px=f64::from(rect.width().min(rect.height()).max(100.0));
+    (span/px).max(2.0*LIGHT_SECOND/px)
 }
 
 fn contact_details(ui: &mut egui::Ui, view: &View, c: &ContactView) {
@@ -4224,6 +4286,8 @@ fn clip_to_rect(rect: Rect, o: Pos2, dir: EVec2) -> Option<Pos2> {
 #[derive(Default)]
 struct Labels {
     items: Vec<(Pos2, String, Color32)>,
+    /// Screen areas covered by overlays (time controls, combat log) that labels keep clear of.
+    reserved: Vec<Rect>,
 }
 
 impl Labels {
@@ -4234,25 +4298,45 @@ impl Labels {
     fn paint(self, painter: &egui::Painter) {
         let font = egui::FontId::proportional(12.0);
         let bounds = painter.clip_rect().shrink(4.0);
-        let mut placed: Vec<Rect> = vec![];
+        // Labels whose anchors fall within a few pixels of each other belong to a stack of
+        // markers drawn on one spot. Four or more become one label for the group, so a fleet
+        // at system scale reads as a fleet rather than a column of overprinted names.
+        let mut groups: Vec<(Pos2, Vec<(String, Color32)>)> = vec![];
         for (at, text, color) in self.items {
-            let galley = painter.layout_no_wrap(text, font.clone(), color);
-            let size = galley.size();
-            let mut r = Rect::from_min_size(at - EVec2::new(0.0, size.y), size);
-            // Keep labels inside the map.
-            r = r.translate(EVec2::new((bounds.right() - r.right()).min(0.0) + (bounds.left() - r.left()).max(0.0), 0.0));
-            for _ in 0..12 {
-                if !placed.iter().any(|p| p.expand(1.0).intersects(r)) {
-                    break;
+            match groups.iter_mut().find(|(anchor, _)| anchor.distance(at) < 7.0) {
+                Some((_, members)) => members.push((text, color)),
+                None => groups.push((at, vec![(text, color)])),
+            }
+        }
+        let mut placed: Vec<Rect> = self.reserved.clone();
+        for (at, members) in groups {
+            let lines: Vec<(String, Color32)> = if members.len() >= 4 {
+                let (first, color) = members[0].clone();
+                vec![(format!("{first}  +{} more", members.len() - 1), color)]
+            } else { members };
+            for (text, color) in lines {
+                let galley = painter.layout_no_wrap(text, font.clone(), color);
+                let size = galley.size();
+                let home = Rect::from_min_size(at - EVec2::new(0.0, size.y), size);
+                // Keep labels inside the map.
+                let home = home.translate(EVec2::new((bounds.right() - home.right()).min(0.0) + (bounds.left() - home.left()).max(0.0), 0.0));
+                // Try below, then above, then to the left of the anchor before giving up.
+                let step = size.y + 1.0;
+                let candidates = (0..10).map(|i| EVec2::new(0.0, i as f32 * step))
+                    .chain((1..6).map(|i| EVec2::new(0.0, -(i as f32) * step)))
+                    .chain((0..4).map(|i| EVec2::new(-size.x - 24.0, i as f32 * step)));
+                let Some(r) = candidates.map(|d| home.translate(d))
+                    .find(|r| bounds.contains_rect(*r) && !placed.iter().any(|p| p.expand(1.0).intersects(*r))) else {
+                    // No free spot: a dropped label is better than an unreadable pile.
+                    continue;
+                };
+                if (r.min - home.min).length() > 1.0 {
+                    let anchor = if r.center().x < at.x { r.right_center() } else { r.left_center() };
+                    painter.line_segment([at, anchor], Stroke::new(0.5, color.gamma_multiply(0.4)));
                 }
-                r = r.translate(EVec2::new(0.0, size.y + 1.0));
+                painter.galley(r.min, galley, color);
+                placed.push(r);
             }
-            if (r.min - (at - EVec2::new(0.0, size.y))).length() > 1.0 {
-                let anchor = if r.center().x < at.x { r.right_center() } else { r.left_center() };
-                painter.line_segment([at, anchor], Stroke::new(0.5, color.gamma_multiply(0.4)));
-            }
-            painter.galley(r.min, galley, color);
-            placed.push(r);
         }
     }
 }
