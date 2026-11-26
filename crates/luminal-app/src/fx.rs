@@ -272,9 +272,9 @@ mod tests {
         let mut backdrop = Backdrop::default();
         let ctx = egui::Context::default();
         let frame = |backdrop: &mut Backdrop, pan: EVec2, theme: theme::Theme| {
-            let _ = ctx.run_ui(egui::RawInput { screen_rect: Some(rect), ..Default::default() }, |ui| {
+            ctx.run_ui(egui::RawInput { screen_rect: Some(rect), ..Default::default() }, |ui| {
                 backdrop.draw(&ui.painter_at(rect), rect, theme, pan);
-            });
+            }).textures_delta.clear();
             std::sync::Arc::as_ptr(&backdrop.mesh)
         };
         let still = frame(&mut backdrop, EVec2::ZERO, theme::Theme::Luminal);
@@ -302,7 +302,7 @@ mod tests {
     fn a_degenerate_effect_draws_nothing() {
         let ctx = egui::Context::default();
         let rect = Rect::from_min_size(Pos2::ZERO, EVec2::new(400.0, 300.0));
-        let output = ctx.run_ui(egui::RawInput { screen_rect: Some(rect), ..Default::default() }, |ui| {
+        let mut output = ctx.run_ui(egui::RawInput { screen_rect: Some(rect), ..Default::default() }, |ui| {
             let painter = ui.painter_at(rect);
             glow(&painter, Pos2::ZERO, f32::NAN, Color32::WHITE, 1.0);
             glow(&painter, Pos2::ZERO, 1.0e9, Color32::WHITE, 1.0);
@@ -310,6 +310,7 @@ mod tests {
             plume(&painter, Pos2::ZERO, Pos2::new(f32::INFINITY, 0.0), 4.0, Color32::WHITE, 1.0);
             disc(&painter, Pos2::ZERO, 0.0, Color32::WHITE, Color32::BLACK);
         });
+        output.textures_delta.clear();
         assert!(!output.shapes.iter().any(|s| matches!(s.shape, Shape::Mesh(_))));
     }
 }

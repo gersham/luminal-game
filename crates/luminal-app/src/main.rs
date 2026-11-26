@@ -1003,7 +1003,10 @@ mod tests {
         click(&mut app,&ctx,false,text_position(&output,"SURRENDER").unwrap());
         let output=frame(&mut app,&ctx,false,vec![]);
         click(&mut app,&ctx,false,text_position(&output,"Confirm surrender").unwrap());
-        assert!(app.session.view(app.role).outcome.unwrap().reason.contains("surrendered"));
+        // In Escort the transport's escort fights on after the flagship surrenders (see
+        // world::escort_and_convoy_continue_while_the_transport_lives), so there is no outcome yet.
+        assert!(app.session.command(app.role,Command::Surrender {body:BodyId(1)}).is_err(),"the ship has already gone");
+        assert!(app.session.view(app.role).outcome.is_none());
     }
 
     /// `cargo test --release -p luminal-app frame_cost -- --ignored --nocapture`

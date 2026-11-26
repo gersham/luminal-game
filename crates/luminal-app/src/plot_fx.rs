@@ -359,12 +359,13 @@ mod tests {
         let ctx = egui::Context::default();
         let rect = Rect::from_min_size(Pos2::ZERO, EVec2::new(800.0, 600.0));
         let at = view.bodies.iter().find(|b| b.id == id).unwrap().pos;
-        let output = ctx.run_ui(egui::RawInput { screen_rect: Some(rect), ..Default::default() }, |ui| {
+        let mut output = ctx.run_ui(egui::RawInput { screen_rect: Some(rect), ..Default::default() }, |ui| {
             let painter = ui.painter_at(rect);
             let cam = Camera { center: at, km_per_px: 5_000.0 };
             fx.draw_under(&painter, &cam, rect, &view, view.bodies.iter().find(|b| b.id == id), Color32::WHITE, 10.5);
             fx.draw_over(&painter, &cam, rect, &view, view.bodies.iter().find(|b| b.id == id), None, 10.5);
         });
+        output.textures_delta.clear();
         assert!(output.shapes.iter().all(|s| match &s.shape { Shape::Mesh(mesh) => mesh.is_valid(), _ => true }));
     }
 

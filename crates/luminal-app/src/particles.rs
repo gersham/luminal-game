@@ -342,10 +342,11 @@ mod tests {
         let frames = 600;
         for frame in 1..=frames {
             let now = frame as f64 / 60.0;
-            let output = ctx.run_ui(egui::RawInput { screen_rect: Some(rect), ..Default::default() }, |ui| {
+            let mut output = ctx.run_ui(egui::RawInput { screen_rect: Some(rect), ..Default::default() }, |ui| {
                 particles.observe(&view, now);
                 particles.draw(&ui.painter_at(rect), &camera, rect, now);
             });
+            output.textures_delta.clear();
             ctx.tessellate(output.shapes, output.pixels_per_point);
         }
         println!("MOTES {} alive, {:.3} ms/frame with twenty ships burning", particles.motes.len(), started.elapsed().as_secs_f64() * 1000.0 / frames as f64);
@@ -364,9 +365,10 @@ mod tests {
         let ctx = egui::Context::default();
         let rect = Rect::from_min_size(Pos2::ZERO, EVec2::new(800.0, 600.0));
         let at = view.bodies.iter().find(|b| b.id == id).unwrap().pos;
-        let output = ctx.run_ui(egui::RawInput { screen_rect: Some(rect), ..Default::default() }, |ui| {
+        let mut output = ctx.run_ui(egui::RawInput { screen_rect: Some(rect), ..Default::default() }, |ui| {
             particles.draw(&ui.painter_at(rect), &Camera { center: at, km_per_px: 1000.0 }, rect, 0.25);
         });
+        output.textures_delta.clear();
         let meshes: Vec<_> = output.shapes.iter().filter_map(|s| match &s.shape { Shape::Mesh(mesh) => Some(mesh.clone()), _ => None }).collect();
         assert_eq!(meshes.len(), 1, "one mesh however many motes");
         assert!(meshes[0].is_valid() && meshes[0].vertices.len() <= LIMIT * 5);

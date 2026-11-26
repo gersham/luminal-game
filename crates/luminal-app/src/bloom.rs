@@ -236,7 +236,8 @@ mod tests {
         assert!(!bloom.available(), "tests run headless");
         let ctx = egui::Context::default();
         let rect = Rect::from_min_size(Pos2::ZERO, EVec2::new(400.0, 300.0));
-        let output = ctx.run_ui(egui::RawInput { screen_rect: Some(rect), ..Default::default() }, |ui| bloom.paint(&ui.painter_at(rect), rect));
+        let mut output = ctx.run_ui(egui::RawInput { screen_rect: Some(rect), ..Default::default() }, |ui| bloom.paint(&ui.painter_at(rect), rect));
+        output.textures_delta.clear();
         assert!(!output.shapes.iter().any(|s| matches!(s.shape, Shape::Callback(_))));
     }
 
